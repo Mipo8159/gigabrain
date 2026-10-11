@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Secret scan for gigaforge. Runs on `git commit` (core.hooksPath=.githooks),
+# or by hand: .githooks/pre-commit --all
+# Prints file:line and the pattern NAME only — never the matched value.
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1   # always the repo root
+
+if [ "$1" = "--all" ] || ! git rev-parse --git-dir >/dev/null 2>&1; then
+  files=$(find . -type f -not -path './.git/*' -not -path './inbox/*' -not -path './node_modules/*')
+else
+  files=$(git diff --cached --name-only --diff-filter=ACM)
+fi
+
+declare -A P=(
+  [aws-access-key]='(AKIA|ASIA)[A-Z0-9]{16}'
+  [google-oauth-secret]='GOCSPX-[A-Za-z0-9_-]{10,}'
+  [private-key]='-----BEGIN [A-Z ]*PRIVATE KEY-----'
+  [github-token]='gh[pousr]_[A-Za-z0-9]{30,}'
+  [anthropic-key]='sk-ant-[A-Za-z0-9_-]{20,}'
+  [slack-token]='xox[baprs]-[A-Za-z0-9-]{10,}'
+  [assigned-secret]='(password|passwd|secret|api_?key|token)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_-]{12,}'
+)
+
+# Reviewed false positives: "<path> <sha256 of the exact line, first 16 hex>"
+# in .githooks/secret-allowlist. Any change to the line changes its hash, so
+# the line is scanned again. Add entries only after inspecting the line masked.
+allowed() { # allowed <file> <lineno>
+  [ -f .githooks/secret-allowlist ] || return 1
+  local h; h=$(sed -n "${2}p" "$1" | sha256sum | cut -c1-16)
+  grep -qxF "${1#./} $h" .githooks/secret-allowlist
+}
+
+hits=0
+for f in $files; do
+  [ -f "$f" ] || continue
+  for name in "${!P[@]}"; do
+    lines=$(grep -nEio -- "${P[$name]}" "$f" 2>/dev/null | cut -d: -f1 | sort -u |
+            while read -r n; do allowed "$f" "$n" || echo "$n"; done | tr '\n' ',' | sed 's/,$//')
+    if [ -n "$lines" ]; then
+      echo "  ✗ $f lines $lines: $name"
+      hits=1
+    fi
+  done
+done
+
+# Client internals must never reach brain/ (it is pushed to GitHub).
+# Terms are case-insensitive; one per line in .githooks/client-terms.
+if [ -f .githooks/client-terms ]; then
+  for f in $files; do
+    case "$f" in ./brain/*|brain/*) ;; *) continue ;; esac
+    [ -f "$f" ] || continue
+    while IFS= read -r term; do
+      term="${term%%#*}"; term="$(echo "$term" | xargs)"; [ -z "$term" ] && continue
+      lines=$(grep -nio -- "$term" "$f" 2>/dev/null | cut -d: -f1 | sort -u | tr '\n' ',' | sed 's/,$//')
+      if [ -n "$lines" ]; then echo "  ✗ $f lines $lines: client term"; hits=1; fi
+    done < .githooks/client-terms
+  done
+fi
+
+if [ $hits -ne 0 ]; then
+  echo "pre-commit: possible secrets found (values masked). Redact, or commit with --no-verify if a false positive."
+  exit 1
+fi
+echo "pre-commit: secret scan clean"

@@ -1,0 +1,7 @@
+# harvest candidates are untrusted and may quote raw sessions: never committed
+inbox/*
+!inbox/.gitkeep
+.env
+*.local.json
+node_modules/
+__pycache__/

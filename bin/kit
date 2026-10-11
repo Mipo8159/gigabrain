@@ -1,0 +1,683 @@
+#!/usr/bin/env python3
+"""gigaforge kit: apply the brain + library to any project, and keep it healthy.
+
+    kit detect  <repo> [--json]        stacks (with evidence), package manager, real commands
+    kit apply   <repo> [--kind own|lab|client] [--memory NAME] [--dry-run]
+    kit apply   --all [--dry-run]      re-apply every registered project (after kit updates)
+    kit doctor  [<repo> | --all]       global install + per-project drift, exit 1 on errors
+    kit status                         one line per registered project
+    kit remove  <repo> [--dry-run]     undo exactly what apply recorded (keeps edited files)
+    kit audit   [<repo> | --all]       Claude config security scan (see bin/kit-audit.py)
+    kit budget                         always-loaded context cost (see bin/budget.py)
+
+Per project it owns two files, both git-excluded via .git/info/exclude:
+  .claude/gigaforge.json        the request: kind, memory, stack include/exclude, hook profile
+                                 (edit it, then `kit apply <repo>` again)
+  .claude/gigaforge.state.json  what apply wrote, with hashes (for doctor / remove)
+and writes: tagged permission entries + autoMemoryDirectory into .claude/settings.local.json
+(personal, never the team's settings.json), and a CLAUDE.md scaffold only if none exists
+(the scaffold is yours afterwards; kit never rewrites it).
+Design adapted from ECC's install manifests / ownership guard / doctor (MIT).
+"""
+import datetime, fnmatch, hashlib, json, os, pathlib, re, subprocess, sys
+
+G = pathlib.Path(__file__).resolve().parent.parent
+KIT = G / "kit"
+REGISTRY = pathlib.Path(os.environ.get("GIGAFORGE_KIT_REGISTRY", KIT / "projects.json"))  # tests point this elsewhere
+SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "venv", ".venv", "__pycache__", "coverage",
+             "cdk.out", ".serverless", ".turbo", ".nx", "vendor", "target", ".terraform", ".claude"}
+MEMORY_ROOT = pathlib.Path(os.environ.get("GIGAFORGE_MEMORY_ROOT", G / "memory"))  # selftest redirects
+REQ, STATE = ".claude/gigaforge.json", ".claude/gigaforge.state.json"
+LOCAL = ".claude/settings.local.json"
+HOOK_PROFILES = ("minimal", "standard", "strict")
+TODAY = datetime.date.today().isoformat()
+
+
+# ---------- small helpers ----------
+def sha(path):
+    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()[:16] if pathlib.Path(path).exists() else None
+
+
+def load_json(path, default):
+    p = pathlib.Path(path)
+    if not p.exists():
+        return default
+    try:
+        return json.loads(p.read_text())
+    except json.JSONDecodeError as e:
+        sys.exit(f"kit: {p} is not valid JSON ({e}); fix it by hand first")
+
+
+def dump_json(path, data, dry):
+    if dry:
+        return
+    p = pathlib.Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+KIT_PATHS = ["kit", "bin", "library", "global/hooks"]  # brain/ commits by /retro must not look like kit drift
+
+
+def kit_commit():
+    r = subprocess.run(["git", "-C", str(G), "log", "-1", "--format=%h", "--", *KIT_PATHS],
+                       capture_output=True, text=True)
+    dirty = subprocess.run(["git", "-C", str(G), "status", "--porcelain", "--", *KIT_PATHS],
+                           capture_output=True, text=True).stdout.strip()
+    return (r.stdout.strip() or "unknown") + ("+dirty" if dirty else "")
+
+
+def git_dir(repo):
+    r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"], capture_output=True, text=True)
+    return pathlib.Path(r.stdout.strip()) if r.returncode == 0 else None
+
+
+def exclude_file(repo):
+    """info/exclude that git actually reads (worktrees share the common dir's)."""
+    r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--path-format=absolute", "--git-path", "info/exclude"],
+                       capture_output=True, text=True)
+    return pathlib.Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+
+
+def walk(repo, max_depth=3, cap=6000):
+    out = []
+    for root, dirs, files in os.walk(repo):
+        rel = pathlib.Path(root).relative_to(repo)
+        depth = 0 if str(rel) == "." else len(rel.parts)
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS and not (d.startswith(".") and d != ".github")]
+        if depth >= max_depth:
+            dirs[:] = []
+        out += [str(rel / f) if depth else f for f in files]
+        if len(out) > cap:
+            break
+    return out
+
+
+# ---------- detect ----------
+def stacks_manifest():
+    return json.loads((KIT / "stacks.json").read_text())
+
+
+def match(repo, files, ind):
+    pat = ind["file"]
+    if "/" in pat:
+        hits = [f for f in files if fnmatch.fnmatch(f, pat)]
+    else:  # bare name: root or any dir up to depth 2 (monorepo packages)
+        hits = [f for f in files if fnmatch.fnmatch(pathlib.Path(f).name, pat) and len(pathlib.Path(f).parts) <= 3]
+    if "contains" in ind:
+        hits = [f for f in hits if ind["contains"] in (repo / f).read_text(errors="ignore")]
+    return sorted(hits, key=lambda f: (len(pathlib.Path(f).parts), f))
+
+
+def package_manager(repo):
+    for lock, pm in (("pnpm-lock.yaml", "pnpm"), ("yarn.lock", "yarn"), ("bun.lockb", "bun"), ("bun.lock", "bun"),
+                     ("package-lock.json", "npm")):
+        if (repo / lock).exists():
+            return pm
+    return "npm" if (repo / "package.json").exists() else None
+
+
+SCRIPT_ROLES = [("install", None), ("build", r"^build$"), ("typecheck", r"^(typecheck|type-check|tsc)$"),
+                ("lint", r"^lint$"), ("format", r"^(format|prettier)$"), ("test", r"^test$"), ("test:e2e", r"^test:e2e$"),
+                ("dev", r"^(start:dev|dev)$"), ("migrate", r"^(migration:run|migrate|db:migrate)$")]
+# scripts whose name says they touch shared/remote state: kit adds an ask-first rule for each
+RISKY = re.compile(r"deploy|remove|destroy|revert|rollback|drop|seed|publish|release|teardown|reset|trigger|"
+                   r"^aws:|^infra|migrate:?prod|delete", re.I)  # not bare "prod": build:prod / products are routine
+
+
+def risky_scripts(repo):
+    """[(package-dir or '.', script)] for scripts named like deploys/destructive ops."""
+    out = []
+    for pj in [repo / "package.json"] + sorted(repo.glob("*/package.json")):
+        if pj.exists():
+            scripts = load_json(pj, {}).get("scripts", {}) if isinstance(load_json(pj, {}), dict) else {}
+            rel = "." if pj.parent == repo else pj.parent.name
+            out += [(rel, s) for s in scripts if RISKY.search(s)]
+    return out
+
+
+def commands(repo, _sub=False):
+    cmds = {}
+    pm = package_manager(repo)
+    pkg = load_json(repo / "package.json", {}) if pm else {}
+    scripts = pkg.get("scripts", {}) if isinstance(pkg, dict) else {}
+    if not pm and not _sub:  # no root package: describe each first-level package (auth/, web/, ...)
+        for pj in sorted(repo.glob("*/package.json")):
+            if pj.parent.name in SKIP_DIRS:
+                continue
+            for role, c in commands(pj.parent, _sub=True).items():
+                cmds[f"{pj.parent.name}:{role}"] = f"cd {pj.parent.name} && {c}"
+    if pm:
+        cmds["install"] = {"npm": "npm ci", "pnpm": "pnpm install --frozen-lockfile", "yarn": "yarn install --frozen-lockfile",
+                           "bun": "bun install"}[pm] if any((repo / l).exists() for l in ("package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lockb", "bun.lock")) else f"{pm} install"
+        run = "npm run" if pm == "npm" else pm
+        for role, rx in SCRIPT_ROLES[1:]:
+            name = next((s for s in scripts if re.match(rx, s)), None)
+            if name:
+                cmds[role] = f"{run} {name}" if not (pm == "npm" and name == "test") else "npm test"
+    if (repo / "pyproject.toml").exists() or (repo / "requirements.txt").exists():
+        py = (repo / "pyproject.toml").read_text(errors="ignore") if (repo / "pyproject.toml").exists() else ""
+        if "[tool.poetry" in py:
+            cmds.setdefault("install", "poetry install")
+        elif (repo / "uv.lock").exists():
+            cmds.setdefault("install", "uv sync")
+        elif (repo / "requirements.txt").exists():
+            cmds.setdefault("install", "pip install -r requirements.txt")
+        if "pytest" in py or (repo / "pytest.ini").exists() or (repo / "tests").is_dir():
+            cmds.setdefault("test", "pytest")
+        if "ruff" in py:
+            cmds.setdefault("lint", "ruff check .")
+            cmds.setdefault("format", "ruff format .")
+        if "mypy" in py:
+            cmds.setdefault("typecheck", "mypy .")
+    if (repo / "go.mod").exists():
+        cmds.setdefault("build", "go build ./...")
+        cmds.setdefault("test", "go test ./...")
+        cmds.setdefault("lint", "go vet ./...")
+        cmds.setdefault("format", "gofmt -l -w .")
+    if (repo / "Makefile").exists():
+        targets = re.findall(r"^([a-zA-Z][\w-]*):", (repo / "Makefile").read_text(errors="ignore"), re.M)
+        for t in ("build", "test", "lint", "fmt", "format", "run", "dev"):
+            if t in targets:
+                cmds.setdefault("format" if t == "fmt" else t, f"make {t}")
+    return cmds
+
+
+def workspace_children(repo):
+    """A non-git folder holding several git repos (e.g. core/ + admin/)."""
+    if git_dir(repo):
+        return []
+    return sorted(d.name for d in repo.iterdir() if d.is_dir() and (d / ".git").exists())
+
+
+def detect(repo):
+    repo = pathlib.Path(repo).resolve()
+    files = walk(repo)
+    man = stacks_manifest()
+    found = {}
+    for name, st in man["stacks"].items():
+        ev = []
+        for ind in st["indicators"]:
+            hits = match(repo, files, ind)
+            if hits and not any(e.startswith(hits[0] + " ") or e == hits[0] for e in ev):
+                ev.append(f"{hits[0]}" + (f" contains {ind['contains']!r}" if "contains" in ind else ""))
+        if ev:
+            found[name] = ev[:3]
+    monorepo = any((repo / f).exists() for f in ("nx.json", "turbo.json", "pnpm-workspace.yaml", "lerna.json")) or \
+        "workspaces" in (load_json(repo / "package.json", {}) if (repo / "package.json").exists() else {})
+    return {"repo": str(repo), "git": bool(git_dir(repo)), "stacks": found, "package_manager": package_manager(repo),
+            "commands": commands(repo), "risky_scripts": risky_scripts(repo), "monorepo": monorepo, "workspace_children": workspace_children(repo),
+            "has_claude_md": (repo / "CLAUDE.md").exists() or (repo / ".claude/CLAUDE.md").exists()}
+
+
+def selection(stack_names):
+    man = stacks_manifest()
+    skills, checklists, ask, notes = [], [], [], []
+    for n in stack_names:
+        st = man["stacks"].get(n)
+        if not st:
+            continue
+        skills += st.get("skills", [])
+        checklists += st.get("checklists", [])
+        ask += st.get("permissions", {}).get("ask", [])
+        if st.get("notes"):
+            notes.append(f"{n}: {st['notes']}")
+    skills += man["always"]["skills"]
+    checklists += man["always"]["checklists"]
+    uniq = lambda xs: list(dict.fromkeys(xs))
+    return uniq(skills), uniq(checklists), uniq(ask), notes
+
+
+# ---------- registry ----------
+def registry():
+    return load_json(REGISTRY, {"version": 1, "projects": {}})
+
+
+def register(repo, req, dry):
+    reg = registry()
+    reg["projects"][str(repo)] = {"kind": req["kind"], "memory": req.get("memory"), "applied": TODAY}
+    if not dry:
+        dump_json(REGISTRY, reg, False)
+
+
+# ---------- apply ----------
+def default_kind(repo):
+    """Registry first, then labs.md rows matching the repo OR a parent folder
+    (a client workspace like sweeft/clasico covers clasico/core). Unknown repos
+    get no default: guessing "own" for client work would leak its memory."""
+    reg = registry()["projects"].get(str(repo))
+    if reg:
+        return reg["kind"]
+    labs = (G / "labs.md").read_text() if (G / "labs.md").exists() else ""
+    rows = [l for l in labs.splitlines() if l.startswith("|")]
+    for d in [repo, *repo.parents]:
+        if d == G.parent or d == d.parent:
+            break
+        rel = str(d.relative_to(G.parent.parent)) if str(d).startswith(str(G.parent.parent)) else str(d)
+        row = next((l for l in rows if f"`{rel}`" in l), None)
+        if row:
+            low = row.lower()
+            return "client" if "client" in low else "lab" if "| lab |" in low else "own"
+    sys.exit(f"kit: {repo} is not in kit/projects.json or labs.md: pass --kind own|lab|client "
+             "(client keeps memory local and the scaffold out of git)")
+
+
+def default_memory(repo, kind):
+    if kind == "client":
+        return None  # client facts never enter gigaforge
+    return "newEra" if "newEra" in repo.parts else repo.name
+
+
+def scaffold(repo, det, stacks, skills, checklists, notes):
+    c = det["commands"]
+    cmd_lines = "\n".join(f"- {k}: `{v}`" for k, v in c.items()) or "- TODO: no build/test commands detected"
+    done = c.get("test") or "TODO"
+    return f"""# {repo.name}
+
+<!-- Scaffold written by gigaforge `kit apply` on {TODAY}. It is yours now: kit never
+     rewrites it. Run /onboard-project to replace the TODOs with the real thing. -->
+
+## What this is
+TODO: two lines. What it does, who uses it, where it runs.
+
+## Commands
+{cmd_lines}
+
+## Stack
+{", ".join(stacks) or "not detected"}.
+Library skills that apply here: {", ".join(f"`{s}`" for s in skills)}.
+The `reviewer` agent loads: {", ".join(f"`{x}.md`" for x in checklists)}.
+{chr(10).join("- " + n for n in notes)}
+
+## Done means
+TODO: the proof a change here needs. A starting point: `{done}` green, plus how
+to see it working (curl, UI, a migration run).
+
+## Conventions
+TODO: only what a newcomer would get wrong.
+
+## Never
+TODO: destructive or off-limits actions (prod DBs, deploys, shared branches).
+{("Ask first (kit added a permission rule for each): " + ", ".join(f"`{s}`" if p == "." else f"`{p}/{s}`" for p, s in det["risky_scripts"]) + ".") if det["risky_scripts"] else ""}
+
+## Gotchas
+"""
+
+
+def plan(repo, args):
+    repo = pathlib.Path(repo).resolve()
+    if not repo.is_dir():
+        sys.exit(f"kit: {repo} is not a directory")
+    det = detect(repo)
+    req_path = repo / REQ
+    req = load_json(req_path, {})
+    if not isinstance(req, dict):
+        sys.exit(f"kit: {req_path} must be a JSON object (got {type(req).__name__}); fix or delete it")
+    req.setdefault("version", 1)
+    req["kind"] = args.get("kind") or req.get("kind") or default_kind(repo)
+    if req["kind"] not in ("own", "lab", "client"):
+        sys.exit("kit: --kind must be own, lab or client")
+    if "memory" in args:
+        req["memory"] = args["memory"]
+    elif "memory" not in req:
+        req["memory"] = default_memory(repo, req["kind"])
+    if req["kind"] == "client":
+        req["memory"] = None
+    req.setdefault("include_stacks", [])
+    req.setdefault("exclude_stacks", [])
+    req.setdefault("hooks", "standard")
+    if req["hooks"] not in HOOK_PROFILES:
+        sys.exit(f"kit: hooks must be one of {HOOK_PROFILES}")
+    stacks = [s for s in list(det["stacks"]) + req["include_stacks"] if s not in req["exclude_stacks"]]
+    stacks = list(dict.fromkeys(stacks))
+    req["detected"] = sorted(det["stacks"])
+    skills, checklists, ask, notes = selection(stacks)
+    for pkg_dir, s in det["risky_scripts"]:
+        pm = package_manager(repo if pkg_dir == "." else repo / pkg_dir) or "npm"
+        ask.append(f"Bash(*run {s}*)")  # npm run x, pnpm run x, yarn run x, npm --prefix api run x, pnpm -F api run x
+        if pm in ("pnpm", "yarn", "bun"):
+            ask.append(f"Bash(*{pm} *{s}*)")  # these run scripts without "run": pnpm db:reset, pnpm -F api db:reset
+        if s == "publish":
+            ask.append("Bash(*npm publish*)")
+    ask = list(dict.fromkeys(ask))
+    ops = []
+    # 1. permissions (ask-before) + memory into settings.local.json, as a recorded subset
+    local = load_json(repo / LOCAL, {})
+    have = set(local.get("permissions", {}).get("ask", []))
+    allow_deny = set(local.get("permissions", {}).get("allow", [])) | set(local.get("permissions", {}).get("deny", []))
+    old_state = load_json(repo / STATE, {})
+    old_owned = set(next((o.get("ask", []) for o in old_state.get("ops", []) if o["kind"] == "settings"), []))
+    add_ask = [a for a in ask if a not in have and a not in allow_deny]
+    keep_ask = [a for a in ask if a in old_owned and a in have]
+    drop_ask = sorted(old_owned - set(ask))  # stack no longer selected
+    mem = str(MEMORY_ROOT / req["memory"]) if req["memory"] else None
+    cur_mem = local.get("autoMemoryDirectory")
+    mem_op = None
+    if mem and cur_mem not in (None, mem):
+        print(f"warn {LOCAL}: autoMemoryDirectory is {cur_mem}; left as is (yours). Pass --memory to change.")
+        if "memory" in args:
+            mem_op = mem
+    elif mem:
+        mem_op = mem
+    was_owned = bool(next((o.get("memory_owned") for o in old_state.get("ops", []) if o["kind"] == "settings"), False))
+    unset_mem = False
+    if req["kind"] == "client" and cur_mem and str(G) in cur_mem:
+        if was_owned:
+            unset_mem = True  # kit set it while the repo was own/lab: client facts must stay local
+            print(f"  {LOCAL}: client repo: removing kit's memory link into gigaforge ({cur_mem})")
+        else:
+            print(f"warn {LOCAL}: client repo memory points into gigaforge ({cur_mem}); fix by hand: client facts stay local")
+    ops.append({"kind": "settings", "path": LOCAL, "ask": sorted(set(add_ask + keep_ask)), "add": add_ask,
+                "drop": drop_ask, "memory": mem_op, "unset_memory": unset_mem,
+                "memory_owned": (bool(mem_op) or was_owned) and not unset_mem})
+    # 2. CLAUDE.md scaffold, only when none exists (then it is the user's)
+    prev_scaffold = next((o for o in old_state.get("ops", []) if o["kind"] == "scaffold"), None)
+    if not det["has_claude_md"]:
+        ops.append({"kind": "scaffold", "path": "CLAUDE.md",
+                    "content": scaffold(repo, det, stacks, skills, checklists, notes)})
+    elif prev_scaffold:
+        ops.append({"kind": "scaffold-kept", "path": "CLAUDE.md", "sha256": prev_scaffold.get("sha256")})
+    # 3. git exclude for kit files (and the scaffold in client repos)
+    if det["git"]:
+        pats = [REQ, STATE, LOCAL] + (["CLAUDE.md"] if req["kind"] == "client" and not det["has_claude_md"] else [])
+        prev_added = next((o.get("patterns", []) for o in old_state.get("ops", []) if o["kind"] == "exclude"), [])
+        ops.append({"kind": "exclude", "path": ".git/info/exclude", "patterns": pats, "prev_added": prev_added})
+    return repo, det, req, stacks, skills, checklists, ops
+
+
+def apply(repo, args, dry):
+    repo, det, req, stacks, skills, checklists, ops = plan(repo, args)
+    tag = "plan" if dry else "apply"
+    print(f"{tag} {repo}  kind={req['kind']} memory={req['memory'] or 'local'} hooks={req['hooks']}")
+    print(f"  stacks: {', '.join(stacks) or '-'}" + (f"  (excluded: {', '.join(req['exclude_stacks'])})" if req['exclude_stacks'] else ""))
+    for s, ev in det["stacks"].items():
+        print(f"    {s:<10} {'; '.join(ev)}")
+    if det["workspace_children"]:
+        print(f"  workspace of git repos: {', '.join(det['workspace_children'])} (apply each one too; see /onboard-project)")
+    state_ops = []
+    for op in ops:
+        p = repo / op["path"]
+        if op["kind"] == "settings":
+            local = load_json(p, {})
+            perms = local.setdefault("permissions", {})
+            ask = [a for a in perms.get("ask", []) if a not in op["drop"]] + op["add"]
+            if ask:
+                perms["ask"] = ask
+            elif "ask" in perms:
+                del perms["ask"]
+            if not perms:
+                local.pop("permissions")
+            if op.get("unset_memory"):
+                local.pop("autoMemoryDirectory", None)
+            if op["memory"]:
+                local["autoMemoryDirectory"] = op["memory"]
+                if not dry:
+                    pathlib.Path(op["memory"]).mkdir(parents=True, exist_ok=True)
+            print(f"  {op['path']}: +{len(op['add'])} ask rule(s), -{len(op['drop'])} stale"
+                  + (f", memory -> {op['memory']}" if op["memory"] else ""))
+            dump_json(p, local, dry)
+            state_ops.append({"kind": "settings", "path": op["path"], "ask": op["ask"], "memory_owned": op["memory_owned"]})
+        elif op["kind"] == "scaffold":
+            print(f"  CLAUDE.md: scaffold written (no CLAUDE.md existed)")
+            if not dry:
+                p.write_text(op["content"])
+            state_ops.append({"kind": "scaffold", "path": "CLAUDE.md", "sha256": None if dry else sha(p)})
+        elif op["kind"] == "scaffold-kept":
+            state_ops.append({"kind": "scaffold", "path": "CLAUDE.md", "sha256": op["sha256"]})
+        elif op["kind"] == "exclude":
+            ex = exclude_file(repo)
+            if not ex:
+                continue
+            cur = ex.read_text().splitlines() if ex.exists() else []
+            new = [x for x in op["patterns"] if x not in cur]
+            if new:
+                print(f"  {ex}: +{', '.join(new)}")
+                if not dry:
+                    ex.parent.mkdir(parents=True, exist_ok=True)
+                    ex.write_text("\n".join(cur + ["# gigaforge kit"] + new) + "\n")
+            # record only lines kit itself added (running union); a user's identical line is never ours
+            added = [x for x in op["prev_added"] if x in cur] + [x for x in new if x not in op["prev_added"]]
+            state_ops.append({"kind": "exclude", "path": str(ex), "patterns": added})
+    if det["risky_scripts"]:
+        print(f"  ask-first scripts: {', '.join(f'{p}/{s}' if p != '.' else s for p, s in det['risky_scripts'])}")
+    print(f"  library: {len(skills)} skills, checklists: {', '.join(checklists)}")
+    dump_json(repo / REQ, req, dry)
+    dump_json(repo / STATE, {"version": 1, "kit_commit": kit_commit(), "applied": TODAY, "stacks": stacks,
+                             "skills": skills, "checklists": checklists, "ops": state_ops}, dry)
+    register(repo, req, dry)
+    if dry:
+        print("  (dry run: nothing written)")
+
+
+# ---------- doctor ----------
+class Report:
+    def __init__(self):
+        self.errors = self.warns = 0
+
+    def err(self, m):
+        self.errors += 1
+        print(f"  ERROR {m}")
+
+    def warn(self, m):
+        self.warns += 1
+        print(f"  warn  {m}")
+
+    def ok(self, m):
+        print(f"  ok    {m}")
+
+
+def doctor_global(r):
+    print("global (~/.claude)")
+    home = pathlib.Path.home() / ".claude"
+    want = [(home / "CLAUDE.md", G / "global/CLAUDE.md")]
+    want += [(home / "skills" / d.name, d) for d in (G / "global/skills").iterdir() if d.is_dir()]
+    want += [(home / "skills" / d.name, d) for d in (G / "library/skills").iterdir() if d.is_dir()
+             if not (G / "global/skills" / d.name).exists()]
+    want += [(home / "agents" / a.name, a) for a in (G / "global/agents").glob("*.md")]
+    bad = [str(l.relative_to(home)) for l, t in want if not (l.is_symlink() and l.resolve() == t.resolve())]
+    (r.err(f"{len(bad)} link(s) missing or wrong: {', '.join(bad[:6])}{'…' if len(bad) > 6 else ''} -> run bin/install.sh")
+     if bad else r.ok(f"{len(want)} links into gigaforge"))
+    settings = load_json(home / "settings.json", {})
+    cmds = [h.get("command", "") for evs in settings.get("hooks", {}).values() for g in evs for h in g.get("hooks", [])]
+    for h in sorted((G / "global/hooks").glob("*")):
+        if h.name.startswith(("_", ".")) or h.suffix not in (".py", ".sh"):
+            continue
+        (r.ok if any(str(h) in c for c in cmds) else r.warn)(f"hook {h.name} {'registered' if any(str(h) in c for c in cmds) else 'NOT registered (run bin/install.sh)'}")
+    for c in cmds:
+        m = re.search(r"(/\S+\.(?:py|sh|js))", c)
+        if m and str(G) in m.group(1) and not pathlib.Path(m.group(1)).exists():
+            r.err(f"settings.json hook points at a missing file: {m.group(1)}")
+    man = stacks_manifest()
+    have_s = {d.name for d in (G / "library/skills").iterdir()} | {d.name for d in (G / "global/skills").iterdir()}
+    have_c = {f.stem for f in (G / "library/checklists").glob("*.md")}
+    blocks = list(man["stacks"].values()) + [man["always"]]
+    missing = sorted({s for b in blocks for s in b.get("skills", []) if s not in have_s} |
+                     {f"{c}.md" for b in blocks for c in b.get("checklists", []) if c not in have_c})
+    (r.err(f"kit/stacks.json names missing library entries: {', '.join(missing)}") if missing
+     else r.ok(f"kit/stacks.json: {len(man['stacks'])} stacks, all references resolve"))
+    lib = subprocess.run([sys.executable, str(G / "bin/check-library.py")], capture_output=True, text=True)
+    (r.ok("library check passes") if lib.returncode == 0 else
+     r.err("library check fails: " + (lib.stdout.strip().splitlines() or ["?"])[-1]))
+
+
+def doctor_project(repo, r):
+    repo = pathlib.Path(repo).resolve()
+    print(f"{repo}")
+    if not repo.is_dir():
+        return r.err("path no longer exists (kit remove it from kit/projects.json)")
+    req, st = load_json(repo / REQ, None), load_json(repo / STATE, None)
+    if not req or not st:
+        return r.err("not applied (run kit apply)")
+    det = detect(repo)
+    new = sorted(set(det["stacks"]) - set(req.get("detected", [])) - set(req.get("exclude_stacks", [])))
+    gone = sorted(set(req.get("detected", [])) - set(det["stacks"]))
+    if new or gone:
+        r.warn(f"stack drift: new {new or '-'}, gone {gone or '-'} -> kit apply to refresh")
+    else:
+        r.ok(f"stacks: {', '.join(st.get('stacks', [])) or '-'}")
+    local = load_json(repo / LOCAL, {})
+    for op in st.get("ops", []):
+        if op["kind"] == "settings":
+            missing = [a for a in op.get("ask", []) if a not in local.get("permissions", {}).get("ask", [])]
+            (r.warn(f"{len(missing)} managed ask rule(s) removed by hand: {missing[:3]}") if missing
+             else r.ok(f"{len(op.get('ask', []))} managed ask rules in place"))
+        if op["kind"] == "scaffold":
+            p = repo / "CLAUDE.md"
+            if not p.exists():
+                r.warn("CLAUDE.md scaffold was deleted")
+            elif sha(p) == op.get("sha256"):
+                r.warn("CLAUDE.md is still the untouched scaffold: run /onboard-project there")
+            elif "TODO" in p.read_text():
+                r.warn("CLAUDE.md still has TODOs")
+            else:
+                r.ok("CLAUDE.md filled in")
+    if not det["has_claude_md"]:
+        r.warn("no CLAUDE.md")
+    claude_md = next((repo / f for f in ("CLAUDE.md", ".claude/CLAUDE.md") if (repo / f).exists()), None)
+    if claude_md and (repo / "package.json").exists():
+        scripts = set(load_json(repo / "package.json", {}).get("scripts", {}))
+        used = set(re.findall(r"`(?:npm run|pnpm|yarn|bun run) ([\w:.-]+)", claude_md.read_text()))
+        stale = sorted(u for u in used - scripts if u not in ("install", "add", "dlx", "exec", "test"))
+        if stale:
+            r.warn(f"CLAUDE.md names scripts package.json doesn't have: {', '.join(stale[:5])}")
+    mem = local.get("autoMemoryDirectory")
+    if req.get("kind") == "client":
+        if mem and str(G) in mem:
+            r.err("client repo memory points into gigaforge (client facts must stay local)")
+        else:
+            r.ok("client: memory stays local")
+    elif mem:
+        (r.ok if pathlib.Path(mem).is_dir() else r.err)(f"memory -> {mem}")
+    else:
+        r.warn("no autoMemoryDirectory (memory is per-path local)")
+    if st.get("kit_commit", "").split("+")[0] != kit_commit().split("+")[0]:
+        r.warn(f"applied with kit {st.get('kit_commit')}, now {kit_commit()} -> kit apply to pick up changes")
+
+
+def doctor(target):
+    r = Report()
+    if target in (None, "--all"):
+        doctor_global(r)
+        for p in sorted(registry()["projects"]):
+            doctor_project(p, r)
+    else:
+        doctor_project(target, r)
+    print(f"doctor: {r.errors} error(s), {r.warns} warning(s)")
+    return 1 if r.errors else 0
+
+
+# ---------- status / remove ----------
+def status():
+    reg = registry()["projects"]
+    if not reg:
+        return print("no projects registered (kit apply <repo>)")
+    print(f"{'project':<34} {'kind':<7} {'memory':<10} {'stacks':<40} claude.md")
+    for p, meta in sorted(reg.items()):
+        st = load_json(pathlib.Path(p) / STATE, {})
+        md = pathlib.Path(p) / "CLAUDE.md"
+        scaf = next((o for o in st.get("ops", []) if o["kind"] == "scaffold"), None)
+        mdstate = "missing" if not md.exists() and not (pathlib.Path(p) / ".claude/CLAUDE.md").exists() else \
+            "scaffold" if scaf and sha(md) == scaf.get("sha256") else "todo" if md.exists() and "TODO" in md.read_text() else "ok"
+        name = str(pathlib.Path(p).relative_to(G.parent)) if str(p).startswith(str(G.parent)) else p
+        print(f"{name:<34} {meta['kind']:<7} {(meta.get('memory') or 'local'):<10} {','.join(st.get('stacks', []))[:40]:<40} {mdstate}")
+
+
+def remove(repo, dry):
+    repo = pathlib.Path(repo).resolve()
+    st = load_json(repo / STATE, None)
+    if not st:
+        sys.exit(f"kit: {repo} has no {STATE}; nothing to remove")
+    for op in st["ops"]:
+        if op["kind"] == "settings":
+            local = load_json(repo / LOCAL, {})
+            perms = local.get("permissions", {})
+            perms["ask"] = [a for a in perms.get("ask", []) if a not in op.get("ask", [])]
+            if not perms["ask"]:
+                perms.pop("ask")
+            if not perms:
+                local.pop("permissions", None)
+            if op.get("memory_owned"):
+                local.pop("autoMemoryDirectory", None)
+            print(f"  {LOCAL}: -{len(op.get('ask', []))} ask rule(s)" + (", memory link removed" if op.get("memory_owned") else ""))
+            if not dry:
+                (dump_json(repo / LOCAL, local, False) if local else (repo / LOCAL).unlink(missing_ok=True))
+        elif op["kind"] == "scaffold":
+            p = repo / "CLAUDE.md"
+            if p.exists() and sha(p) == op.get("sha256"):
+                print("  CLAUDE.md: untouched scaffold removed")
+                if not dry:
+                    p.unlink()
+            elif p.exists():
+                print("  CLAUDE.md: kept (you edited it)")
+        elif op["kind"] == "exclude":
+            ex = pathlib.Path(op["path"])
+            if ex.exists():
+                ours = set(op["patterns"])
+                lines = [l for l in ex.read_text().splitlines() if l not in ours and l != "# gigaforge kit"]
+                print(f"  .git/info/exclude: -{len(op['patterns'])} pattern(s)")
+                if not dry:
+                    ex.write_text("\n".join(lines) + ("\n" if lines else ""))
+    if not dry:
+        for f in (REQ, STATE):
+            (repo / f).unlink(missing_ok=True)
+        reg = registry()
+        reg["projects"].pop(str(repo), None)
+        dump_json(REGISTRY, reg, False)
+    print(f"removed {repo}" + (" (dry run)" if dry else ""))
+
+
+# ---------- cli ----------
+def main(argv):
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    dry = "--dry-run" in rest
+    rest = [a for a in rest if a != "--dry-run"]
+    opts, pos, i = {}, [], 0
+    while i < len(rest):
+        if rest[i] in ("--kind", "--memory"):
+            opts[rest[i][2:]] = rest[i + 1]
+            i += 2
+        else:
+            pos.append(rest[i])
+            i += 1
+    if cmd == "detect":
+        paths = [x for x in pos if x != "--json"]
+        d = detect(paths[0] if paths else ".")
+        if "--json" in pos:
+            print(json.dumps(d, indent=2))
+        else:
+            print(f"{d['repo']}  git={d['git']} pm={d['package_manager']} monorepo={d['monorepo']} claude.md={d['has_claude_md']}")
+            for s, ev in d["stacks"].items():
+                print(f"  {s:<10} {'; '.join(ev)}")
+            for k, v in d["commands"].items():
+                print(f"  cmd {k:<9} {v}")
+            if d["risky_scripts"]:
+                print(f"  risky scripts (ask-first on apply): {', '.join(f'{p}/{s}' if p != '.' else s for p, s in d['risky_scripts'])}")
+            if d["workspace_children"]:
+                print(f"  workspace: {', '.join(d['workspace_children'])}")
+        return 0
+    if cmd == "apply":
+        if pos[:1] == ["--all"] and opts:
+            sys.exit("kit: --kind/--memory apply to one repo; with --all each project keeps its own (edit its .claude/gigaforge.json)")
+        targets = sorted(registry()["projects"]) if pos[:1] == ["--all"] else pos[:1]
+        if not targets:
+            sys.exit("kit apply <repo> | --all")
+        for t in targets:
+            apply(t, opts, dry)
+        return 0
+    if cmd == "doctor":
+        return doctor(pos[0] if pos else None)
+    if cmd == "status":
+        return status() or 0
+    if cmd == "remove":
+        return remove(pos[0], dry) or 0
+    if cmd in ("audit", "budget", "selftest"):
+        script = G / "bin" / {"audit": "kit-audit.py", "budget": "budget.py", "selftest": "kit-selftest.py"}[cmd]
+        return subprocess.call([sys.executable, str(script), *rest])
+    sys.exit(f"kit: unknown command {cmd!r} (kit --help)")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

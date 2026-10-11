@@ -1,0 +1,329 @@
+{
+  "ecc": {
+    "repo": "https://github.com/affaan-m/ECC",
+    "local": "/home/mip/Desktop/workdir/sweeft/ECC",
+    "branch": "main",
+    "license": "MIT, Copyright (c) 2026 Affaan Mustafa",
+    "pinned_sha": "ef648e01899ba3e8dc6371642deaaf64b4477775",
+    "absorbed": "2026-10-03",
+    "skills": {
+      "nestjs-patterns": "skills/nestjs-patterns",
+      "backend-patterns": "skills/backend-patterns",
+      "api-design": "skills/api-design",
+      "hexagonal-architecture": "skills/hexagonal-architecture",
+      "react-patterns": "skills/react-patterns",
+      "react-performance": "skills/react-performance",
+      "react-testing": "skills/react-testing",
+      "python-patterns": "skills/python-patterns",
+      "python-testing": "skills/python-testing",
+      "fastapi-patterns": "skills/fastapi-patterns",
+      "golang-patterns": "skills/golang-patterns",
+      "golang-testing": "skills/golang-testing",
+      "postgres-patterns": "skills/postgres-patterns",
+      "redis-patterns": "skills/redis-patterns",
+      "database-migrations": "skills/database-migrations",
+      "docker-patterns": "skills/docker-patterns",
+      "kubernetes-patterns": "skills/kubernetes-patterns",
+      "deployment-patterns": "skills/deployment-patterns",
+      "verification-loop": "skills/verification-loop",
+      "search-first": "skills/search-first",
+      "secure-coding": "skills/security-review",
+      "contract-first": "skills/contract-first",
+      "council": "skills/council",
+      "production-audit": "skills/production-audit",
+      "architecture-decision-records": "skills/architecture-decision-records",
+      "loop-design-check": "skills/loop-design-check",
+      "error-handling": "skills/error-handling",
+      "mcp-server-patterns": "skills/mcp-server-patterns",
+      "e2e-testing": "skills/e2e-testing",
+      "inherit-legacy-style": "skills/inherit-legacy-style",
+      "accessibility": "skills/accessibility",
+      "make-interfaces-feel-better": "skills/make-interfaces-feel-better",
+      "cisco-ios-patterns": "skills/cisco-ios-patterns",
+      "netmiko-ssh-automation": "skills/netmiko-ssh-automation",
+      "network-bgp-diagnostics": "skills/network-bgp-diagnostics",
+      "network-config-validation": "skills/network-config-validation",
+      "network-interface-health": "skills/network-interface-health",
+      "homelab-network-readiness": "skills/homelab-network-readiness",
+      "homelab-network-setup": "skills/homelab-network-setup",
+      "homelab-pihole-dns": "skills/homelab-pihole-dns",
+      "homelab-vlan-segmentation": "skills/homelab-vlan-segmentation",
+      "homelab-wireguard-vpn": "skills/homelab-wireguard-vpn",
+      "seo": "skills/seo",
+      "manim-video": "skills/manim-video",
+      "remotion-video-creation": "skills/remotion-video-creation",
+      "video-editing": "skills/video-editing",
+      "videodb": "skills/videodb",
+      "fal-ai-media": "skills/fal-ai-media",
+      "ui-demo": "skills/ui-demo",
+      "content-engine": "skills/content-engine",
+      "email-ops": "skills/email-ops",
+      "mailtrap-email-integration": "skills/mailtrap-email-integration",
+      "brand-voice": "skills/brand-voice"
+    },
+    "edits": {
+      "docker-patterns": {
+        "drop_sections": [
+          "Hardened CLI Installer Harnesses"
+        ],
+        "description": "Docker and Docker Compose patterns for local development, container security, networking, volume strategies, and multi-service orchestration. Use when setting up Docker or Compose for development, designing multi-container architectures, hardening images, or debugging container networking or volumes."
+      },
+      "kubernetes-patterns": {
+        "drop_sections": [
+          "When to Use"
+        ]
+      },
+      "search-first": {
+        "drop_sections": [
+          "Integration Points"
+        ],
+        "replace": [
+          [
+            "# /search-first — Research Before You Code",
+            "# Search First — Research Before You Code"
+          ],
+          [
+            "`ls ~/.claude/skills ~/.codex/skills` where applicable",
+            "`ls ~/.claude/skills`"
+          ]
+        ]
+      },
+      "council": {
+        "replace": [
+          [
+            "- use `knowledge-ops` to store the lesson in the right durable location\n- or use `/save-session` if the outcome belongs in session memory\n- or update the relevant GitHub / Linear issue directly if the decision changes active execution truth",
+            "- record it as an ADR (`architecture-decision-records`) if it becomes long-lived system policy\n- or let `/retro` capture the lesson at session end\n- or update the relevant issue directly if the decision changes active execution truth"
+          ],
+          [
+            "Should we ship ECC 2.0 as alpha now, or hold until the control-plane UI is more complete?",
+            "Should we ship the new admin dashboard as a beta now, or hold until the reporting views are complete?"
+          ],
+          [
+            "| Verifying whether output is correct | `santa-method` |",
+            "| Verifying whether output is correct | the `verifier` agent |"
+          ],
+          [
+            "| Breaking a feature into implementation steps | `planner` |",
+            "| Breaking a feature into implementation steps | plan mode or `build-loop` |"
+          ],
+          [
+            "| Designing system architecture | `architect` |",
+            "| Designing system architecture | plan mode, then an ADR (`architecture-decision-records`) |"
+          ],
+          [
+            "| Reviewing code for bugs or security | `code-reviewer` or `santa-method` |",
+            "| Reviewing code for bugs or security | the `reviewer` agent |"
+          ]
+        ]
+      },
+      "architecture-decision-records": {
+        "replace": [
+          [
+            "- **Planner agent**: when the planner proposes architecture changes, suggest creating an ADR\n- **Code reviewer agent**: flag PRs that introduce architectural changes without a corresponding ADR",
+            "- **Plan mode / build-loop**: when a plan proposes architecture changes, suggest creating an ADR\n- **reviewer agent**: flag diffs that introduce architectural changes without a corresponding ADR"
+          ]
+        ]
+      },
+      "loop-design-check": {
+        "description": "Design a goal-oriented agent loop or review one for failure modes: spinning, Goodhart-gaming the verifier, or running a wrong answer to completion. Covers machine-decidable goals, loop types, plan/build/judge skeletons, and runaway prevention. Use when designing, writing, or checking an agent loop, or before starting a long autonomous build-loop.",
+        "replace": [
+          [
+            "see `autonomous-loops` / `continuous-agent-loop`. **This skill",
+            "see the `build-loop` skill and Claude Code's `/loop`. **This skill"
+          ],
+          [
+            "> Mechanism layer (how to wire the loop architecture): see `autonomous-loops` / `continuous-agent-loop`. This skill",
+            "> Mechanism layer (how to wire the loop architecture): see `build-loop` and `/loop`. This skill"
+          ]
+        ]
+      },
+      "remotion-video-creation": {
+        "extras": [
+          "rules/assets/charts-bar-chart.tsx",
+          "rules/assets/text-animations-typewriter.tsx",
+          "rules/assets/text-animations-word-highlight.tsx"
+        ]
+      },
+      "videodb": {
+        "extras": [
+          "scripts/ws_listener.py"
+        ]
+      },
+      "video-editing": {
+        "exclude_extras": [
+          "assets/fusion/*"
+        ],
+        "drop_sections": [
+          "Native Fusion Presets"
+        ],
+        "replace": [
+          [
+            "For measured reference-driven work, chain `taste-distillation` into\n`taste-application`, then return here for the editor and final-output review.\nThe standalone taste skills can use existing footage; generation is optional.\n",
+            ""
+          ]
+        ]
+      },
+      "manim-video": {
+        "description": "Build reusable Manim explainers for technical concepts, graphs, system diagrams, and product walkthroughs; pair with remotion-video-creation or video-editing for the final cut. Use when the user wants a clean animated explainer rather than a generic talking-head script."
+      },
+      "email-ops": {
+        "description": "Evidence-first mailbox triage, drafting, send verification, and sent-mail-safe follow-up workflow. Use when the user wants to organize email, draft or send through the real mail surface, or prove what landed in Sent.",
+        "drop_sections": [
+          "Skill Stack"
+        ],
+        "replace": [
+          [
+            "- if the task is really DM or iMessage work, hand off to `messages-ops`\n",
+            ""
+          ]
+        ]
+      },
+      "content-engine": {
+        "replace": [
+          [
+            "If the user wants Affaan / ECC voice specifically, still treat `brand-voice` as the source of truth and feed it the best live or source-derived material available.\n",
+            ""
+          ]
+        ]
+      },
+      "brand-voice": {
+        "drop_sections": [
+          "Affaan / ECC Defaults"
+        ],
+        "replace": [
+          [
+            "5. If site copy matters, include the current ECC landing page and repo/plugin framing.\n",
+            "5. If site copy matters, include the current landing page and product framing.\n"
+          ],
+          [
+            "4. If live X access is available, use `x-api` to pull recent original posts before drafting.\n",
+            "4. If live X access is available, pull recent original posts before drafting.\n"
+          ],
+          [
+            "- `crosspost`\n- `lead-intelligence`\n",
+            "- `email-ops`\n"
+          ]
+        ]
+      }
+    },
+    "checklists": {
+      "typescript": [
+        "agents/typescript-reviewer.md",
+        "rules/typescript"
+      ],
+      "react": [
+        "agents/react-reviewer.md",
+        "rules/react"
+      ],
+      "python": [
+        "agents/python-reviewer.md",
+        "agents/fastapi-reviewer.md",
+        "rules/python"
+      ],
+      "go": [
+        "agents/go-reviewer.md",
+        "rules/golang"
+      ],
+      "database": [
+        "agents/database-reviewer.md",
+        "skills/postgres-patterns",
+        "skills/database-migrations"
+      ],
+      "security": [
+        "agents/security-reviewer.md",
+        "rules/common/security.md",
+        "skills/security-review/cloud-infrastructure-security.md"
+      ],
+      "silent-failures": [
+        "agents/silent-failure-hunter.md"
+      ],
+      "types": [
+        "agents/type-design-analyzer.md"
+      ],
+      "tests": [
+        "agents/pr-test-analyzer.md",
+        "skills/ai-regression-testing"
+      ]
+    },
+    "skipped": {
+      "frontend-patterns": "overlaps react-patterns/-performance/-testing",
+      "tdd-workflow": "test-first is owned by build-loop and tutor",
+      "build-error-resolver": "overlaps debug-protocol",
+      "continuous-learning-v2": "ideas taken (confidence, evidence, 2-project promotion) into retro/curate + brain/library-ledger.md; observer hooks not ported (ECC ships them disabled)",
+      "rules/*": "always-loaded cost; content folded into library/checklists",
+      "commands/*": "upstream calls them legacy shims",
+      "aws / ecs / lambda / msk": "not in ECC; covered by the official aws-core plugin",
+      "kafka / rabbitmq (self-hosted)": "not in ECC; gap, to be written from live docs with researcher",
+      "ai-regression-testing": "Next.js/Supabase-specific setup and an ECC custom command; its 'test where the bugs were' patterns were folded into library/checklists/tests.md",
+      "tasteforge-video": "needs ECC's packaged tasteforge engine",
+      "motion-foundations / motion-patterns / motion-advanced": "React UI animation (not video); absorb if a frontend needs it",
+      "blender-motion-state-inspection": "3D rig inspection, niche",
+      "crosspost / social-publisher": "posting to social networks (social-publisher needs the SocialClaw service); content-engine covers creation",
+      "network-architect / network-troubleshooter / network-config-reviewer / homelab-architect agents": "covered by the absorbed network-* and homelab-* skills",
+      "seo-specialist agent": "covered by the seo skill",
+      "video-editing assets/fusion (ITO presets)": "sponsor-specific DaVinci presets",
+      "manim-video assets/network_graph_scene.py": "ECC promo example"
+    }
+  },
+  "visual-explainer": {
+    "repo": "https://github.com/nicobailon/visual-explainer",
+    "local": "/home/mip/Desktop/workdir/sweeft/visual-explainer",
+    "branch": "main",
+    "license": "MIT, Copyright (c) 2025 Nico Bailon",
+    "pinned_sha": "5846f5aef34a23c8fea389d2f23ce56224cbf840",
+    "absorbed": "2026-10-06",
+    "skills": {
+      "visual-explainer": "plugins/visual-explainer"
+    },
+    "edits": {
+      "visual-explainer": {
+        "drop_sections": [
+          "Older recipes (optional)"
+        ],
+        "replace": [
+          [
+            "- Pi: `visual_explainer` `prepare` → `render` (ask before `prepare` unless a visual was requested). MCP: render tools default to `open:false`. Elsewhere: write the file and open it. Use `viewer:\"glimpse\"` only on request.",
+            "- Write the file, then open it in the browser (`xdg-open <path>`). Publish it as a claude.ai Artifact only when the user asks to share it."
+          ],
+          [
+            "\n- Quick mode: only for a literal `--quick` on `/generate-web-diagram`, `/diff-review`, `/plan-review`, `/project-recap`. Do the same research, read `./quick/README.md` and `./quick/schema.json`, emit the JSON spec, and render with `action:\"render_quick\"` (Pi) or `node <this skill's directory>/quick/render.mjs spec.json out.html` (resolve the path from the skill directory, not the user's repo). If the content does not fit or rendering fails, use full HTML.",
+            ""
+          ],
+          [
+            "Make slides only when asked (`/generate-slides`, `--slides`). Read `references/slides.md`. Export PPTX only on request or with `--pptx`: build the HTML deck first, then run `visual-explainer-pptx deck.html deck.pptx` (or `node ./pptx/export.mjs` from a checkout). Tell the user that HTML stays the source of truth. The PPTX has no animation, navigation, responsive layout, custom fonts, live diagrams, or JS.",
+            "Make slides only when asked. Read `references/slides.md` and copy from `templates/slide-deck.html`. For PPTX, build the HTML deck first, then convert it with the `anthropic-skills:pptx` skill. Tell the user that HTML stays the source of truth: the PPTX has no animation, navigation, live diagrams, or JS."
+          ],
+          [
+            " For zoom and pan, copy `templates/mermaid-flowchart.html` from Older recipes.",
+            ""
+          ],
+          [
+            "Use Manim, Remotion, or Motion Canvas for visuals",
+            "Use Manim (skill `manim-video`), Remotion (skill `remotion-video-creation`), or Motion Canvas for visuals"
+          ]
+        ],
+        "extras": [
+          "templates/page.html",
+          "templates/slide-deck.html"
+        ],
+        "exclude_extras": [
+          "quick/**",
+          "mcp/**",
+          "pptx/**",
+          "commands/**",
+          ".claude-plugin/**",
+          "extension.ts"
+        ],
+        "description": "Generate self-contained HTML visual explanations (hand-drawn SVG diagrams, steppers, small multiples, slide decks, animated explainers) for systems, technical concepts, plans, diffs, and data. Use when the user asks to visualize, draw, diagram, or visually explain something, wants a visual diff or plan review, or asks for a slide deck or animated explainer. Not for plain-text answers or ordinary code review."
+      }
+    },
+    "checklists": {},
+    "skipped": {
+      "quick/ (render.mjs, schema)": "opt-in JSON-to-HTML token saver; executable JS, revisit if full pages prove too slow",
+      "mcp/server.mjs": "same output as writing the file directly; no extra server",
+      "pptx/ exporter": "needs npm install; anthropic-skills:pptx and the Artifact Slides type cover it",
+      "commands/*.md": "adapter imports skills only; SKILL.md page-shape table covers diff/plan/recap. fact-check is the one worth a command later",
+      "configs/* and extension.ts": "other agent hosts (Pi, Cursor, Codex, ...)"
+    }
+  }
+}

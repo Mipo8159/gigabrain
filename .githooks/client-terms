@@ -1,0 +1,4 @@
+# Client-internal names that must never appear in brain/ (checked on commit).
+# Add one per line when a new client project starts.
+wenroll
+sdqa

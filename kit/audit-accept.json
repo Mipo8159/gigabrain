@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "allow-bare-bash",
+    "path_glob": "~/.claude/settings.json",
+    "reason": "Giga's deliberate choice (2026-08-13): Bash allowed outright in auto mode; a deny list still blocks catastrophic commands and irreversible/outward actions are confirmed. See brain/habits/claude-permissions-are-wide-open.md"
+  }
+]

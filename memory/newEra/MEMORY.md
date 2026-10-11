@@ -1,0 +1,21 @@
+- [gigaforge is the brain](gigaforge-is-the-brain.md) — cross-project habits live in gigaforge/brain (loaded via ~/.claude/CLAUDE.md); this folder holds newEra-only facts.
+- [Same setup from either folder](session-setup-works-from-either-folder.md) — newEra and newEra/mogulkhan share one memory dir and one skill set.
+- [The MCP server is a teaching exercise](mcp-server-is-a-teaching-exercise.md) — rationale over speed; the README's "not implemented" list is a syllabus.
+- [auctionize is serverless AWS, no local stack](auctionize-is-serverless-aws-no-local-stack.md) — no tests, no LocalStack; tsc + sls package can all pass on a broken deploy, so probe the bundle too.
+- [auctionize has its own .claude setup](auctionize-has-its-own-claude-setup.md) — same shared memory + symlinked skills as mogulkhan; deploy/remove are the one thing that still interrupts the loop.
+- [auctionize dependency ceilings](auctionize-dependency-ceilings.md) — the middy/uuid "ESM wall" was FALSE; uuid is gone, middy stayed at 7 behind the middify/middifyWithBody split.
+- [esbuild breaks auctionize's tsyringe DI](auctionize-esbuild-breaks-tsyringe-di.md) — SOLVED: SWC esbuild plugin via build.esbuild.configFile restores decorator metadata, zero source edits.
+- [auxiliary is the app now, auctionize is legacy](auxiliary-is-the-app-auctionize-is-legacy.md) — READ FIRST for this project; auth+web+core ALL DEPLOYED 2026-08-18; renamed auxilary->auxiliary same day (folder, table, SSM, code).
+- [Free account plan blocked four services](auxiliary-free-plan-blocked-four-services.md) — SOLVED 2026-08-18; check the ACCOUNT PLAN before IAM/SCPs when you see SubscriptionRequiredException.
+- [The upload pipeline plan](auxiliary-upload-pipeline-plan.md) — 7 steps, and the one-job-vs-three-queues decision is still OPEN; it is a design question, not a cost one.
+- [core/ is the third service](auxiliary-core-service-scaffolded.md) — DEPLOYED 2026-08-18 as core-dev; borrows auth's pool via ${cf:} and shares its table; never redeclare that table.
+- [Identity + brand decisions](auxiliary-identity-and-brand-decisions.md) — linking was replaced by symmetric blocking; the typo was CORRECTED 2026-08-18 and the logo trick moved to the real i; dark-committed editing-suite UI.
+- [The real goal: transcoding app + reusable template](auctionize-real-goal-is-transcoding-template.md) — build it piece by piece; comprehension is a deliverable.
+- [Job + quota data model](auctionize-job-and-quota-data-model.md) — planned, not built; quota is a transactional counter, so it can never live in Cognito.
+- [auctionize DI is Inversify via SWC](auctionize-di-is-inversify-via-swc.md) — type-based injection; defaulted AWS-client ctor params MUST be @unmanaged().
+- [auctionize deploys as the default profile](auctionize-deploys-as-default-profile.md) — no profile pinned anywhere; `[default]` == `finrod` == iamadmin @ 755352605221.
+- [auctionize YAML schema errors are bogus](auctionize-yaml-schema-false-positives.md) — iac/*.yml are CFN fragments; the editor names a random resource type, ignore it.
+- [pala generates AWS explainer videos](pala-video-pipeline.md) — JSON spec in, narrated MP4 out; the contract is the product, Polly must be neural.
+- [Claude subscription ≠ API key](pala-video-pipeline.md) — `claude -p` as a provider is how you spend the subscription; there is no subscription API key.
+- [tracker distributed-systems lab](tracker-distributed-systems-lab.md) — READ FIRST for tracker; step 0 built 2026-10-06, Giga implements workflow.ts, next = "step 1" gRPC auth extraction.
+- [tracker handoff](handoff-tracker.md) — failure-first state for tracker step 0 → step 1.

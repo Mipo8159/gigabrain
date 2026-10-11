@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "projects": {
+    "/home/mip/Desktop/workdir/sweeft/newEra/auxiliary": {
+      "kind": "own",
+      "memory": "newEra",
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/newEra/pala": {
+      "kind": "own",
+      "memory": "newEra",
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/newEra/mcp": {
+      "kind": "lab",
+      "memory": "newEra",
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/newEra/mogulkhan": {
+      "kind": "lab",
+      "memory": "newEra",
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/newEra/auctionize": {
+      "kind": "own",
+      "memory": "newEra",
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/clasico/core": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/clasico/admin": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/clasico/push": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/lutecia": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-03"
+    },
+    "/home/mip/Desktop/workdir/sweeft/newEra/tracker": {
+      "kind": "lab",
+      "memory": "newEra",
+      "applied": "2026-10-06"
+    }
+  }
+}

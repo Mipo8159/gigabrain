@@ -1,0 +1,526 @@
+{
+  "version": 1,
+  "about": "Stack modules for bin/kit. A stack is detected when ANY indicator matches. 'file' is a path or glob relative to the project root (depth <= 3, node_modules/.git/dist skipped); 'contains' is a case-sensitive substring of that file. skills/checklists name library/ entries; permissions merge into the project's .claude/settings.json (tagged, removable). Adapted from ECC config/project-stack-mappings.json (MIT).",
+  "stacks": {
+    "node": {
+      "indicators": [
+        {
+          "file": "package.json"
+        }
+      ],
+      "skills": [
+        "backend-patterns",
+        "api-design",
+        "verification-loop"
+      ],
+      "checklists": [
+        "typescript",
+        "silent-failures"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(npm publish:*)",
+          "Bash(pnpm publish:*)",
+          "Bash(yarn publish:*)"
+        ]
+      }
+    },
+    "typescript": {
+      "indicators": [
+        {
+          "file": "tsconfig.json"
+        },
+        {
+          "file": "package.json",
+          "contains": "\"typescript\""
+        }
+      ],
+      "skills": [],
+      "checklists": [
+        "typescript"
+      ]
+    },
+    "nest": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "@nestjs/core"
+        },
+        {
+          "file": "nest-cli.json"
+        }
+      ],
+      "skills": [
+        "nestjs-patterns",
+        "hexagonal-architecture",
+        "contract-first"
+      ],
+      "checklists": [
+        "typescript"
+      ]
+    },
+    "react": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "\"react\""
+        }
+      ],
+      "skills": [
+        "react-patterns",
+        "react-performance",
+        "react-testing",
+        "contract-first",
+        "e2e-testing",
+        "accessibility",
+        "make-interfaces-feel-better",
+        "seo"
+      ],
+      "checklists": [
+        "react"
+      ]
+    },
+    "python": {
+      "indicators": [
+        {
+          "file": "pyproject.toml"
+        },
+        {
+          "file": "requirements.txt"
+        },
+        {
+          "file": "setup.py"
+        },
+        {
+          "file": "Pipfile"
+        }
+      ],
+      "skills": [
+        "python-patterns",
+        "python-testing"
+      ],
+      "checklists": [
+        "python",
+        "silent-failures"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(twine upload:*)"
+        ]
+      }
+    },
+    "fastapi": {
+      "indicators": [
+        {
+          "file": "pyproject.toml",
+          "contains": "fastapi"
+        },
+        {
+          "file": "requirements.txt",
+          "contains": "fastapi"
+        }
+      ],
+      "skills": [
+        "fastapi-patterns",
+        "api-design",
+        "contract-first"
+      ],
+      "checklists": [
+        "python"
+      ]
+    },
+    "go": {
+      "indicators": [
+        {
+          "file": "go.mod"
+        }
+      ],
+      "skills": [
+        "golang-patterns",
+        "golang-testing"
+      ],
+      "checklists": [
+        "go",
+        "silent-failures"
+      ]
+    },
+    "postgres": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "\"pg\""
+        },
+        {
+          "file": "package.json",
+          "contains": "typeorm"
+        },
+        {
+          "file": "package.json",
+          "contains": "prisma"
+        },
+        {
+          "file": "package.json",
+          "contains": "drizzle-orm"
+        },
+        {
+          "file": "docker-compose.yml",
+          "contains": "postgres"
+        },
+        {
+          "file": "docker-compose.yaml",
+          "contains": "postgres"
+        },
+        {
+          "file": "compose.yml",
+          "contains": "postgres"
+        },
+        {
+          "file": "pyproject.toml",
+          "contains": "psycopg"
+        },
+        {
+          "file": "requirements.txt",
+          "contains": "psycopg"
+        },
+        {
+          "file": "go.mod",
+          "contains": "jackc/pgx"
+        }
+      ],
+      "skills": [
+        "postgres-patterns",
+        "database-migrations"
+      ],
+      "checklists": [
+        "database"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(psql:*)",
+          "Bash(*migration:revert*)",
+          "Bash(*DROP TABLE*)",
+          "Bash(*DROP DATABASE*)",
+          "Bash(*drop table*)",
+          "Bash(*drop database*)",
+          "Bash(*prisma migrate reset*)",
+          "Bash(*schema:drop*)",
+          "Bash(dropdb:*)"
+        ]
+      }
+    },
+    "redis": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "ioredis"
+        },
+        {
+          "file": "package.json",
+          "contains": "\"redis\""
+        },
+        {
+          "file": "package.json",
+          "contains": "bullmq"
+        },
+        {
+          "file": "docker-compose.yml",
+          "contains": "redis"
+        },
+        {
+          "file": "docker-compose.yml",
+          "contains": "valkey"
+        },
+        {
+          "file": "pyproject.toml",
+          "contains": "redis"
+        },
+        {
+          "file": "go.mod",
+          "contains": "go-redis"
+        }
+      ],
+      "skills": [
+        "redis-patterns"
+      ],
+      "checklists": [
+        "database"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(redis-cli*FLUSHALL*)",
+          "Bash(redis-cli*FLUSHDB*)"
+        ]
+      }
+    },
+    "kafka": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "kafkajs"
+        },
+        {
+          "file": "package.json",
+          "contains": "@confluentinc"
+        },
+        {
+          "file": "docker-compose.yml",
+          "contains": "kafka"
+        },
+        {
+          "file": "docker-compose.yml",
+          "contains": "redpanda"
+        },
+        {
+          "file": "pyproject.toml",
+          "contains": "kafka"
+        },
+        {
+          "file": "go.mod",
+          "contains": "kafka"
+        }
+      ],
+      "skills": [
+        "contract-first"
+      ],
+      "checklists": [
+        "silent-failures"
+      ],
+      "notes": "No library skill yet (ECC has none). Messaging lessons live in brain/patterns; AWS MSK is covered by the aws-core plugin."
+    },
+    "docker": {
+      "indicators": [
+        {
+          "file": "Dockerfile"
+        },
+        {
+          "file": "Dockerfile.*"
+        },
+        {
+          "file": "docker-compose.yml"
+        },
+        {
+          "file": "docker-compose.yaml"
+        },
+        {
+          "file": "compose.yml"
+        },
+        {
+          "file": "compose.yaml"
+        }
+      ],
+      "skills": [
+        "docker-patterns",
+        "production-audit"
+      ],
+      "checklists": [
+        "security"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(docker push:*)",
+          "Bash(docker system prune:*)",
+          "Bash(docker volume rm:*)",
+          "Bash(docker compose down -v*)",
+          "Bash(docker compose down --volumes*)"
+        ]
+      }
+    },
+    "k8s": {
+      "indicators": [
+        {
+          "file": "Chart.yaml"
+        },
+        {
+          "file": "kustomization.yaml"
+        },
+        {
+          "file": "k8s/*.yaml"
+        },
+        {
+          "file": "helm/*/Chart.yaml"
+        },
+        {
+          "file": "deploy/*.yaml",
+          "contains": "apiVersion:"
+        }
+      ],
+      "skills": [
+        "kubernetes-patterns",
+        "deployment-patterns",
+        "production-audit"
+      ],
+      "checklists": [
+        "security"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(kubectl apply:*)",
+          "Bash(kubectl delete:*)",
+          "Bash(kubectl scale:*)",
+          "Bash(kubectl rollout:*)",
+          "Bash(helm install:*)",
+          "Bash(helm upgrade:*)",
+          "Bash(helm uninstall:*)"
+        ]
+      }
+    },
+    "aws": {
+      "indicators": [
+        {
+          "file": "serverless.yml"
+        },
+        {
+          "file": "serverless.ts"
+        },
+        {
+          "file": "cdk.json"
+        },
+        {
+          "file": "template.yaml",
+          "contains": "AWS::"
+        },
+        {
+          "file": "package.json",
+          "contains": "@aws-sdk/"
+        },
+        {
+          "file": "pyproject.toml",
+          "contains": "boto3"
+        },
+        {
+          "file": "requirements.txt",
+          "contains": "boto3"
+        },
+        {
+          "file": "*/serverless.yml"
+        }
+      ],
+      "skills": [
+        "deployment-patterns",
+        "production-audit"
+      ],
+      "checklists": [
+        "security"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(*serverless deploy*)",
+          "Bash(*sls deploy*)",
+          "Bash(*cdk deploy*)",
+          "Bash(*cdk destroy*)",
+          "Bash(sam deploy:*)",
+          "Bash(aws * delete*)",
+          "Bash(aws s3 rm:*)",
+          "Bash(aws s3 rb:*)",
+          "Bash(terraform apply:*)",
+          "Bash(terraform destroy:*)"
+        ]
+      },
+      "notes": "AWS service guidance comes from the aws-core plugin skills (serverless, containers, messaging, iam)."
+    },
+    "terraform": {
+      "indicators": [
+        {
+          "file": "*.tf"
+        },
+        {
+          "file": "*/*.tf"
+        }
+      ],
+      "skills": [
+        "deployment-patterns",
+        "production-audit"
+      ],
+      "checklists": [
+        "security"
+      ],
+      "permissions": {
+        "ask": [
+          "Bash(terraform apply:*)",
+          "Bash(terraform destroy:*)",
+          "Bash(terraform state rm:*)"
+        ]
+      }
+    },
+    "mcp": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "@modelcontextprotocol/sdk"
+        },
+        {
+          "file": "pyproject.toml",
+          "contains": "mcp"
+        }
+      ],
+      "skills": [
+        "mcp-server-patterns"
+      ],
+      "checklists": [
+        "typescript"
+      ]
+    },
+    "remotion": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "\"remotion\""
+        },
+        {
+          "file": "package.json",
+          "contains": "@remotion/"
+        }
+      ],
+      "skills": [
+        "remotion-video-creation",
+        "video-editing"
+      ],
+      "checklists": [
+        "react"
+      ]
+    },
+    "email": {
+      "indicators": [
+        {
+          "file": "package.json",
+          "contains": "nodemailer"
+        },
+        {
+          "file": "package.json",
+          "contains": "mailtrap"
+        },
+        {
+          "file": "package.json",
+          "contains": "@aws-sdk/client-ses"
+        },
+        {
+          "file": "package.json",
+          "contains": "@sendgrid/"
+        }
+      ],
+      "skills": [
+        "mailtrap-email-integration"
+      ],
+      "checklists": [
+        "security"
+      ]
+    }
+  },
+  "always": {
+    "skills": [
+      "search-first",
+      "secure-coding",
+      "architecture-decision-records",
+      "council",
+      "loop-design-check",
+      "error-handling",
+      "inherit-legacy-style"
+    ],
+    "checklists": [
+      "silent-failures",
+      "security",
+      "types",
+      "tests"
+    ]
+  }
+}
