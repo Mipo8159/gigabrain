@@ -1,6 +1,6 @@
 ---
 name: onboard-project
-description: Bring a repo into Giga's gigaforge setup — run `kit detect`/`kit apply` (stacks, ask-first rules, memory, CLAUDE.md scaffold), then fill the CLAUDE.md (commands, conventions, done-definition, gotchas) and register it in gigaforge/labs.md. Use when Giga says /onboard-project, "set this project up", "write a CLAUDE.md here", or starts working in a repo that has no CLAUDE.md.
+description: Bring a repo into Giga's gigabrain setup — run `kit detect`/`kit apply` (stacks, ask-first rules, memory, CLAUDE.md scaffold), then fill the CLAUDE.md (commands, conventions, done-definition, gotchas) and register it in gigabrain/labs.md. Use when Giga says /onboard-project, "set this project up", "write a CLAUDE.md here", or starts working in a repo that has no CLAUDE.md.
 ---
 
 # Onboard a project
@@ -16,16 +16,16 @@ services, branches)? Shared memory with sibling repos, or its own?
 
 ## 1b. Detect and apply the kit (deterministic, before any prose)
 
-`G=/home/mip/Desktop/workdir/sweeft/gigaforge`. Run `$G/bin/kit detect <repo>` and
+`G=/home/mip/Desktop/workdir/sweeft/gigabrain`. Run `$G/bin/kit detect <repo>` and
 show its evidence lines: stacks, the real commands from package.json/Makefile/
 pyproject, and the **risky scripts** (deploy/remove/revert/seed…). Then
 `$G/bin/kit apply <repo> --kind <own|lab|client> --dry-run`, then the real apply
 once Giga has OK'd the interview answers. It writes, and records for `kit remove`:
 - ask-first permission rules for the stack and for each risky script, in
   `.claude/settings.local.json` (personal, never the team's settings.json);
-- `autoMemoryDirectory` (own/lab → `gigaforge/memory/<name>`; client → local);
+- `autoMemoryDirectory` (own/lab → `gigabrain/memory/<name>`; client → local);
 - a `CLAUDE.md` scaffold **only if none exists**, plus `.git/info/exclude` lines;
-- `.claude/gigaforge.json`, the per-project knobs: `exclude_stacks`,
+- `.claude/gigabrain.json`, the per-project knobs: `exclude_stacks`,
   `include_stacks`, `hooks` (minimal/standard/strict guard profile). Edit and
   re-run `kit apply` to change them.
 For a workspace (non-git root with several repos), apply each child repo; the
@@ -50,9 +50,9 @@ Don't restate CORE.md; it's already loaded globally.
 
 ## 4. Memory (already wired by `kit apply`)
 
-Own/lab repos share `gigaforge/memory/<name>` (pass `--memory newEra` to join the
+Own/lab repos share `gigabrain/memory/<name>` (pass `--memory newEra` to join the
 newEra pool). **Client repos keep memory local**: `kit` never points them into
-gigaforge and `kit doctor` errors if something does. `bin/link-project.sh`
+gigabrain and `kit doctor` errors if something does. `bin/link-project.sh`
 still exists for one-off relinks.
 
 ## Multi-repo workspaces (e.g. clasico = core/ + admin/ under a non-git root)
@@ -76,7 +76,7 @@ still exists for one-off relinks.
 
 ## 5. Register
 
-Add a row to `gigaforge/labs.md`: name, path, kind (lab / own product /
+Add a row to `gigabrain/labs.md`: name, path, kind (lab / own product /
 client), what it's for, memory location.
 
 Finish with `$G/bin/kit doctor <repo>` and `$G/bin/kit audit <repo>`: no

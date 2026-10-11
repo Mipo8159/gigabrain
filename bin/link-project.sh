@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Point a project's auto-memory at gigaforge/memory/<name>, keeping every other
+# Point a project's auto-memory at gigabrain/memory/<name>, keeping every other
 # key in its .claude/settings.local.json.
 #   bin/link-project.sh <project-dir> <memory-name>
 # Don't use this for client repos: their memory stays local.

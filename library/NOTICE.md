@@ -38,7 +38,7 @@ ECC in turn credits, inside the adapted files:
 - `skills/postgres-patterns`: Supabase Agent Skills (MIT, Supabase team).
 
 Both are MIT-licensed upstream. The holders below are named as ECC credits them;
-check the original repositories before redistributing outside gigaforge.
+check the original repositories before redistributing outside gigabrain.
 
 ```
 MIT License. Copyright (c) Vercel Engineering (vercel-labs/agent-skills, react-best-practices)

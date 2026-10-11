@@ -1,4 +1,4 @@
-# gigaforge
+# gigabrain
 
 Giga's shared brain with Claude, and the record of how working with AI gets
 better over time. It does three jobs:
@@ -17,7 +17,7 @@ better over time. It does three jobs:
                   debug protocol, agents / worktrees / plan mode, one 💡 tip
  every session ─► reads brain/CORE.md (via ~/.claude/CLAUDE.md) + project CLAUDE.md + memory
  end: /retro ───► applies lessons to brain/ · coaching.md · scorecard · journal · prompt-log
-                  ──► pre-commit (secrets + client terms) ──► commit + push gigaforge
+                  ──► pre-commit (secrets + client terms) ──► commit + push gigabrain
  weekly /curate ► prune, merge, re-check stale entries; kit doctor/audit/budget
  every tool call ► guard hook (global/hooks/guard.py): no-verify block, destructive
                   deny-once, config protection, compact hint; SessionStart: handoff
@@ -61,6 +61,6 @@ weaknesses you've fixed drop off, and new repeated ones get added.
 ## Setup (also on a new machine)
 
 ```bash
-git clone <private-url> /home/mip/Desktop/workdir/sweeft/gigaforge
-/home/mip/Desktop/workdir/sweeft/gigaforge/bin/install.sh
+git clone <private-url> /home/mip/Desktop/workdir/sweeft/gigabrain
+/home/mip/Desktop/workdir/sweeft/gigabrain/bin/install.sh
 ```

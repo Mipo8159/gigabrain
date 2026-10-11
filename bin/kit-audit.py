@@ -327,7 +327,7 @@ def scan_global(a):
         scan_md_tree(a, p, "agent", seen)
     for p in walk_links(CL / "skills"):
         scan_md_tree(a, p, "skill", seen)
-    # gigaforge's own sources too, installed or not (seen dedupes by realpath)
+    # gigabrain's own sources too, installed or not (seen dedupes by realpath)
     for p in walk_links(G / "global/agents"):
         scan_md_tree(a, p, "agent", seen)
     for sub in ("global/skills", "library/skills", "library/checklists"):
@@ -396,7 +396,7 @@ def main(argv):
     scan_global(a)
     targets = []
     if argv[:1] == ["--all"]:
-        regf = pathlib.Path(os.environ.get("GIGAFORGE_KIT_REGISTRY", G / "kit/projects.json"))  # same knob as bin/kit
+        regf = pathlib.Path(os.environ.get("GIGABRAIN_KIT_REGISTRY", G / "kit/projects.json"))  # same knob as bin/kit
         reg = json.loads(regf.read_text()) if regf.exists() else {"projects": {}}
         targets = sorted(reg["projects"])
         if not targets:

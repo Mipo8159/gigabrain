@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Always-loaded context cost of the gigaforge setup, deterministic (no model call).
+"""Always-loaded context cost of the gigabrain setup, deterministic (no model call).
 
     bin/budget.py [<repo>] [--json]
 

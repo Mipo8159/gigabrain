@@ -4,7 +4,7 @@
     bin/kit selftest        (or: python3 bin/kit-selftest.py)
 
 Everything runs in a temp dir with a temp registry and hook state; nothing in
-~/.claude, gigaforge's kit/projects.json or any real repo is touched. Each case
+~/.claude, gigabrain's kit/projects.json or any real repo is touched. Each case
 here was a real bug or a decision worth pinning (see the comments).
 Exit 1 on any failure.
 """
@@ -12,9 +12,9 @@ import json, os, pathlib, subprocess, sys, tempfile
 
 G = pathlib.Path(__file__).resolve().parent.parent
 TMP = pathlib.Path(tempfile.mkdtemp(prefix="gf-selftest-", dir=os.environ.get("TMPDIR")))
-ENV = {**os.environ, "GIGAFORGE_KIT_REGISTRY": str(TMP / "projects.json"), "XDG_RUNTIME_DIR": str(TMP / "rt"),
-       "GIGAFORGE_MEMORY_ROOT": str(TMP / "memory"), "TMPDIR": str(TMP),
-       "GIGAFORGE_HOOK_PROFILE": "", "GIGAFORGE_DISABLED_HOOKS": ""}
+ENV = {**os.environ, "GIGABRAIN_KIT_REGISTRY": str(TMP / "projects.json"), "XDG_RUNTIME_DIR": str(TMP / "rt"),
+       "GIGABRAIN_MEMORY_ROOT": str(TMP / "memory"), "TMPDIR": str(TMP),
+       "GIGABRAIN_HOOK_PROFILE": "", "GIGABRAIN_DISABLED_HOOKS": ""}
 (TMP / "rt").mkdir()
 fails = []
 
@@ -127,17 +127,17 @@ def guard_cases():
           and bash_decision("kubectl delete ns x", "r1") == "ask")
     bad = TMP / "badreq-guard"
     (bad / ".claude").mkdir(parents=True)
-    (bad / ".claude/gigaforge.json").write_text('["not", "an", "object"]')
+    (bad / ".claude/gigabrain.json").write_text('["not", "an", "object"]')
     r = subprocess.run([sys.executable, str(G / "global/hooks/guard.py")], capture_output=True, text=True, timeout=20,
                        env=ENV, input=json.dumps({"hook_event_name": "PreToolUse", "session_id": "b", "cwd": str(bad),
                                                   "tool_name": "Bash", "tool_input": {"command": "git reset --hard"}}))
-    check("guard: non-object gigaforge.json keeps the guard on (review #13)", r.returncode == 0 and '"ask"' in r.stdout)
+    check("guard: non-object gigabrain.json keeps the guard on (review #13)", r.returncode == 0 and '"ask"' in r.stdout)
     cfg = TMP / "eslint.config.mjs"
     cfg.write_text("export default []\n")
     edit = lambda s, prof="": json.loads(subprocess.run(
         [sys.executable, str(G / "global/hooks/guard.py")], capture_output=True, text=True, timeout=20,
         input=json.dumps({"hook_event_name": "PreToolUse", "session_id": s, "cwd": str(TMP), "tool_name": "Edit",
-                          "tool_input": {"file_path": str(cfg)}}), env={**ENV, "GIGAFORGE_HOOK_PROFILE": prof}).stdout or "{}")
+                          "tool_input": {"file_path": str(cfg)}}), env={**ENV, "GIGABRAIN_HOOK_PROFILE": prof}).stdout or "{}")
     check("config-protect: existing lint config denied (standard)", "hookSpecificOutput" in edit("c1"))
     check("config-protect: off in minimal profile", edit("c2", "minimal") == {})
     out = guard("PreToolUse", "c3", tool_name="Write", tool_input={"file_path": str(TMP / "new" / ".prettierrc")})
@@ -148,8 +148,8 @@ def guard_cases():
     off = subprocess.run([sys.executable, str(G / "global/hooks/guard.py")], capture_output=True, text=True, timeout=20,
                          input=json.dumps({"hook_event_name": "PreToolUse", "session_id": "d", "cwd": str(TMP),
                                            "tool_name": "Bash", "tool_input": {"command": "rm -rf src"}}),
-                         env={**ENV, "GIGAFORGE_DISABLED_HOOKS": "destructive"})
-    check("guard: GIGAFORGE_DISABLED_HOOKS switches a check off", off.stdout == "")
+                         env={**ENV, "GIGABRAIN_DISABLED_HOOKS": "destructive"})
+    check("guard: GIGABRAIN_DISABLED_HOOKS switches a check off", off.stdout == "")
 
 
 def handoff_cases():
@@ -183,7 +183,7 @@ def kit_cases():
     check("detect: nest+postgres+docker", {"nest", "postgres", "docker"} <= set(d["stacks"]))
     check("detect: real commands from package.json", d["commands"].get("build") == "npm run build")
     check("detect: risky script found", [".", "deploy"] in [list(x) for x in d["risky_scripts"]])
-    # 2026-10-03: unknown repos must not default to "own" (client memory would leak into gigaforge)
+    # 2026-10-03: unknown repos must not default to "own" (client memory would leak into gigabrain)
     r = kit("apply", str(repo))
     check("apply: unknown repo without --kind refuses", r.returncode != 0 and "--kind" in (r.stderr + r.stdout))
     dry = kit("apply", str(repo), "--kind", "own", "--memory", "selftest-mem", "--dry-run")
@@ -201,9 +201,9 @@ def kit_cases():
     before = local.read_text()
     kit("apply", str(repo))
     check("apply: idempotent (second apply changes nothing)", local.read_text() == before)
-    req = json.loads((repo / ".claude/gigaforge.json").read_text())
+    req = json.loads((repo / ".claude/gigabrain.json").read_text())
     req["exclude_stacks"] = ["docker"]
-    (repo / ".claude/gigaforge.json").write_text(json.dumps(req))
+    (repo / ".claude/gigabrain.json").write_text(json.dumps(req))
     kit("apply", str(repo))
     s = json.loads(local.read_text())
     check("exclude_stacks removes exactly that stack's rules",
@@ -216,25 +216,25 @@ def kit_cases():
     check("remove: only kit rules removed; user rule, env and edited CLAUDE.md kept",
           s["permissions"]["ask"] == ["Bash(mine)"] and s["env"] == {"X": "1"} and (repo / "CLAUDE.md").exists()
           and "autoMemoryDirectory" not in s)
-    check("remove: kit files and registry entry gone", not (repo / ".claude/gigaforge.json").exists()
+    check("remove: kit files and registry entry gone", not (repo / ".claude/gigabrain.json").exists()
           and str(repo) not in json.loads((TMP / "projects.json").read_text())["projects"])
     excl = (repo / ".git/info/exclude").read_text()
-    check("remove: .git/info/exclude cleaned", "gigaforge" not in excl)
-    # client: memory never points into gigaforge
+    check("remove: .git/info/exclude cleaned", "gigabrain" not in excl)
+    # client: memory never points into gigabrain
     crepo = TMP / "client"
     crepo.mkdir()
     subprocess.run(["git", "init", "-q", str(crepo)], check=True)
     (crepo / "package.json").write_text("{}")
     kit("apply", str(crepo), "--kind", "client")
     cs = json.loads((crepo / ".claude/settings.local.json").read_text())
-    check("client: no autoMemoryDirectory into gigaforge", str(G) not in cs.get("autoMemoryDirectory", ""))
+    check("client: no autoMemoryDirectory into gigabrain", str(G) not in cs.get("autoMemoryDirectory", ""))
     check("client: scaffold git-excluded", "CLAUDE.md" in (crepo / ".git/info/exclude").read_text())
     # 2026-10-03: CLAUDE.md exclude survives re-apply bookkeeping (was recorded on first apply only)
     kit("apply", str(crepo))
-    st = json.loads((crepo / ".claude/gigaforge.state.json").read_text())
+    st = json.loads((crepo / ".claude/gigabrain.state.json").read_text())
     check("client: re-apply still records the CLAUDE.md exclude it added",
           "CLAUDE.md" in next(o["patterns"] for o in st["ops"] if o["kind"] == "exclude"))
-    # 2026-10-03: own → client must drop kit's memory link into gigaforge
+    # 2026-10-03: own → client must drop kit's memory link into gigabrain
     srepo = TMP / "switch"
     srepo.mkdir()
     subprocess.run(["git", "init", "-q", str(srepo)], check=True)
@@ -242,7 +242,7 @@ def kit_cases():
     kit("apply", str(srepo), "--kind", "own", "--memory", "selftest-mem")
     kit("apply", str(srepo), "--kind", "client")
     ss = json.loads((srepo / ".claude/settings.local.json").read_text())
-    check("client switch: kit-owned memory link into gigaforge removed", str(G) not in ss.get("autoMemoryDirectory", ""))
+    check("client switch: kit-owned memory link into gigabrain removed", str(G) not in ss.get("autoMemoryDirectory", ""))
     # 2026-10-03: a user's own exclude line identical to kit's must survive remove
     urepo = TMP / "userexcl"
     urepo.mkdir()
@@ -282,9 +282,9 @@ def kit_cases():
     check("apply --all rejects --kind", r.returncode != 0)
     bad = TMP / "badreq-kit"
     (bad / ".claude").mkdir(parents=True)
-    (bad / ".claude/gigaforge.json").write_text('["x"]')
+    (bad / ".claude/gigabrain.json").write_text('["x"]')
     r = kit("apply", str(bad), "--kind", "lab")
-    check("non-object gigaforge.json: clear error", r.returncode != 0 and "JSON object" in (r.stderr + r.stdout))
+    check("non-object gigabrain.json: clear error", r.returncode != 0 and "JSON object" in (r.stderr + r.stdout))
     r = subprocess.run([sys.executable, str(G / "bin/kit"), "detect", "--json"], capture_output=True, text=True,
                        env=ENV, cwd=str(prepo))
     check("detect --json without a path uses .", r.returncode == 0 and json.loads(r.stdout)["repo"] == str(prepo))
@@ -315,8 +315,8 @@ if __name__ == "__main__":
             case()
         except Exception:  # one broken case must not hide the others
             check(f"{case.__name__} crashed: {traceback.format_exc().strip().splitlines()[-1]}", False)
-    # 2026-10-03: the selftest once created gigaforge/memory/app on every run
-    check("selftest leaves gigaforge/memory untouched", sorted(p.name for p in (G / "memory").iterdir()) == MEM_BEFORE)
+    # 2026-10-03: the selftest once created gigabrain/memory/app on every run
+    check("selftest leaves gigabrain/memory untouched", sorted(p.name for p in (G / "memory").iterdir()) == MEM_BEFORE)
     shutil.rmtree(TMP, ignore_errors=True)
     print(f"selftest: {len(fails)} failure(s)" + (f": {fails}" if fails else ""))
     sys.exit(1 if fails else 0)

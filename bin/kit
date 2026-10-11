@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""gigaforge kit: apply the brain + library to any project, and keep it healthy.
+"""gigabrain kit: apply the brain + library to any project, and keep it healthy.
 
     kit detect  <repo> [--json]        stacks (with evidence), package manager, real commands
     kit apply   <repo> [--kind own|lab|client] [--memory NAME] [--dry-run]
@@ -11,9 +11,9 @@
     kit budget                         always-loaded context cost (see bin/budget.py)
 
 Per project it owns two files, both git-excluded via .git/info/exclude:
-  .claude/gigaforge.json        the request: kind, memory, stack include/exclude, hook profile
+  .claude/gigabrain.json        the request: kind, memory, stack include/exclude, hook profile
                                  (edit it, then `kit apply <repo>` again)
-  .claude/gigaforge.state.json  what apply wrote, with hashes (for doctor / remove)
+  .claude/gigabrain.state.json  what apply wrote, with hashes (for doctor / remove)
 and writes: tagged permission entries + autoMemoryDirectory into .claude/settings.local.json
 (personal, never the team's settings.json), and a CLAUDE.md scaffold only if none exists
 (the scaffold is yours afterwards; kit never rewrites it).
@@ -23,11 +23,11 @@ import datetime, fnmatch, hashlib, json, os, pathlib, re, subprocess, sys
 
 G = pathlib.Path(__file__).resolve().parent.parent
 KIT = G / "kit"
-REGISTRY = pathlib.Path(os.environ.get("GIGAFORGE_KIT_REGISTRY", KIT / "projects.json"))  # tests point this elsewhere
+REGISTRY = pathlib.Path(os.environ.get("GIGABRAIN_KIT_REGISTRY", KIT / "projects.json"))  # tests point this elsewhere
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "venv", ".venv", "__pycache__", "coverage",
              "cdk.out", ".serverless", ".turbo", ".nx", "vendor", "target", ".terraform", ".claude"}
-MEMORY_ROOT = pathlib.Path(os.environ.get("GIGAFORGE_MEMORY_ROOT", G / "memory"))  # selftest redirects
-REQ, STATE = ".claude/gigaforge.json", ".claude/gigaforge.state.json"
+MEMORY_ROOT = pathlib.Path(os.environ.get("GIGABRAIN_MEMORY_ROOT", G / "memory"))  # selftest redirects
+REQ, STATE = ".claude/gigabrain.json", ".claude/gigabrain.state.json"
 LOCAL = ".claude/settings.local.json"
 HOOK_PROFILES = ("minimal", "standard", "strict")
 TODAY = datetime.date.today().isoformat()
@@ -264,7 +264,7 @@ def default_kind(repo):
 
 def default_memory(repo, kind):
     if kind == "client":
-        return None  # client facts never enter gigaforge
+        return None  # client facts never enter gigabrain
     return "newEra" if "newEra" in repo.parts else repo.name
 
 
@@ -274,7 +274,7 @@ def scaffold(repo, det, stacks, skills, checklists, notes):
     done = c.get("test") or "TODO"
     return f"""# {repo.name}
 
-<!-- Scaffold written by gigaforge `kit apply` on {TODAY}. It is yours now: kit never
+<!-- Scaffold written by gigabrain `kit apply` on {TODAY}. It is yours now: kit never
      rewrites it. Run /onboard-project to replace the TODOs with the real thing. -->
 
 ## What this is
@@ -364,9 +364,9 @@ def plan(repo, args):
     if req["kind"] == "client" and cur_mem and str(G) in cur_mem:
         if was_owned:
             unset_mem = True  # kit set it while the repo was own/lab: client facts must stay local
-            print(f"  {LOCAL}: client repo: removing kit's memory link into gigaforge ({cur_mem})")
+            print(f"  {LOCAL}: client repo: removing kit's memory link into gigabrain ({cur_mem})")
         else:
-            print(f"warn {LOCAL}: client repo memory points into gigaforge ({cur_mem}); fix by hand: client facts stay local")
+            print(f"warn {LOCAL}: client repo memory points into gigabrain ({cur_mem}); fix by hand: client facts stay local")
     ops.append({"kind": "settings", "path": LOCAL, "ask": sorted(set(add_ask + keep_ask)), "add": add_ask,
                 "drop": drop_ask, "memory": mem_op, "unset_memory": unset_mem,
                 "memory_owned": (bool(mem_op) or was_owned) and not unset_mem})
@@ -434,7 +434,7 @@ def apply(repo, args, dry):
                 print(f"  {ex}: +{', '.join(new)}")
                 if not dry:
                     ex.parent.mkdir(parents=True, exist_ok=True)
-                    ex.write_text("\n".join(cur + ["# gigaforge kit"] + new) + "\n")
+                    ex.write_text("\n".join(cur + ["# gigabrain kit"] + new) + "\n")
             # record only lines kit itself added (running union); a user's identical line is never ours
             added = [x for x in op["prev_added"] if x in cur] + [x for x in new if x not in op["prev_added"]]
             state_ops.append({"kind": "exclude", "path": str(ex), "patterns": added})
@@ -476,7 +476,7 @@ def doctor_global(r):
     want += [(home / "agents" / a.name, a) for a in (G / "global/agents").glob("*.md")]
     bad = [str(l.relative_to(home)) for l, t in want if not (l.is_symlink() and l.resolve() == t.resolve())]
     (r.err(f"{len(bad)} link(s) missing or wrong: {', '.join(bad[:6])}{'…' if len(bad) > 6 else ''} -> run bin/install.sh")
-     if bad else r.ok(f"{len(want)} links into gigaforge"))
+     if bad else r.ok(f"{len(want)} links into gigabrain"))
     settings = load_json(home / "settings.json", {})
     cmds = [h.get("command", "") for evs in settings.get("hooks", {}).values() for g in evs for h in g.get("hooks", [])]
     for h in sorted((G / "global/hooks").glob("*")):
@@ -543,7 +543,7 @@ def doctor_project(repo, r):
     mem = local.get("autoMemoryDirectory")
     if req.get("kind") == "client":
         if mem and str(G) in mem:
-            r.err("client repo memory points into gigaforge (client facts must stay local)")
+            r.err("client repo memory points into gigabrain (client facts must stay local)")
         else:
             r.ok("client: memory stays local")
     elif mem:
@@ -613,7 +613,7 @@ def remove(repo, dry):
             ex = pathlib.Path(op["path"])
             if ex.exists():
                 ours = set(op["patterns"])
-                lines = [l for l in ex.read_text().splitlines() if l not in ours and l != "# gigaforge kit"]
+                lines = [l for l in ex.read_text().splitlines() if l not in ours and l != "# gigabrain kit"]
                 print(f"  .git/info/exclude: -{len(op['patterns'])} pattern(s)")
                 if not dry:
                     ex.write_text("\n".join(lines) + ("\n" if lines else ""))
@@ -660,7 +660,7 @@ def main(argv):
         return 0
     if cmd == "apply":
         if pos[:1] == ["--all"] and opts:
-            sys.exit("kit: --kind/--memory apply to one repo; with --all each project keeps its own (edit its .claude/gigaforge.json)")
+            sys.exit("kit: --kind/--memory apply to one repo; with --all each project keeps its own (edit its .claude/gigabrain.json)")
         targets = sorted(registry()["projects"]) if pos[:1] == ["--all"] else pos[:1]
         if not targets:
             sys.exit("kit apply <repo> | --all")

@@ -1,4 +1,4 @@
-# gigaforge: working inside the brain repo
+# gigabrain: working inside the brain repo
 
 This repo is Giga's shared brain with Claude: curated habits, project memories,
 the skills/agents/hooks installed globally, and the record of how Giga's AI

@@ -31,12 +31,12 @@ do not ask and simply hand the work over.
   before they commit** — see [[secrets-land-in-readme]].
 
 **The `/retro` exception and project guards (2026-10-02):** `/retro` may commit
-and push gigaforge, but a session started inside a guarded client workspace has
-a PreToolUse hook that blocks *every* `git push`, gigaforge included. The local
+and push gigabrain, but a session started inside a guarded client workspace has
+a PreToolUse hook that blocks *every* `git push`, gigabrain included. The local
 branch also had no upstream set, so the helper's plain push failed first. Don't
 retry or route around the guard. Commit with `bin/brain-commit.sh`, then end the
 retro with the exact command for Giga to run:
-`! git -C <gigaforge> push --set-upstream origin master` (plain `push` once the
+`! git -C <gigabrain> push --set-upstream origin master` (plain `push` once the
 upstream exists).
 
 Related: [[working-style-interview-then-autonomous-loop]],

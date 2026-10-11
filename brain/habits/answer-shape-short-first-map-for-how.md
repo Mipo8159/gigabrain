@@ -15,7 +15,7 @@ Two shapes Giga keeps asking for:
 
 **Evidence:** 2026-10-01: "these are alot of instructions, please narrow it down
 to few usefull steps"; "what are these folders, how do they work?".
-2026-10-02: "are you aware of our gigaforge repo? how have you onboarded?" and
+2026-10-02: "are you aware of our gigabrain repo? how have you onboarded?" and
 "are we using agents? in what way? or hooks and skills?" — both answered with an
 inventory table + "not used, and why" + an untested-caveat, and Giga moved on
 without a follow-up.

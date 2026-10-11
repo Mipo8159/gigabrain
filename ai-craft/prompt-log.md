@@ -92,11 +92,11 @@ The goal is to *see* your own patterns change over the months.
 
 ## 2026-10-03: a long autonomous delegation (good scope, missing boundaries)
 - **Before:** "spend some more time, somewhere around 20-30 minutes, to reanalyze everything the ECC
-  repository does and absorb every precious detail into gigaforge … until we are left with a kit
+  repository does and absorb every precious detail into gigabrain … until we are left with a kit
   that is easy to use and adjust to all the existing projects."
-- **After:** "Absorb ECC's architecture into gigaforge as a kit for my projects. Done when: `kit
+- **After:** "Absorb ECC's architecture into gigabrain as a kit for my projects. Done when: `kit
   apply` works on a scratch clone and `kit doctor --all` is clean. Budget ~30 min. Allowed: edit
-  and test inside gigaforge + temp dirs. Not allowed without asking: other repos, ~/.claude,
+  and test inside gigabrain + temp dirs. Not allowed without asking: other repos, ~/.claude,
   commits, pushes."
 - **Why:** the goal and the time budget were clear, and the run was autonomous as wanted. But with
   no done-line or action boundary, Claude chose both. It stopped twice to hand back outward actions
@@ -137,7 +137,7 @@ The goal is to *see* your own patterns change over the months.
 - **Why:** the change was one line and needed no questions. But a default flip always raises two more decisions: rows that already exist, and what becomes visible. Claude had to hand both back as open questions at the end.
 
 ## 2026-10-06: "generate a new nestjs project … step by step" (rich goal, three tasks, no done-line)
-- **Before:** "please generate a new nestjs project, all is missue, this project should be split and evolved piece by piece … users, issues, audit-logs, search, analytcs, devices … Nestjs, kafka, sagas, postgres, elasticsearch … grpc for auth checks, clickhouse … another goal is to improve our gigaforge, which should definately be onboarded … teach me how to write better promps along the way"
+- **Before:** "please generate a new nestjs project, all is missue, this project should be split and evolved piece by piece … users, issues, audit-logs, search, analytcs, devices … Nestjs, kafka, sagas, postgres, elasticsearch … grpc for auth checks, clickhouse … another goal is to improve our gigabrain, which should definately be onboarded … teach me how to write better promps along the way"
 - **After:** "New Nest lab `newEra/tracker`, Jira domain, stack: <list>. Monolith first, one pattern per step, animated artifact per step. I write each step's core; you scaffold, test, visualise. Step 0 done when: compose + e2e green, an invalid transition returns 409, the artifact is published, kit doctor clean. ~3 h/week. issue-flow: delete after porting. Ask first: anything outside the repo."
 - **Why:** the stack and domain were complete, so one question batch was enough. Missing were the done-line, who codes, the pace, and the repo name. "all is missue" was unreadable, and issue-flow was deleted before anything could be ported from it.
 

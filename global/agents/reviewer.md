@@ -26,7 +26,7 @@ Look for, in this order:
 5. **Missing proof**: behaviour with no test or verification.
 
 **Stack checklists.** Before reviewing, list the changed files and Read the
-matching checklists from `/home/mip/Desktop/workdir/sweeft/gigaforge/library/checklists/`.
+matching checklists from `/home/mip/Desktop/workdir/sweeft/gigabrain/library/checklists/`.
 Load only the ones that match:
 
 | Diff touches | Checklist |

@@ -28,7 +28,7 @@ Progress (one source per run):
 
 ## Tier B: clone and learn from (hands-on reference code, not absorbed)
 
-Clone into `~/Desktop/workdir/sweeft/newEra/refs/` (outside gigaforge), run
+Clone into `~/Desktop/workdir/sweeft/newEra/refs/` (outside gigabrain), run
 locally, break things on purpose.
 
 | Repo | ★ | Licence | Learn | Note |
@@ -37,7 +37,7 @@ locally, break things on purpose.
 | [GoogleCloudPlatform/microservices-demo](https://github.com/GoogleCloudPlatform/microservices-demo) | 21k | Apache-2.0 | 10 services on Kubernetes + Istio: deploy, scale, inject failures, observe | run on kind / minikube |
 | [aws-samples/serverless-patterns](https://github.com/aws-samples/serverless-patterns) | 1.8k | MIT-0 (LICENSE file; API says NOASSERTION) | deployable SQS, SNS, EventBridge, Kinesis, Step Functions patterns | pick patterns that match auxiliary |
 | [practicajs/practica](https://github.com/practicajs/practica) | 1.7k | MIT | production-ready Node starter: testing, logging, config, error handling | compare with mogulkhan |
-| [oskardudycz/EventSourcing.NodeJS](https://github.com/oskardudycz/EventSourcing.NodeJS) | 0.5k | CC-BY-SA-4.0 | event sourcing in Node, step by step | pairs with issue-flow; share-alike, so never copy into gigaforge |
+| [oskardudycz/EventSourcing.NodeJS](https://github.com/oskardudycz/EventSourcing.NodeJS) | 0.5k | CC-BY-SA-4.0 | event sourcing in Node, step by step | pairs with issue-flow; share-alike, so never copy into gigabrain |
 | [kgrzybek/modular-monolith-with-ddd](https://github.com/kgrzybek/modular-monolith-with-ddd) | 14k | MIT | the most complete DDD reference app (modules, integration events, outbox) | .NET: read for design, not syntax |
 | [kelseyhightower/kubernetes-the-hard-way](https://github.com/kelseyhightower/kubernetes-the-hard-way) | 50k | Apache-2.0 | what k8s actually is underneath (certs, etcd, kubelet) | one weekend, optional |
 

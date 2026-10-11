@@ -1,6 +1,6 @@
 ---
 name: retro
-description: End-of-session learning — while the whole session is still in context, extract what's reusable, apply it straight to the gigaforge brain (habits, patterns, coaching focus, scorecard, journal, prompt log), secret-scan, commit and push gigaforge, and give Giga one concrete thing to do better next time. Use when Giga says /retro, "wrap up", "what did we learn", "save session knowledge", or is about to exit a meaningful session.
+description: End-of-session learning — while the whole session is still in context, extract what's reusable, apply it straight to the gigabrain brain (habits, patterns, coaching focus, scorecard, journal, prompt log), secret-scan, commit and push gigabrain, and give Giga one concrete thing to do better next time. Use when Giga says /retro, "wrap up", "what did we learn", "save session knowledge", or is about to exit a meaningful session.
 ---
 
 # Retro: learn from this session, update the brain, push
@@ -9,7 +9,7 @@ Giga asked for the brain to get smarter after every session, automatically,
 without collecting junk. This skill is the learner. It runs in-session, so it
 has the full context, and Giga is present when it pushes.
 
-`G` = `/home/mip/Desktop/workdir/sweeft/gigaforge`.
+`G` = `/home/mip/Desktop/workdir/sweeft/gigabrain`.
 
 ## 1. Gather (silently)
 
@@ -46,7 +46,7 @@ apply:**`, and two lines that make it recognisable later:
 | reusable technical decision / gotcha | `brain/patterns/<slug>.md` |
 | a prompt that went badly or well | `ai-craft/prompt-log.md` (before → after → why) |
 | a concept Giga engaged with | `me/concepts.md` (raise a level only on evidence) |
-| project-only fact | leave it to that project's auto-memory; not gigaforge |
+| project-only fact | leave it to that project's auto-memory; not gigabrain |
 | a library skill or reviewer checklist was used | `brain/library-ledger.md` (below) |
 
 **Library evidence** (the ledger is the only place imported knowledge earns
@@ -104,7 +104,7 @@ silently renamed a queue") or drop it.
   it, or cut its scope?
 - `me/journal/YYYY-MM-DD.md`: append one line: what Giga learned or decided.
 
-## 4. Commit and push gigaforge (Giga's standing request; gigaforge only)
+## 4. Commit and push gigabrain (Giga's standing request; gigabrain only)
 
 Commit **exactly the files you wrote in this retro**, nothing else:
 

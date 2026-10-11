@@ -1,7 +1,7 @@
-# Roadmap — close the gigaforge gaps, grow Giga's AI skill
+# Roadmap — close the gigabrain gaps, grow Giga's AI skill
 
 Agreed 2026-10-05. Pace: **~3 h/week** outside client work. Coaching: **firm**.
-Each phase fixes one gigaforge gap *and* trains one Claude skill on Giga's side.
+Each phase fixes one gigabrain gap *and* trains one Claude skill on Giga's side.
 Progress is tracked where it already lives: `/retro` rows in `me/scorecard.md`,
 the monthly re-score, and the `Now:` line below, which the coach hook injects
 into every session. No second tracker.

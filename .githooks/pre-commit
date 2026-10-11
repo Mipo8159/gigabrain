@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Secret scan for gigaforge. Runs on `git commit` (core.hooksPath=.githooks),
+# Secret scan for gigabrain. Runs on `git commit` (core.hooksPath=.githooks),
 # or by hand: .githooks/pre-commit --all
 # Prints file:line and the pattern NAME only — never the matched value.
 cd "$(dirname "$(readlink -f "$0")")/.." || exit 1   # always the repo root

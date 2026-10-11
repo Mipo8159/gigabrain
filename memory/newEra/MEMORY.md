@@ -1,4 +1,4 @@
-- [gigaforge is the brain](gigaforge-is-the-brain.md) — cross-project habits live in gigaforge/brain (loaded via ~/.claude/CLAUDE.md); this folder holds newEra-only facts.
+- [gigabrain is the brain](gigabrain-is-the-brain.md) — cross-project habits live in gigabrain/brain (loaded via ~/.claude/CLAUDE.md); this folder holds newEra-only facts.
 - [Same setup from either folder](session-setup-works-from-either-folder.md) — newEra and newEra/mogulkhan share one memory dir and one skill set.
 - [The MCP server is a teaching exercise](mcp-server-is-a-teaching-exercise.md) — rationale over speed; the README's "not implemented" list is a syllabus.
 - [auctionize is serverless AWS, no local stack](auctionize-is-serverless-aws-no-local-stack.md) — no tests, no LocalStack; tsc + sls package can all pass on a broken deploy, so probe the bundle too.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Adapt upstream skills into gigaforge/library/skills, deterministically.
+"""Adapt upstream skills into gigabrain/library/skills, deterministically.
 
     bin/absorb-adapt.py <source> [--sha SHA] [skill ...]
 
@@ -15,7 +15,7 @@ of upstream files never to copy, markdown included).
 
 Transforms: new frontmatter with provenance; drop sections named in
 edits.<skill>.drop_sections; apply edits.<skill>.replace [[old, new], ...]; replace "Related" sections with links to what
-gigaforge actually has (keeping licence credits); rename renamed skills in the body. Prints WARN lines
+gigabrain actually has (keeping licence credits); rename renamed skills in the body. Prints WARN lines
 for upstream-specific text it can't fix, for /absorb to handle via an edit rule.
 """
 import fnmatch, json, pathlib, re, shutil, subprocess, sys

@@ -40,7 +40,7 @@ Rules:
 - **Argue the split.** Parallelism has costs: cold-start context, merge
   conflicts, and Giga's attention. Say which part stays serial and why. A small
   single-file fix does not get a worktree.
-- **Separate agent configs** live in `gigaforge/global/agents/`: `researcher`,
+- **Separate agent configs** live in `gigabrain/global/agents/`: `researcher`,
   `reviewer`, `verifier` (added 2026-10-02 after Claude called a diagnosis
   "confirmed" too early). Propose a new role only when a session shows it would
   have been used, never pre-emptively.

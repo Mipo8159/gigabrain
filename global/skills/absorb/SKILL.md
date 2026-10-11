@@ -1,6 +1,6 @@
 ---
 name: absorb
-description: Import or refresh outside knowledge (skills, agents, checklists) from an upstream source such as the ECC repo into gigaforge/library — triage against Giga's stack, adapt with provenance, pin the upstream commit, and later diff upstream changes since the pin. Use when Giga says /absorb, "absorb X", "pull the good parts of <repo>", "update the library", "what changed in ECC", or when /curate reports library drift.
+description: Import or refresh outside knowledge (skills, agents, checklists) from an upstream source such as the ECC repo into gigabrain/library — triage against Giga's stack, adapt with provenance, pin the upstream commit, and later diff upstream changes since the pin. Use when Giga says /absorb, "absorb X", "pull the good parts of <repo>", "update the library", "what changed in ECC", or when /curate reports library drift.
 ---
 
 # Absorb: learn from outside sources, not only from our own sessions
@@ -11,7 +11,7 @@ the level of whatever we happened to hit this week. What is read lands in
 `library/`; it only counts as earned once `brain/library-ledger.md` holds
 evidence for it. Read `G/library/README.md` first; it is the contract.
 
-`G` = `/home/mip/Desktop/workdir/sweeft/gigaforge`.
+`G` = `/home/mip/Desktop/workdir/sweeft/gigabrain`.
 
 Modes: `/absorb <source>` (first import or add items), `/absorb <source> --update`
 (refresh to upstream HEAD), `/absorb <git-url>` (new source).
@@ -27,7 +27,7 @@ own tooling) and anything an installed plugin already covers officially.
 
 ## 2. Triage (then one approval)
 
-- **New source:** clone it read-only next to gigaforge
+- **New source:** clone it read-only next to gigabrain
   (`/home/mip/Desktop/workdir/sweeft/<name>`), check the licence (no licence or
   non-permissive → stop and tell Giga), add an entry to `library/sources.json`.
 - **`--update`:** `git -C <local> fetch`, then `bin/check-library.py --drift`.

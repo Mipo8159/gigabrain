@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate gigaforge/library against library/sources.json.
+"""Validate gigabrain/library against library/sources.json.
 
     bin/check-library.py           structure, provenance, reproducibility, credits
     bin/check-library.py --drift   also list upstream commits since each pin
@@ -99,7 +99,7 @@ def check_names(sources):
         if d.name not in mine:
             fail(f"skills/{d.name}: not in sources.json")
     for n in sorted(mine & ({p.name for p in (G / "global/skills").iterdir()} | BUILTIN)):
-        fail(f"skills/{n}: name collides with a gigaforge or built-in skill")
+        fail(f"skills/{n}: name collides with a gigabrain or built-in skill")
     home = pathlib.Path.home() / ".claude/skills"
     for n in sorted(mine):
         p = home / n

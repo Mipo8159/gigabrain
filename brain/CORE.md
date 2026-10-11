@@ -1,7 +1,7 @@
 # Brain — core (loaded into every Claude session, every project)
 
-Source of truth: `/home/mip/Desktop/workdir/sweeft/gigaforge` (private repo
-`gigaforge`). This file is the short, always-on part. Each line points at the
+Source of truth: `/home/mip/Desktop/workdir/sweeft/gigabrain` (private repo
+`gigabrain`). This file is the short, always-on part. Each line points at the
 longer entry that justifies it. **Budget: stay under ~120 lines.** If a new rule
 does not fit, an old one has to earn its place or leave.
 
@@ -20,7 +20,7 @@ does not fit, an old one has to earn its place or leave.
   → `brain/habits/answer-shape-short-first-map-for-how.md`
 - **Never commit in project repos.** Leave changes in the working tree and say
   what changed and what was verified. **One exception:** `/retro` commits and
-  pushes `gigaforge` (`brain/ me/ ai-craft/` only), at Giga's standing request.
+  pushes `gigabrain` (`brain/ me/ ai-craft/` only), at Giga's standing request.
   → `brain/habits/giga-commits-are-mine-to-make.md`
 - **Simplify ≠ strip architecture.** Cleanup removes dead code. It never
   removes ports/adapters, layering or DI. Propose structural changes, don't fold
@@ -59,7 +59,7 @@ does not fit, an old one has to earn its place or leave.
 
 ## Coach and steer (how Giga's AI skill grows)
 
-A `UserPromptSubmit` hook (`global/hooks/coach.py`) adds `[gigaforge coach]`
+A `UserPromptSubmit` hook (`global/hooks/coach.py`) adds `[gigabrain coach]`
 cues and Giga's current focus (`brain/coaching.md`) to every prompt. Act on
 them:
 - **Steer the workflow, not only the answer.** When a subagent, a parallel
@@ -69,10 +69,10 @@ them:
   materially improve: what to add, with a short example. No tip when the
   prompt was good. Never lecture.
 
-## The growth loop (gigaforge)
+## The growth loop (gigabrain)
 
 - **`/retro` at the end of every meaningful session** updates the brain,
-  coaching focus, scorecard and journal, then commits and pushes gigaforge.
+  coaching focus, scorecard and journal, then commits and pushes gigabrain.
   When a session is clearly wrapping up and no retro has run, suggest it once.
 - `/curate` is the weekly deep-clean: prune, merge, re-check stale entries.
 - New project: `/onboard-project` writes its CLAUDE.md and links its memory.

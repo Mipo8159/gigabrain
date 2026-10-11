@@ -1,6 +1,6 @@
 ---
 name: curate
-description: Promote or discard the harvest candidates waiting in gigaforge/inbox/ — move the few that earn it into brain/ (habits, patterns, CORE.md) or a project's memory, update Giga's scorecard, concepts and journal, and prune stale brain entries. Use when Giga says /curate, "curate the brain", "process the inbox", or when a session-start note says candidates are waiting.
+description: Promote or discard the harvest candidates waiting in gigabrain/inbox/ — move the few that earn it into brain/ (habits, patterns, CORE.md) or a project's memory, update Giga's scorecard, concepts and journal, and prune stale brain entries. Use when Giga says /curate, "curate the brain", "process the inbox", or when a session-start note says candidates are waiting.
 ---
 
 # Curate the brain
@@ -9,7 +9,7 @@ The inbox is untrusted. The brain is what every future session reads first, so
 every line in it costs attention in every project. **Your job is mostly to say
 no.** A good run promotes 0–3 things and deletes the rest.
 
-Repo: `/home/mip/Desktop/workdir/sweeft/gigaforge` (call it `G`).
+Repo: `/home/mip/Desktop/workdir/sweeft/gigabrain` (call it `G`).
 
 ## 1. Load
 

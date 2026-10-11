@@ -122,7 +122,7 @@ MACHINE_PREFIXES = ("Another Claude session sent a message", "[SYSTEM NOTIFICATI
 
 
 def main():
-    if os.environ.get("GIGAFORGE_HARVEST"):
+    if os.environ.get("GIGABRAIN_HARVEST"):
         return
     try:
         data = json.load(sys.stdin)
@@ -139,7 +139,7 @@ def main():
     out, flags = cues(p, data.get("cwd", ""))
 
     try:
-        if os.environ.get("GIGAFORGE_NO_SIGNALS"):
+        if os.environ.get("GIGABRAIN_NO_SIGNALS"):
             raise OSError("test run")
         SIGNALS.parent.mkdir(exist_ok=True)
         with SIGNALS.open("a") as f:
@@ -152,7 +152,7 @@ def main():
     focus = FOCUS.read_text().strip() if FOCUS.exists() else ""
     sid = data.get("session_id", "")
     first = False
-    if sid and not os.environ.get("GIGAFORGE_NO_SIGNALS"):
+    if sid and not os.environ.get("GIGABRAIN_NO_SIGNALS"):
         try:
             seen = SEEN.read_text().split() if SEEN.exists() else []
             if sid not in seen:
@@ -164,7 +164,7 @@ def main():
         focus = ""   # repeat the focus only when a cue makes it relevant
     if not out and not focus:
         return
-    lines = ["[gigaforge coach] Hidden context, don't quote it."]
+    lines = ["[gigabrain coach] Hidden context, don't quote it."]
     if out:
         lines.append("Cues for this prompt:")
         lines += [f"- {c}" for c in out]

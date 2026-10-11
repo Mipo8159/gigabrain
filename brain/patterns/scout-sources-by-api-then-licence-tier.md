@@ -9,7 +9,7 @@ Scouting outside knowledge sources (skill packs, reference apps, learning
 corpora) is a two-step job. First pull the facts from the GitHub API, not from
 search snippets: stars, last push, licence. Then put each repo in one tier:
 **absorb** (permissive licence and AI-shaped content), **clone and run**
-(reference code, kept outside gigaforge), or **read only** (no licence,
+(reference code, kept outside gigabrain), or **read only** (no licence,
 NOASSERTION or share-alike).
 
 **Why:** on 2026-10-05, while looking for repos like ECC, search results

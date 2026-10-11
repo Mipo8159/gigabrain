@@ -2,7 +2,7 @@
 
 `brain/` holds what Giga and Claude learned the hard way: corrections,
 incidents, verified results. `library/` holds what we **read**: skills and
-checklists absorbed from outside sources (ECC first), adapted to gigaforge and
+checklists absorbed from outside sources (ECC first), adapted to gigabrain and
 pinned to an upstream commit. A library entry is a textbook chapter. It only
 becomes knowledge once a real session shows it working.
 
