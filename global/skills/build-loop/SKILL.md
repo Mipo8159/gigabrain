@@ -116,7 +116,12 @@ dependency to install — you handle. That is the deal.
 
 ## Phase 4 — Report
 
-Run the full verify set once more, cleanly, then report:
+Run the full verify set once more, cleanly. If the diff is over ~100 lines or
+touches business rules, launch `intent-reviewer` with the user's **original
+request** (their words or ticket) as the requirement and the contract file as
+a secondary, *claimed* source, plus `reviewer`; run both in the background.
+Passing criteria prove what you wrote down; this checks it against what was asked.
+Fix its blockers, then report:
 
 - each criterion, its command, and the evidence it passed
 - anything left red or skipped, stated plainly — never round up to "done"

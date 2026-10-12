@@ -1,0 +1,3 @@
+{"kind": "gap",
+ "gap": "both of these: (1) R2 is not fully implemented although the submission notes claim it is done: ContentService.update / PATCH /content/:id never checks that the content is PENDING, so APPROVED or REJECTED content can still be edited (no 409); and (2) R5 is missing: ExternalContentService.approve creates the reel/lesson with regionId null instead of the content's regionId",
+ "plan": true}

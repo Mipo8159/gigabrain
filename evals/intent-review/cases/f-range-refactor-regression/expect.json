@@ -1,0 +1,1 @@
+{"kind": "gap", "gap": "AC2 is broken: listByRegion no longer filters out soft-deleted rows (the deletedAt filter added in the first commit was dropped by the later repository tidy commit), so deleted content still appears in listings, and no test covers listings"}

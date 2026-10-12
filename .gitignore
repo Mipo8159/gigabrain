@@ -5,3 +5,4 @@ inbox/*
 *.local.json
 node_modules/
 __pycache__/
+evals/**/.out/

@@ -1,0 +1,1 @@
+{"kind": "gap", "gap": "AC1 is contradicted: PREMIUM creators are capped at 100 pending items (PENDING_LIMITS.PREMIUM = 100, \"effectively unlimited\") instead of unlimited, so the 101st PREMIUM upload gets a 429; the PREMIUM test only checks 50"}

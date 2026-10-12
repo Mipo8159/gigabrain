@@ -1,0 +1,1 @@
+{"kind": "gap", "gap": "AC2 is missing: update() never checks the status, so APPROVED or REJECTED content can still be edited instead of returning 409"}

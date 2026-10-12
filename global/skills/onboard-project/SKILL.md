@@ -12,7 +12,9 @@ everywhere…") is a CLAUDE.md line that didn't exist yet. This skill writes it 
 
 Ask together: Is this a client repo (confidential) or Giga's own? Learning lab
 or production work? Anything Claude must never touch (prod DBs, running
-services, branches)? Shared memory with sibling repos, or its own?
+services, branches)? Shared memory with sibling repos, or its own? Up to 3
+business rules that must never break (seed `<memory dir>/business-invariants.md`,
+format in skill `intent-review`; skip if none yet)?
 
 ## 1b. Detect and apply the kit (deterministic, before any prose)
 

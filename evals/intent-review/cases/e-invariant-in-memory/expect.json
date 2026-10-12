@@ -1,0 +1,1 @@
+{"kind": "gap", "gap": "approveBulk publishes every item as a reel regardless of type, so a LESSON approved in bulk becomes a public reel instead of a lesson in its course, breaking the stored invariant INV-1 (a LESSON never becomes a reel)"}

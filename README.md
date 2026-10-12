@@ -56,7 +56,7 @@ weaknesses you've fixed drop off, and new repeated ones get added.
 | `/build-loop` | "build this until it works, don't keep asking me" |
 | `/absorb` | pull improvements from an upstream source (ECC) into `library/` |
 | `kit apply <repo>` · `kit doctor --all` | wire any project; check every project's health |
-| agents: `reviewer`, `researcher`, `verifier` | review with stack checklists; cited research; rerun-the-repro proof |
+| agents: `reviewer`, `intent-reviewer`, `researcher`, `verifier` | review with stack checklists; diff vs business requirement (+ skill `/intent-review`); cited research; rerun-the-repro proof |
 
 ## Setup (also on a new machine)
 

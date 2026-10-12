@@ -22,6 +22,7 @@ skill grows. `brain/CORE.md` is already loaded (via `~/.claude/CLAUDE.md`).
 | `me/journal/` | one file per day, 3 lines per session | `/curate` |
 | `ai-craft/` | Track 0: drills + prompt log | Giga + Claude |
 | `global/` | installed into `~/.claude` by `bin/install.sh` (symlinks) | edit here, never in ~/.claude |
+| `evals/` | agent evals with fixtures (`bin/eval-intent` for `intent-reviewer`); rerun after editing that agent | Claude |
 
 ## Rules for this repo
 

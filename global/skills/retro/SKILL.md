@@ -47,6 +47,7 @@ apply:**`, and two lines that make it recognisable later:
 | a prompt that went badly or well | `ai-craft/prompt-log.md` (before → after → why) |
 | a concept Giga engaged with | `me/concepts.md` (raise a level only on evidence) |
 | project-only fact | leave it to that project's auto-memory; not gigabrain |
+| a business rule a change broke, nearly broke, or `intent-reviewer` proposed | that project's `<memory dir>/business-invariants.md` (format in skill `intent-review`); client repos too, since it stays local |
 | a library skill or reviewer checklist was used | `brain/library-ledger.md` (below) |
 
 **Library evidence** (the ledger is the only place imported knowledge earns
