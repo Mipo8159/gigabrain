@@ -6,7 +6,7 @@ Progress is tracked where it already lives: `/retro` rows in `me/scorecard.md`,
 the monthly re-score, and the `Now:` line below, which the coach hook injects
 into every session. No second tracker.
 
-**Now:** Phase 1, step 1 — verify per-project plugin scoping + `claude plugin eval` against live docs (claude-code-guide / researcher), then Giga launches the plugin worktree (`claude -w plugin`).
+**Now:** Phase 2, step 1 — Giga launches `claude -w routine` (the worktree practice phase 1 skipped). There: make `coach.py` skip subagent hand-backs and `claude -p` probe sessions (they pollute signals), then a headless weekly job (`signals-report` + `check-library --drift` + `bin/eval-skills`) that writes a report for `/curate`, never a push.
 
 `/retro` moves the `Now:` line and ticks a phase only when its proof is shown.
 
@@ -15,7 +15,7 @@ into every session. No second tracker.
 | # | Due | Gap it closes | Claude skill Giga practises | Done when (proof) | Who | Status |
 |---|---|---|---|---|---|---|
 | 0 | 2026-10-05 | no roadmap; coach can't see it; stale SessionEnd wording | first prompt with done + env + scope | this file exists; coach hook prints `Now:` + firm cue on a sample prompt; secret scan passes | Claude | done 2026-10-05 |
-| 1 | 2026-10-18 | every library skill loads globally (noise, context); no trigger tests; setup tied to `~/.claude` symlinks | plan mode; **Giga launches the worktree** (`claude -w plugin`) | docs checked first; off-stack skills retired via `sources.json`; `claude plugin eval` green for the 7 core skills; a NestJS-repo session no longer lists homelab/network skills | Giga launches, Claude builds | |
+| 1 | 2026-10-18 | every library skill loads globally (noise, context); no trigger tests; setup tied to `~/.claude` symlinks | plan mode; **Giga launches the worktree** (`claude -w plugin`) | docs checked first; off-stack skills retired via `sources.json`; `claude plugin eval` green for the 7 core skills; a NestJS-repo session no longer lists homelab/network skills | Giga launches, Claude builds | done 2026-10-12 (16 skills → `homelab`/`media`/`content` plugins via `library/plugins.json`; eval 9/9; scratch Nest repo 0 vs 10. Worktree practice not done, moved to phase 2) |
 | 2 | 2026-10-25 | Automation = 0 (scorecard dim 10) | `/schedule` routine, headless `claude -p` | one weekly routine has run: signals report + ECC drift check, output as a report/PR for `/curate` (never a direct push) | both | |
 | 3 | 2026-11-08 | no Kafka knowledge; Giga hasn't coded in any logged session | `tutor` — **Giga writes the core** | Kafka skill written from live docs (`researcher`); one tracker step core coded by Giga (step 0 `workflow.ts` is first), tests green; skill confidence ≥ 0.5 | **Giga codes** | |
 | 4 | 2026-11-15 | no PHP/Bitrix knowledge (lutecia) | `researcher` + `verifier` on a remote-only target | generic Bitrix/PHP skill from live docs (no client facts); used in one lutecia session; ledger evidence line | both | |

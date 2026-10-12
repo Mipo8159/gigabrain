@@ -40,14 +40,14 @@ Evidence is one dated, generalised line: no client names, URLs or schemas.
 | checklist `go` | ecc | 2026-10-03 | 0.4 | — |
 | checklist `database` | ecc | 2026-10-03 | 0.6 | 2026-10-05 · read-only MSSQL ETL · date-literal language trap, nondeterministic STRING_AGG, join-multiplied keys were real; 2026-10-06 · Nest lab monolith · migrations-on-boot replica race, unindexed membership lookup, int4 overflow → 500 were real |
 | checklist `security` | ecc | 2026-10-03 | 0.7 | 2026-10-03 · own config/security tooling · secret-masking and unsafe-default findings were real; 2026-10-05 · PII exporter · unkeyed phone hash reversible, world-readable state, guard-regex bypasses were real; 2026-10-06 · Nest lab auth baseline · query params with PII in default error logs, unvalidated JWT secret, deactivated-user token window were real |
-| checklist `silent-failures` | ecc | 2026-10-03 | 0.7 | 2026-10-03 · own python tooling · fail-open hook paths and swallowed errors were real findings; 2026-10-05 · cron exporter · cursor advanced on partial run (silent data loss) was a real blocker; 2026-10-06 · Nest lab · readiness catch discarding the cause, display code inside a write transaction were real |
+| checklist `silent-failures` | ecc | 2026-10-03 | 0.8 | 2026-10-03 · own python tooling · fail-open hook paths and swallowed errors were real findings; 2026-10-05 · cron exporter · cursor advanced on partial run (silent data loss) was a real blocker; 2026-10-06 · Nest lab · readiness catch discarding the cause, display code inside a write transaction were real; 2026-10-12 · own python checker · unchecked `diff` exit code (exit 2 passes silently) was a real finding |
 | skill `contract-first` | ecc | 2026-10-03 | 0.4 | — |
 | skill `council` | ecc | 2026-10-03 | 0.4 | — |
 | skill `production-audit` | ecc | 2026-10-03 | 0.4 | — |
 | skill `architecture-decision-records` | ecc | 2026-10-03 | 0.4 | — |
 | skill `loop-design-check` | ecc | 2026-10-03 | 0.4 | — |
 | checklist `types` | ecc | 2026-10-03 | 0.4 | — |
-| checklist `tests` | ecc | 2026-10-03 | 0.5 | 2026-10-06 · Nest lab · missing IDOR, viewer-write, forged-token and failed-write atomicity cases were real gaps; all added |
+| checklist `tests` | ecc | 2026-10-03 | 0.6 | 2026-10-06 · Nest lab · missing IDOR, viewer-write, forged-token and failed-write atomicity cases were real gaps; all added; 2026-10-12 · own python checker · new failure paths had no tests; real gap, closed with mutation runs |
 | skill `error-handling` | ecc | 2026-10-03 | 0.4 | — |
 | skill `mcp-server-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `e2e-testing` | ecc | 2026-10-03 | 0.4 | — |

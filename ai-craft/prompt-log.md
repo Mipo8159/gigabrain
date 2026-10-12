@@ -146,3 +146,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "allright, buld the audit mode, I need to have the abiliy to analyze and plan accross codebase. read requirements, and potential submission or claim file … then plan ahead and analyze what is going on and give out suggestions around it."
 - **After:** "Build audit mode for intent-reviewer: whole repo + requirements file + optional claims file → status per rule with file:line, overclaims, ranked fix plan, no fixes. Done when bin/eval-intent passes the old 7 cases plus one new audit case. Budget: ≤10 agent runs (I'm on Pro)."
 - **Why:** the scope was clear and Claude had already proposed the proof one turn earlier, but the prompt didn't adopt it, so the done-line and the run budget (which mattered after the usage question) were Claude's guess.
+
+## 2026-10-12: "help me improve the gigabrain … use claude AI to its best capacity" (goal without target)
+- **Before:** "help me improve the gigabrain by adding more features to it, or by expanding its knoweledge. the goal is to use claude AI to its best capacity"
+- **After:** "Do the roadmap `Now:` step (phase 1: plugin scoping). Done when `claude plugin eval` is green for the core skills and a Nest repo lists no homelab skills. Budget 2 h, install allowed, ask before touching other repos. Retire: network/homelab/seo; opt-in: media, content."
+- **Why:** "more features or more knowledge" points the wrong way. 52 library entries were still unproven, and the gaps scored 0 were habits, not knowledge. The roadmap already named the next step, and the coach hook injects it into every prompt. Claude spent one turn steering back to it plus a 4-question batch.

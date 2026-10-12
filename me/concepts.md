@@ -23,6 +23,7 @@ else, or a doc, get it). Raise a level only on evidence, and record the evidence
 | Kubernetes | k8s | — | — | track 3 |
 | Role-based access at the API layer | security | seen | 2026-10-02: UI-only role gate vs server route | explain: why hiding a button isn't access control |
 | Context engineering (CLAUDE.md, memory, skills) | ai | explain | built gigabrain with Claude | build: own skill with evals |
+| Plugin scoping + skill-trigger evals | ai | seen | 2026-10-12: chose the opt-in bundles; Claude built `library/plugins` + `bin/eval-skills` (9/9) | explain: why the description decides whether a skill triggers; then write one trigger case yourself |
 | Agent orchestration (subagents, background review, worktrees, hooks as guards) | ai | seen | 2026-10-02: asked how agents/hooks/skills were used; saw a background reviewer catch a rollout risk | build: launch a worktree session yourself for a parallel half |
 | Agent loops / tool use / MCP | ai | seen | `mcp/` teaching server | build: finish the README syllabus |
 | Optimistic concurrency (version compare-and-set, lost update) | data | seen | 2026-10-06: tracker step 0 visual + e2e race test (Claude-built) | explain: answer the step-0 check-yourself questions |
