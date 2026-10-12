@@ -14,6 +14,7 @@
 #   5. memory: prune the 6 promoted habits from memory/newEra/MEMORY.md, fix links
 #   6. newEra repos: autoMemoryDirectory -> gigabrain/memory/newEra
 #   7. git: core.hooksPath=.githooks (secret scan on commit), if this is a repo
+#   7b. ~/.gitconfig include.path    -> global/gitconfig (shared aliases, e.g. git last)
 set -euo pipefail
 G="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 C="$HOME/.claude"
@@ -107,6 +108,12 @@ if git -C "$G" rev-parse --git-dir >/dev/null 2>&1; then
   git -C "$G" config core.hooksPath .githooks; echo "  core.hooksPath=.githooks"
 else
   echo "  not a git repo yet: re-run after 'git init'"
+fi
+echo "7b. git aliases (global/gitconfig via include.path)"
+if git config --global --get-all include.path 2>/dev/null | grep -qxF "$G/global/gitconfig"; then
+  echo "  already included"
+else
+  git config --global --add include.path "$G/global/gitconfig"; echo "  ~/.gitconfig includes $G/global/gitconfig"
 fi
 echo "8. health"
 "$G/bin/kit" doctor || echo "  (doctor reported errors above; fix them, then re-run)"

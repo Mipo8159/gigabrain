@@ -1,0 +1,5 @@
+# Shared git aliases. bin/install.sh adds this file to ~/.gitconfig as an include.path,
+# so edits here go live on every machine after a pull, with no re-install.
+[alias]
+	# git last [-N] [log args]: hash, author <email>, date (relative), subject on the next line
+	last = log -10 --pretty=format:'%C(yellow)%h%Creset  %C(cyan)%an <%ae>%Creset  %C(green)%ad%Creset (%ar)%n         %s' --date=format:'%Y-%m-%d %H:%M'
