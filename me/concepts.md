@@ -28,3 +28,4 @@ else, or a doc, get it). Raise a level only on evidence, and record the evidence
 | Optimistic concurrency (version compare-and-set, lost update) | data | seen | 2026-10-06: tracker step 0 visual + e2e race test (Claude-built) | explain: answer the step-0 check-yourself questions |
 | Monolith-first service extraction (strangler) | distributed | seen | 2026-10-06: chose "monolith, then extract" for tracker | build: tracker step 1 (users/auth → gRPC) |
 | State machine as a pure domain function | design | seen | 2026-10-06: tracker workflow.ts spec handed over | **build**: implement workflow.ts (tutor) |
+| Requirements traceability / spec-vs-delivery audit | review | explain | 2026-10-12: described the interview task (requirements + claims vs code, plan without fixing) and asked for the tool; practice repos built with answer keys | **build**: audit a practice repo by hand, score vs key |

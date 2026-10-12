@@ -141,3 +141,8 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "New Nest lab `newEra/tracker`, Jira domain, stack: <list>. Monolith first, one pattern per step, animated artifact per step. I write each step's core; you scaffold, test, visualise. Step 0 done when: compose + e2e green, an invalid transition returns 409, the artifact is published, kit doctor clean. ~3 h/week. issue-flow: delete after porting. Ask first: anything outside the repo."
 - **Why:** the stack and domain were complete, so one question batch was enough. Missing were the done-line, who codes, the pace, and the repo name. "all is missue" was unreadable, and issue-flow was deleted before anything could be ported from it.
 
+
+## 2026-10-12: "build the audit mode … read requirements, and potential submission or claim file … give out suggestions"
+- **Before:** "allright, buld the audit mode, I need to have the abiliy to analyze and plan accross codebase. read requirements, and potential submission or claim file … then plan ahead and analyze what is going on and give out suggestions around it."
+- **After:** "Build audit mode for intent-reviewer: whole repo + requirements file + optional claims file → status per rule with file:line, overclaims, ranked fix plan, no fixes. Done when bin/eval-intent passes the old 7 cases plus one new audit case. Budget: ≤10 agent runs (I'm on Pro)."
+- **Why:** the scope was clear and Claude had already proposed the proof one turn earlier, but the prompt didn't adopt it, so the done-line and the run budget (which mattered after the usage question) were Claude's guess.
