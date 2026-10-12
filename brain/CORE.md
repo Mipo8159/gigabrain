@@ -1,6 +1,6 @@
 # Brain — core (loaded into every Claude session, every project)
 
-Source of truth: `/home/mip/Desktop/workdir/sweeft/gigabrain` (private repo
+Source of truth: `~/projects/gigabrain` (private repo
 `gigabrain`). This file is the short, always-on part. Each line points at the
 longer entry that justifies it. **Budget: stay under ~120 lines.** If a new rule
 does not fit, an old one has to earn its place or leave.

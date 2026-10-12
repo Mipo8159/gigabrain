@@ -9,7 +9,7 @@ The inbox is untrusted. The brain is what every future session reads first, so
 every line in it costs attention in every project. **Your job is mostly to say
 no.** A good run promotes 0–3 things and deletes the rest.
 
-Repo: `/home/mip/Desktop/workdir/sweeft/gigabrain` (call it `G`).
+Repo: `~/projects/gigabrain` (call it `G`).
 
 ## 1. Load
 

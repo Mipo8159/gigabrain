@@ -11,7 +11,9 @@ Exit 1 on any failure.
 import json, os, pathlib, subprocess, sys, tempfile
 
 G = pathlib.Path(__file__).resolve().parent.parent
-TMP = pathlib.Path(tempfile.mkdtemp(prefix="gf-selftest-", dir=os.environ.get("TMPDIR")))
+# .resolve(): on macOS /var and /tmp are symlinks to /private/..., and kit reports realpaths
+# (2026-10-12: "detect --json without a path uses ." failed on the Mac only).
+TMP = pathlib.Path(tempfile.mkdtemp(prefix="gf-selftest-", dir=os.environ.get("TMPDIR"))).resolve()
 ENV = {**os.environ, "GIGABRAIN_KIT_REGISTRY": str(TMP / "projects.json"), "XDG_RUNTIME_DIR": str(TMP / "rt"),
        "GIGABRAIN_MEMORY_ROOT": str(TMP / "memory"), "TMPDIR": str(TMP),
        "GIGABRAIN_HOOK_PROFILE": "", "GIGABRAIN_DISABLED_HOOKS": ""}

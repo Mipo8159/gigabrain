@@ -5,8 +5,9 @@
 
 Reads each skill from the source's git object store at SHA (default: the
 source's pinned_sha in library/sources.json), never from its working tree, so
-the result is reproducible. Writes library/skills/<local-name>/, replacing what
-is there. Re-running at a newer SHA is how /absorb --update refreshes a skill:
+the result is reproducible. Writes library/skills/<local-name>/ (or
+library/plugins/<plugin>/skills/<local-name>/ when library/plugins.json lists it),
+replacing what is there. Re-running at a newer SHA is how /absorb --update refreshes a skill:
 every edit lives in sources.json ("edits"), never as a hand change to the copy.
 Edit keys per skill: description (replacement string), drop_sections (titles),
 replace ([[old, new], ...] on the body), extras (non-markdown files to copy,
@@ -18,14 +19,32 @@ edits.<skill>.drop_sections; apply edits.<skill>.replace [[old, new], ...]; repl
 gigabrain actually has (keeping licence credits); rename renamed skills in the body. Prints WARN lines
 for upstream-specific text it can't fix, for /absorb to handle via an edit rule.
 """
-import fnmatch, json, pathlib, re, shutil, subprocess, sys
+import fnmatch, json, os, pathlib, re, shutil, subprocess, sys
 
 G = pathlib.Path(__file__).resolve().parent.parent
 LIB = G / "library"
-OUT = pathlib.Path(__import__("os").environ.get("ABSORB_OUT", LIB / "skills"))  # check-library diffs a fresh run
+OUT = pathlib.Path(os.environ.get("ABSORB_OUT", LIB))  # library root; check-library diffs a fresh run
+PLUGINS = json.loads((LIB / "plugins.json").read_text())["plugins"]
+
+
+def skill_dir(root, name):
+    """library/skills/<name>, or library/plugins/<p>/skills/<name> for an opt-in skill in plugins.json."""
+    for p, spec in PLUGINS.items():
+        if name in spec["skills"]:
+            return root / "plugins" / p / "skills" / name
+    return root / "skills" / name
 RELATED = re.compile(r"^(related|related skills|see also)\b", re.I)
 CREDIT = re.compile(r"credit|attribution|adapted from|based on|licen[cs]e", re.I)
 SUSPECT = re.compile(r"\becc\b|everything-claude|homunculus|instinct|/ecc:|CLAUDE_PLUGIN_ROOT|~/\.codex", re.I)
+
+
+def resolve_local(key, src):
+    """sources.json 'local' is per machine; fall back to $GIGABRAIN_UPSTREAM/<key>
+    (default ~/.cache/gigabrain/upstream/<key>) when that path is absent here."""
+    if not pathlib.Path(src["local"]).is_dir():
+        base = os.environ.get("GIGABRAIN_UPSTREAM", str(pathlib.Path.home() / ".cache/gigabrain/upstream"))
+        src["local"] = str(pathlib.Path(base) / key)
+    return src
 
 
 def git_show(src, sha, path, binary=False):
@@ -130,12 +149,17 @@ def adapt(name, src_key, src, sha, upstream_dir, have, renames):
         if old not in out:
             print(f"WARN {name}: replace target not found upstream any more: {old[:60]!r}")
         out = out.replace(old, new)
+    here = skill_dir(OUT, name).parent.parent.name  # plugin name, or "library" for a global skill
+    for p, spec in PLUGINS.items():  # a plugin skill is only reachable as /<plugin>:<skill> from outside it
+        for n in spec["skills"]:
+            if p != here and n != name:
+                out = re.sub(rf"(?<![\w/:-]){re.escape(n)}(?![\w/-])", f"{p}:{n}", out)
     out = out.strip() + "\n"
     head = (f"---\nname: {name}\ndescription: {json.dumps(desc, ensure_ascii=False)}\n"
             + (f"license: {lic}\n" if lic else "") + "metadata:\n"
             f"  type: library\n  source: {src_key}\n  upstream: {upstream_dir}\n"
             f"  upstream_sha: {sha[:8]}\n  absorbed: {src['absorbed']}\n---\n\n")
-    dest = OUT / name
+    dest = skill_dir(OUT, name)
     # Extras: markdown references only, unless edits.<skill>.extras lists a file
     # explicitly. Upstream scripts/hooks never ride along unreviewed.
     allow = set(edits.get("extras", []))
@@ -171,7 +195,7 @@ def main():
     sha = None
     if args[:1] == ["--sha"]:
         sha, args = args[1], args[2:]
-    src = json.loads((LIB / "sources.json").read_text())[src_key]
+    src = resolve_local(src_key, json.loads((LIB / "sources.json").read_text())[src_key])
     sha = subprocess.run(["git", "-C", src["local"], "rev-parse", sha or src["pinned_sha"]],
                          capture_output=True, text=True, check=True).stdout.strip()
     skills = src["skills"]

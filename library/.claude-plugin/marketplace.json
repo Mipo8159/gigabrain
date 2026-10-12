@@ -1,0 +1,26 @@
+{
+  "name": "gigabrain",
+  "owner": {
+    "name": "Giga"
+  },
+  "metadata": {
+    "description": "Opt-in skill bundles from gigabrain/library. Mirrors library/plugins.json; bin/check-library.py fails if names, sources or descriptions drift."
+  },
+  "plugins": [
+    {
+      "name": "homelab",
+      "source": "./plugins/homelab",
+      "description": "Home network and network-device skills: Cisco IOS, Netmiko, BGP, interface health, config validation, VLANs, Pi-hole, WireGuard."
+    },
+    {
+      "name": "media",
+      "source": "./plugins/media",
+      "description": "Generated media: Manim explainer animations and fal.ai image/video/audio generation."
+    },
+    {
+      "name": "content",
+      "source": "./plugins/content",
+      "description": "Marketing and outreach: content engine, brand voice, email ops, SEO."
+    }
+  ]
+}

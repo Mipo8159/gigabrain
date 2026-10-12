@@ -89,4 +89,4 @@ Return:
 
 ## Related Skills
 
-- Skills: `content-engine`, `remotion-video-creation`, `video-editing`
+- Skills: `content:content-engine`, `remotion-video-creation`, `video-editing`

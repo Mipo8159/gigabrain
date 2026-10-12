@@ -73,8 +73,7 @@
         "contract-first",
         "e2e-testing",
         "accessibility",
-        "make-interfaces-feel-better",
-        "seo"
+        "make-interfaces-feel-better"
       ],
       "checklists": [
         "react"

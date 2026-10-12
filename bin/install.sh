@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Wire gigabrain into ~/.claude. Idempotent: safe to re-run after every pull,
-# and on a new machine after cloning to /home/mip/Desktop/workdir/sweeft/gigabrain.
+# and on a new machine after cloning to ~/projects/gigabrain.
 # Giga runs this; Claude doesn't (changes to Claude's own config need a human).
 #
 #   1. ~/.claude/CLAUDE.md          -> global/CLAUDE.md (imports brain/CORE.md)
 #   2. ~/.claude/skills/<s>         -> global/skills/<s> and library/skills/<s>
 #                                      (dangling links to retired library skills removed)
+#   2b. plugin marketplace 'gigabrain' -> library/ (opt-in bundles: library/plugins.json;
+#                                      enable per repo: claude plugin install <p>@gigabrain --scope local)
 #   3. ~/.claude/agents/<a>.md      -> global/agents/<a>.md
 #   4. ~/.claude/settings.json      += cleanupPeriodDays 365, SessionStart inbox
 #                                      notice, ask-before git commit/push, guard hooks
@@ -18,7 +20,7 @@
 set -euo pipefail
 G="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 C="$HOME/.claude"
-NEWERA=/home/mip/Desktop/workdir/sweeft/newEra
+NEWERA="$HOME/projects/newEra"
 link() { # link <target> <linkpath>: back up a real file/dir once, then symlink
   if [ -e "$2" ] && [ ! -L "$2" ]; then mv "$2" "$2.pre-gigabrain"; echo "  backed up $2"; fi
   ln -sfn "$1" "$2"; echo "  $2 -> $1"
@@ -37,6 +39,14 @@ for l in "$C"/skills/*; do  # a library skill retired by /curate leaves a dangli
   if [ -L "$l" ] && [ ! -e "$l" ] && [[ "$(readlink "$l")" == "$G"/library/* ]]; then rm "$l"; echo "  removed stale $l"; fi
 done
 for a in "$G"/global/agents/*.md; do link "$a" "$C/agents/$(basename "$a")"; done
+if command -v claude >/dev/null; then  # opt-in skill bundles, loaded in place from library/plugins/
+  mp=$(python3 -c 'import json,sys; print(((json.load(open(sys.argv[1])).get("gigabrain") or {}).get("source") or {}).get("path", ""))' \
+       "$C/plugins/known_marketplaces.json" 2>/dev/null || true)
+  if [ "$mp" = "$G/library" ]; then echo "  marketplace gigabrain: registered"
+  else  # missing, or registered from an old clone path
+    [ -n "$mp" ] && claude plugin marketplace remove gigabrain >/dev/null
+    claude plugin marketplace add "$G/library" >/dev/null && echo "  marketplace gigabrain -> $G/library"; fi
+else echo "  note: claude CLI not on PATH; add the marketplace later: claude plugin marketplace add $G/library"; fi
 chmod +x "$G"/global/hooks/*.sh "$G"/bin/*.sh "$G"/bin/*.py "$G"/.githooks/pre-commit
 
 echo "4. settings.json (backup: $C/backups/settings.json.pre-gigabrain)"

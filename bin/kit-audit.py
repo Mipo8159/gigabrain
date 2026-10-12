@@ -330,7 +330,7 @@ def scan_global(a):
     # gigabrain's own sources too, installed or not (seen dedupes by realpath)
     for p in walk_links(G / "global/agents"):
         scan_md_tree(a, p, "agent", seen)
-    for sub in ("global/skills", "library/skills", "library/checklists"):
+    for sub in ("global/skills", "library/skills", "library/plugins", "library/checklists"):
         for p in walk_links(G / sub):
             scan_md_tree(a, p, "skill", seen)
     for ioc in ("router_runtime.js", "setup.mjs"):

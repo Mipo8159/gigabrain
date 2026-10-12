@@ -11,11 +11,23 @@ import json, os, pathlib, re, subprocess, sys, tempfile
 
 G = pathlib.Path(__file__).resolve().parent.parent
 LIB = G / "library"
+PLUGINS = json.loads((LIB / "plugins.json").read_text())["plugins"]
 BUILTIN = {"security-review", "code-review", "review", "init", "simplify", "loop", "schedule", "run",
            "claude-api", "update-config", "keybindings-help", "fewer-permission-prompts", "plugin-authoring"}
 SUSPECT = re.compile(r"\becc\b|everything-claude|homunculus|instinct|/ecc:|CLAUDE_PLUGIN_ROOT|Prompt Defense", re.I)
 CREDIT = re.compile(r"MIT License|credit:", re.I)
 fails = []
+
+
+def skill_dir(root, name):  # same rule as bin/absorb-adapt.py
+    for p, spec in PLUGINS.items():
+        if name in spec["skills"]:
+            return root / "plugins" / p / "skills" / name
+    return root / "skills" / name
+
+
+def skill_roots(root):
+    return [root / "skills"] + [root / "plugins" / p / "skills" for p in PLUGINS]
 
 
 def fail(msg):
@@ -36,6 +48,15 @@ def frontmatter(path):
     return out, path.read_text()[m.end():]
 
 
+def resolve_local(key, src):
+    """sources.json 'local' is per machine; fall back to $GIGABRAIN_UPSTREAM/<key>
+    (default ~/.cache/gigabrain/upstream/<key>) when that path is absent here."""
+    if not pathlib.Path(src["local"]).is_dir():
+        base = os.environ.get("GIGABRAIN_UPSTREAM", str(pathlib.Path.home() / ".cache/gigabrain/upstream"))
+        src["local"] = str(pathlib.Path(base) / key)
+    return src
+
+
 def git(src, *args):
     return subprocess.run(["git", "-C", src["local"], *args], capture_output=True, text=True)
 
@@ -47,7 +68,7 @@ def check_source(key, src):
     ledger = (G / "brain" / "library-ledger.md").read_text()
     # skills: provenance + no upstream leftovers + credits kept
     for name, up in src["skills"].items():
-        f = LIB / "skills" / name / "SKILL.md"
+        f = skill_dir(LIB, name) / "SKILL.md"
         if not f.exists():
             fail(f"skills/{name}: missing (run bin/absorb-adapt.py {key} {name})"); continue
         fm, body = frontmatter(f)
@@ -86,18 +107,27 @@ def check_source(key, src):
                            text=True, env={**os.environ, "ABSORB_OUT": tmp})
         if r.returncode:
             fail(f"{key}: absorb-adapt.py exited {r.returncode}: {r.stdout.strip().splitlines()[-1:]}")
-        d = subprocess.run(["diff", "-rq", tmp, str(LIB / "skills")], capture_output=True, text=True)
-        for line in d.stdout.splitlines():
-            if "Only in " + str(LIB / "skills") in line and not any(n in line for n in src["skills"]):
-                continue  # another source's skill
-            fail(f"{key}: not reproducible ({line.replace(tmp, '<fresh>')}); move the hand edit into sources.json edits")
+        for fresh, have in zip(skill_roots(pathlib.Path(tmp)), skill_roots(LIB)):
+            if not fresh.exists() and not have.exists():
+                continue
+            fresh.mkdir(parents=True, exist_ok=True)
+            d = subprocess.run(["diff", "-rq", str(fresh), str(have)], capture_output=True, text=True)
+            if d.returncode > 1:
+                fail(f"{key}: diff failed on {have.relative_to(LIB)}: {d.stderr.strip()[:120]}")
+            for line in d.stdout.splitlines():
+                if line.startswith(f"Only in {have}: ") and line.split(": ", 1)[1] not in src["skills"]:
+                    continue  # another source's skill
+                fail(f"{key}: not reproducible ({line.replace(tmp, '<fresh>')}); move the hand edit into sources.json edits")
 
 
 def check_names(sources):
     mine = {n for s in sources.values() for n in s["skills"]}
-    for d in (LIB / "skills").iterdir():
-        if d.name not in mine:
-            fail(f"skills/{d.name}: not in sources.json")
+    for root in skill_roots(LIB):
+        for d in (root.iterdir() if root.is_dir() else []):
+            if d.name not in mine:
+                fail(f"{d.relative_to(LIB)}: not in sources.json")
+            elif skill_dir(LIB, d.name) != d:
+                fail(f"{d.relative_to(LIB)}: belongs at {skill_dir(LIB, d.name).relative_to(LIB)} (library/plugins.json)")
     for n in sorted(mine & ({p.name for p in (G / "global/skills").iterdir()} | BUILTIN)):
         fail(f"skills/{n}: name collides with a gigabrain or built-in skill")
     home = pathlib.Path.home() / ".claude/skills"
@@ -105,6 +135,33 @@ def check_names(sources):
         p = home / n
         if p.exists() and not (p.is_symlink() and str(p.resolve()).startswith(str(LIB))):
             fail(f"skills/{n}: ~/.claude/skills/{n} exists and is not this library's symlink")
+        elif p.exists() and skill_dir(LIB, n).relative_to(LIB).parts[0] == "plugins":
+            fail(f"skills/{n}: opt-in plugin skill is still linked globally at ~/.claude/skills/{n} (run bin/install.sh)")
+
+
+def check_plugins(sources):
+    """library/plugins.json is the source of truth; the marketplace and plugin manifests must match it."""
+    mine = {n for s in sources.values() for n in s["skills"]}
+    for d in ((LIB / "plugins").iterdir() if (LIB / "plugins").is_dir() else []):
+        if d.name not in PLUGINS:
+            fail(f"plugins/{d.name}: not in plugins.json (left over from a rename? delete it)")
+    seen = {}
+    for p, spec in PLUGINS.items():
+        for n in spec["skills"]:
+            if n in seen:
+                fail(f"plugins.json: {n} is in both {seen[n]} and {p}")
+            seen[n] = p
+            if n not in mine:
+                fail(f"plugins.json: {p} lists {n}, which no source in sources.json provides")
+        m = LIB / "plugins" / p / ".claude-plugin" / "plugin.json"
+        man = json.loads(m.read_text()) if m.exists() else {}
+        if man.get("name") != p or man.get("description") != spec["description"]:
+            fail(f"plugins/{p}: .claude-plugin/plugin.json missing, or name/description differ from plugins.json")
+    mk = LIB / ".claude-plugin" / "marketplace.json"
+    entries = {e.get("name"): (e.get("source"), e.get("description"))
+               for e in (json.loads(mk.read_text()) if mk.exists() else {}).get("plugins", [])}
+    if entries != {p: (f"./plugins/{p}", s["description"]) for p, s in PLUGINS.items()}:
+        fail(f"marketplace.json plugins {entries} do not match plugins.json (want ./plugins/<name> for each)")
 
 
 def drift(key, src):
@@ -127,10 +184,12 @@ def drift(key, src):
 def main():
     sources = json.loads((LIB / "sources.json").read_text())
     for key, src in sources.items():
+        resolve_local(key, src)
         check_source(key, src)
         if "--drift" in sys.argv:
             drift(key, src)
     check_names(sources)
+    check_plugins(sources)
     n_sk = sum(len(s["skills"]) for s in sources.values())
     n_cl = sum(len(s["checklists"]) for s in sources.values())
     print(f"check-library: {n_sk} skills, {n_cl} checklists, {len(fails)} failure(s)")

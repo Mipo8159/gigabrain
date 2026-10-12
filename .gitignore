@@ -6,3 +6,4 @@ inbox/*
 node_modules/
 __pycache__/
 evals/**/.out/
+evals/skills/results/

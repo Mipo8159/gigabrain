@@ -489,6 +489,13 @@ def doctor_global(r):
             r.err(f"settings.json hook points at a missing file: {m.group(1)}")
     man = stacks_manifest()
     have_s = {d.name for d in (G / "library/skills").iterdir()} | {d.name for d in (G / "global/skills").iterdir()}
+    plug_s = {d.name for d in (G / "library/plugins").glob("*/skills/*")}
+    opt_in = sorted({s for b in list(man["stacks"].values()) + [man["always"]] for s in b.get("skills", [])} & plug_s)
+    if opt_in:  # stacks.json may only name global skills; a plugin skill would not load there
+        r.err(f"kit/stacks.json names opt-in plugin skills (library/plugins.json): {', '.join(opt_in)}")
+    mp = (load_json(home / "plugins/known_marketplaces.json", {}).get("gigabrain") or {}).get("source", {}).get("path")
+    (r.ok("plugin marketplace 'gigabrain' -> library/") if mp == str(G / "library") else
+     r.warn(f"plugin marketplace 'gigabrain' {'points at ' + mp if mp else 'not registered'} (run bin/install.sh)"))
     have_c = {f.stem for f in (G / "library/checklists").glob("*.md")}
     blocks = list(man["stacks"].values()) + [man["always"]]
     missing = sorted({s for b in blocks for s in b.get("skills", []) if s not in have_s} |

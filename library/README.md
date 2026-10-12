@@ -10,13 +10,21 @@ becomes knowledge once a real session shows it working.
 |---|---|---|
 | `sources.json` | each source: repo, local clone, licence, pinned SHA, item map, declarative edits, skip reasons | `/absorb` |
 | `skills/<name>/SKILL.md` | adapted skills, installed globally by `bin/install.sh` | `bin/absorb-adapt.py` only |
+| `plugins.json` | opt-in bundles (`homelab`, `media`, `content`): which skills leave the global set | `/absorb`, `/curate` |
+| `plugins/<p>/skills/<name>/` | opt-in skills, loaded only where enabled: `claude plugin install <p>@gigabrain --scope local`; invoked as `/<p>:<name>` | `bin/absorb-adapt.py` only |
+| `.claude-plugin/marketplace.json`, `plugins/<p>/.claude-plugin/plugin.json` | local marketplace `gigabrain`, registered by `bin/install.sh`; must mirror `plugins.json` | hand, checked by `check-library` |
 | `checklists/<lang>.md` | review checklists the `reviewer` agent loads per diff | `/absorb` (hand-written synthesis) |
 | `NOTICE.md` | upstream licences and credits (MIT requires them) | `/absorb` |
 | `../brain/library-ledger.md` | confidence + dated evidence per entry | `/retro`, `/curate` |
 
 ## Rules
 
-- **Never hand-edit `skills/`.** Every change is an `edits` rule in
+- **Off-stack by default means opt-in.** A new skill outside Giga's daily
+  stacks goes into a `plugins.json` bundle, not the global set: every global
+  skill's description costs context in every session. Moving a skill is a
+  `plugins.json` edit plus an `absorb-adapt.py` re-run; references from other
+  skills are rewritten to `/<plugin>:<skill>` automatically.
+- **Never hand-edit `skills/` or `plugins/*/skills/`.** Every change is an `edits` rule in
   `sources.json` (`drop_sections`, `replace`), so `bin/absorb-adapt.py <src>`
   reproduces the copy at any SHA and `/absorb --update` loses nothing.
 - **Earned evidence lives in `brain/library-ledger.md`, not in these files.**

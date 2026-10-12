@@ -11,7 +11,7 @@ the level of whatever we happened to hit this week. What is read lands in
 `library/`; it only counts as earned once `brain/library-ledger.md` holds
 evidence for it. Read `G/library/README.md` first; it is the contract.
 
-`G` = `/home/mip/Desktop/workdir/sweeft/gigabrain`.
+`G` = `~/projects/gigabrain`.
 
 Modes: `/absorb <source>` (first import or add items), `/absorb <source> --update`
 (refresh to upstream HEAD), `/absorb <git-url>` (new source).
@@ -28,7 +28,7 @@ own tooling) and anything an installed plugin already covers officially.
 ## 2. Triage (then one approval)
 
 - **New source:** clone it read-only next to gigabrain
-  (`/home/mip/Desktop/workdir/sweeft/<name>`), check the licence (no licence or
+  (`~/projects/<name>`), check the licence (no licence or
   non-permissive → stop and tell Giga), add an entry to `library/sources.json`.
 - **`--update`:** `git -C <local> fetch`, then `bin/check-library.py --drift`.
   For each commit touching absorbed paths, read the diff
@@ -37,8 +37,10 @@ own tooling) and anything an installed plugin already covers officially.
   *conflict* (contradicts a brain entry or ledger evidence; the brain wins,
   raise it). Also list new upstream items that pass the stack filter.
 - For every candidate item, compare with what exists: `global/skills`,
-  `library/skills`, `library/checklists`, installed plugin skills. Overlap → skip
-  with a reason in `sources.json` `skipped`, or merge into the existing entry.
+  `library/skills`, `library/plugins/*/skills`, `library/checklists`, installed
+  plugin skills. Overlap → skip with a reason in `sources.json` `skipped`, or
+  merge into the existing entry. An off-stack item that passes goes into an
+  opt-in bundle in `library/plugins.json`, not the global set.
 - Present **one table**: item · take/skip/merge · why. Get Giga's one OK. Then
   run steps 3–5 without further questions.
 

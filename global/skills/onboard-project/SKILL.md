@@ -18,7 +18,7 @@ format in skill `intent-review`; skip if none yet)?
 
 ## 1b. Detect and apply the kit (deterministic, before any prose)
 
-`G=/home/mip/Desktop/workdir/sweeft/gigabrain`. Run `$G/bin/kit detect <repo>` and
+`G=~/projects/gigabrain`. Run `$G/bin/kit detect <repo>` and
 show its evidence lines: stacks, the real commands from package.json/Makefile/
 pyproject, and the **risky scripts** (deploy/remove/revert/seed…). Then
 `$G/bin/kit apply <repo> --kind <own|lab|client> --dry-run`, then the real apply

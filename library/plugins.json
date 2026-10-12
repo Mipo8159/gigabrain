@@ -1,0 +1,19 @@
+{
+  "about": "Opt-in library skills, grouped into plugins of the local 'gigabrain' marketplace (library/.claude-plugin/marketplace.json). A skill listed here is written by bin/absorb-adapt.py to library/plugins/<plugin>/skills/<name>/ instead of library/skills/<name>/, so it loads only in projects that enable the plugin: claude plugin install <plugin>@gigabrain --scope local. Skills not listed stay global (symlinked into ~/.claude/skills by bin/install.sh). Plugin skills are invoked as /<plugin>:<skill>. Decided 2026-10-12 (roadmap phase 1).",
+  "plugins": {
+    "homelab": {
+      "description": "Home network and network-device skills: Cisco IOS, Netmiko, BGP, interface health, config validation, VLANs, Pi-hole, WireGuard.",
+      "skills": ["cisco-ios-patterns", "netmiko-ssh-automation", "network-bgp-diagnostics", "network-config-validation",
+                 "network-interface-health", "homelab-network-readiness", "homelab-network-setup", "homelab-pihole-dns",
+                 "homelab-vlan-segmentation", "homelab-wireguard-vpn"]
+    },
+    "media": {
+      "description": "Generated media: Manim explainer animations and fal.ai image/video/audio generation.",
+      "skills": ["manim-video", "fal-ai-media"]
+    },
+    "content": {
+      "description": "Marketing and outreach: content engine, brand voice, email ops, SEO.",
+      "skills": ["content-engine", "brand-voice", "email-ops", "seo"]
+    }
+  }
+}

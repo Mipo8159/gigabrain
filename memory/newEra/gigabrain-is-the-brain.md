@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-`/home/mip/Desktop/workdir/sweeft/gigabrain` (private repo
+`~/projects/gigabrain` (private repo
 `git@github.com:Mipo8159/gigabrain.git`, branch `master`, first pushed
 2026-10-01 as `732a0f5`; Giga commits and pushes) is the centre of the setup:
 

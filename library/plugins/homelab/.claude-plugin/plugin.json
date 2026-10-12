@@ -1,0 +1,5 @@
+{
+  "name": "homelab",
+  "description": "Home network and network-device skills: Cisco IOS, Netmiko, BGP, interface health, config validation, VLANs, Pi-hole, WireGuard.",
+  "version": "1.0.0"
+}

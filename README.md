@@ -41,7 +41,7 @@ weaknesses you've fixed drop off, and new repeated ones get added.
 | `labs.md` | every connected project and where its memory lives |
 | `library/` | imported skills + review checklists, pinned upstream (`/absorb`) |
 | `kit/` | per-project layer: `stacks.json`, project registry. **Start here: `kit/README.md`** |
-| `bin/` | `install.sh` (wire into ~/.claude), `kit` (detect/apply/doctor/audit/budget), absorb + check scripts |
+| `bin/` | `install.sh` (wire into ~/.claude), `kit` (detect/apply/doctor/audit/budget), absorb + check scripts, `eval-skills` (trigger evals for `global/skills`) |
 | `.githooks/` | secret scan on commit (prints masked findings only) |
 
 ## Commands you'll use
@@ -61,6 +61,6 @@ weaknesses you've fixed drop off, and new repeated ones get added.
 ## Setup (also on a new machine)
 
 ```bash
-git clone <private-url> /home/mip/Desktop/workdir/sweeft/gigabrain
-/home/mip/Desktop/workdir/sweeft/gigabrain/bin/install.sh
+git clone <private-url> ~/projects/gigabrain
+~/projects/gigabrain/bin/install.sh
 ```

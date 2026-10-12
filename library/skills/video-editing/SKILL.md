@@ -216,7 +216,7 @@ with open("voiceover.mp3", "wb") as f:
 
 ### Music and SFX with fal.ai
 
-Use the `fal-ai-media` skill for:
+Use the `media:fal-ai-media` skill for:
 - Background music generation
 - Sound effects (ThinkSound model for video-to-audio)
 - Transition sounds
@@ -327,4 +327,4 @@ identify the 5 most engaging 30-second clips for social media."
 
 ## Related Skills
 
-- Skills: `content-engine`, `fal-ai-media`
+- Skills: `content:content-engine`, `media:fal-ai-media`

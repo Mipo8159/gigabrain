@@ -9,7 +9,7 @@ Giga asked for the brain to get smarter after every session, automatically,
 without collecting junk. This skill is the learner. It runs in-session, so it
 has the full context, and Giga is present when it pushes.
 
-`G` = `/home/mip/Desktop/workdir/sweeft/gigabrain`.
+`G` = `~/projects/gigabrain`.
 
 ## 1. Gather (silently)
 

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Trigger evals for gigabrain's own skills (global/skills) with `claude plugin eval`.
+#
+#   bin/eval-skills [extra claude-plugin-eval flags, e.g. --case 'trigger-retro' --runs 1]
+#
+# Eval runs load only the plugin under test (no ~/.claude skills, settings or
+# CLAUDE.md), and a plugin may not symlink outside itself, so this stages a
+# throwaway plugin "core" in a temp dir: a copy of global/skills plus the cases
+# in evals/skills/. Daily use is unchanged (plain /retro, not /core:retro).
+# Each run is a real model call on Giga's account: defaults are 2 runs per case
+# and a $8 ceiling. Rerun after editing any global skill's description.
+# Results: evals/skills/results/<timestamp>/ (gitignored); exit code from the eval.
+set -euo pipefail
+G="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+T="$(mktemp -d "${TMPDIR:-/tmp}/gb-eval-skills.XXXXXX")"
+trap 'rm -rf "$T"' EXIT
+mkdir -p "$T/.claude-plugin"
+printf '{"name": "core", "description": "gigabrain global skills, staged for evals", "version": "0.0.0"}\n' \
+  > "$T/.claude-plugin/plugin.json"
+cp -R "$G/global/skills" "$T/skills"
+mkdir -p "$T/evals"
+for c in "$G"/evals/skills/*/; do [ -f "$c/prompt.md" ] && cp -R "${c%/}" "$T/evals/"; done  # no trailing /: BSD cp would copy the contents
+out="$G/evals/skills/results/$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$out"
+# --ablation none: a `tool_used: Skill` grader only counts toward the score with no baseline arm.
+set +e
+claude plugin eval "$T" --trust-plugin --ablation none --no-publish --runs 2 --concurrency 4 \
+  --max-cost-usd 8 --threshold 1 --output-dir "$out" --report "$out/report.html" "$@"
+rc=$?
+set -e
+echo "results: $out (exit $rc)"
+exit $rc
