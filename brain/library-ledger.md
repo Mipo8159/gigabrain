@@ -5,15 +5,16 @@ metadata:
   type: reference
 ---
 
-Rules: `library/README.md` § Confidence. Start 0.4; held up in use +0.1;
-wrong or outdated −0.2 and `needs-edit: …` (for /absorb); project convention
-differed 0 (evidence only). `Added` is when the row was first absorbed and
-drives the 90-day check; /absorb --update never changes it.
-Evidence is one dated, generalised line: no client names, URLs or schemas.
+Rules are in `library/README.md`, section Confidence. Every entry starts at
+0.4. Advice that held up in use: +0.1. Wrong or outdated: −0.2, and mark it
+`needs-edit: …` for /absorb. The project's own convention differed: 0
+(evidence line only). `Added` is the date the row was first absorbed; it
+drives the 90-day check, and /absorb --update never changes it.
+Evidence is one dated, general line: no client names, URLs or schemas.
 
 | Entry | Source | Added | Confidence | Evidence (date · project kind · what happened) |
 |---|---|---|---|---|
-| skill `nestjs-patterns` | ecc | 2026-10-03 | 0.4 | — |
+| skill `nestjs-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift (retirement proposal in inbox) |
 | skill `backend-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `api-design` | ecc | 2026-10-03 | 0.4 | — |
 | skill `hexagonal-architecture` | ecc | 2026-10-03 | 0.4 | — |
@@ -25,8 +26,8 @@ Evidence is one dated, generalised line: no client names, URLs or schemas.
 | skill `fastapi-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `golang-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `golang-testing` | ecc | 2026-10-03 | 0.4 | — |
-| skill `postgres-patterns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `redis-patterns` | ecc | 2026-10-03 | 0.4 | — |
+| skill `postgres-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift (retirement proposal in inbox) |
+| skill `redis-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift (retirement proposal in inbox) |
 | skill `database-migrations` | ecc | 2026-10-03 | 0.4 | — |
 | skill `docker-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `kubernetes-patterns` | ecc | 2026-10-03 | 0.4 | — |
@@ -75,4 +76,4 @@ Evidence is one dated, generalised line: no client names, URLs or schemas.
 | skill `email-ops` | ecc | 2026-10-03 | 0.4 | — |
 | skill `mailtrap-email-integration` | ecc | 2026-10-03 | 0.4 | — |
 | skill `brand-voice` | ecc | 2026-10-03 | 0.4 | — |
-| skill `visual-explainer` | visual-explainer | 2026-10-06 | 0.4 | — |
+| skill `visual-explainer` | visual-explainer | 2026-10-06 | 0.5 | 2026-10-13 · teach lessons, 9 pages · figure/token rules held up: all pass the render check, light/dark, phone |

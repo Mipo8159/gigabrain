@@ -1,25 +1,26 @@
 # AI-usage scorecard
 
-Re-scored **monthly** with Claude, using evidence (prompt history, harvest
-signals below), never vibes. The goal is the trend, not any single number.
+Giga and Claude re-score this **every month** from evidence (prompt history,
+the signals below), never from gut feeling. The trend matters, not any single
+number. Scores run 0 to 10.
 
-## Baseline — 2026-10-01 (≈ 20–25% of available leverage)
+## Starting point, 2026-10-01 (using about 20–25% of what Claude could do)
 
-Evidence: 958 prompts / 126 sessions, 2026-06-01 → 2026-10-01; tool logs of the
-59 transcripts still on disk.
+Evidence: 958 prompts in 126 sessions from 2026-06-01 to 2026-10-01, plus the
+tool logs of the 59 transcripts still on disk.
 
 | # | Dimension | 2026-10 | Evidence at baseline | Target behaviour |
 |---|---|---|---|---|
 | 1 | Domain / intent in prompts | 8 | rich feature specs (transactions, enums, edge cases) | keep |
 | 2 | Customisation (memory, skills) | 6 | 7 custom skills, shared memory, asked for build-loop | brain + curation loop running |
-| 3 | Done-criteria & verification | 2 | "criteria" ×0, "verify" ×2; "is everything set?", "that's it?" | every task has "done when…" + proof |
+| 3 | Done-criteria & verification | 2 | "criteria" 0 times, "verify" 2 times; "is everything set?", "that's it?" | every task has "done when…" and a proof |
 | 4 | Debugging style | 3 | "help me fix this" + paste; "so what is the problem?" | expected/actual/hypothesis; Claude reproduces |
-| 5 | Context management | 3 | /clear ×1, /compact ×1, exit ×45, /usage ×29 | one goal per session; fresh context; right model |
+| 5 | Context management | 3 | /clear once, /compact once, exit 45 times, /usage 29 times | one goal per session; fresh context; right model |
 | 6 | Parallel work | 0 | no worktrees, no parallel sessions | 2–3 sessions in worktrees routinely |
 | 7 | Enforcement (hooks, permissions) | 1 | no hooks; rules only as advisory memory | rules that must hold are hooks/permissions |
 | 8 | Project instructions (CLAUDE.md) | 0 | none, incl. clasico (~570 prompts) | every active repo has a lean CLAUDE.md |
 | 9 | Review pass | 1 | /code-review, /simplify never used | reviewer subagent on every non-trivial diff |
-| 10 | Automation (headless, CI, schedule) | 0 | claude -p, GitHub Action, /schedule unused | ≥1 recurring automated job |
+| 10 | Automation (headless, CI, schedule) | 0 | claude -p, GitHub Action, /schedule unused | at least 1 recurring automated job |
 | 11 | Learning from AI | 3 | Claude wrote 100% of issue-flow | tutor mode in labs; Giga writes the core |
 
 ## Monthly history
@@ -30,8 +31,9 @@ Evidence: 958 prompts / 126 sessions, 2026-06-01 → 2026-10-01; tool logs of th
 
 ## Prompt-signal trend (`bin/signals-report.py`)
 
-Baseline, replayed from history through the coach heuristics (2026-10-02).
-They're rough regex signals: read the direction, not the decimals.
+The starting rows were made by replaying old prompts through the coach hook's
+pattern checks (2026-10-02). These are rough regex signals: read the
+direction, not the decimals. ↑ means higher is better, ↓ lower is better.
 
 | month | prompts | done% (↑) | no_done (↓) | debug_no_hypothesis (↓) | asks_status (↓) | vague (↓) | multi_task (↓) | research (↓) |
 |---|---|---|---|---|---|---|---|---|
@@ -43,7 +45,8 @@ They're rough regex signals: read the direction, not the decimals.
 
 (2026-10 row refreshed at /curate 2026-10-03, after dropping 7 `claude -p` probe rows from 2026-10-02 15:38.)
 
-Live months come from `bin/signals-report.py` (coach hook log). Compare at each monthly re-score.
+Later months come from `bin/signals-report.py`, which reads the coach hook's
+log. Compare them at each monthly re-score.
 
 ## Session signals (appended by /retro)
 
@@ -64,3 +67,4 @@ Live months come from `bin/signals-report.py` (coach hook log). Compare at each 
 | 2026-10-06 | gigabrain + new lab (install check → kit analysis → keep-vs-rebuild → tracker step 0 + onboarding) | no on all 3 build/analysis prompts (Claude stated proofs; one 4-question batch) | yes (plan table + question batch, then autonomous) | n.a. | yes (stub run: only 6 workflow e2e red; reference impl 28/28 e2e ×3 + 24/24 unit; boot + migrate on dev DB; visual headless-clicked) | background reviewer during docs/visual work; no worktree (serial greenfield) | yes, reviewer found 1 blocker (last-admin) + 9 should-fix, all fixed with e2e cases | no (workflow.ts handed over) |
 | 2026-10-12 | gigabrain (analyse uncommitted work → audit mode for intent-reviewer → usage/billing check → 2 practice repos) | no (3 build prompts without a done-line; Claude stated the proof each time; "use fewer tokens" was a good constraint) | yes (plan line, then autonomous) | n.a. | yes (eval: audit case 1/1 with plan, old cases 6/7 = baseline; practice repos npm test green, kit detect node+postgres) | 2 eval runs in parallel in the background; no worktree (serial) | no (agent/eval files, <100 lines each) | no |
 | 2026-10-12 | gigabrain ("improve gigabrain" → roadmap phase 1: opt-in skill plugins + core-skill trigger evals) | no (vague goal, no done-line; Claude argued for the roadmap step and set the proof; one 4-question batch with budget + action boundary) | yes (recommendation + plan, then autonomous) | n.a. | yes (scratch Nest repo 0 vs 10 plugin skills, eval 9/9, byte-identical move, 6 mutation checks, selftest + check-library) | claude-code-guide docs check in background before the answers; background reviewer (7 findings, all fixed); worktree **not** launched by Giga | yes, reviewer caught the flattened eval + stale secret allowlist | no |
+| 2026-10-13 | gigabrain (overnight autonomous: knowledge + process evals, CORE ablation, teach/learn lessons, practice gym) | no (2 build prompts no_done; Claude set per-track done-when in a night plan) | yes (one go-ahead, then about 12 h autonomous; no questions while Giga slept) | yes (every eval failure audited before trusting; 3 were harness artifacts) | yes (414 graded runs; check-lesson on 9 pages; fact-check + 42P10 on PG17; bin/learn path tests) | heavy: 6 background authoring/lesson agents, researcher fact-check, sequential eval queues; no worktree | no reviewer on the runner diff (eval tooling, not product) | no (lessons built for Giga; practice not started) |
