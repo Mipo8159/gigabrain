@@ -39,6 +39,10 @@ Rules:
 - **Check access before the first probe:** SSO login fresh, VPN or bastion for
   private databases, browser extension connected. Ask for all of them in the
   opening question batch, not one at a time as each fails.
+- **Isolate parallel agents.** Give each one its own work dir named after its task,
+  absolute paths only. 2026-10-14: 3 lesson builders shared one scratchpad; one
+  ran another's script, whose unset `$S` created `undefined/figs/` inside the repo
+  (caught and removed by the agent; the repo stayed clean).
 - **Argue the split.** Parallel work has costs: agents start without context,
   merges can conflict, and it takes Giga's attention. Say which part stays in
   order and why. A small fix in one file gets no worktree.
