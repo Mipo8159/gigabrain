@@ -1,0 +1,1 @@
+{ "name": "payments-webhooks", "type": "module", "private": true, "scripts": { "test": "node --test" } }

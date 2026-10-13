@@ -1,0 +1,8 @@
+{
+  "name": "knowledge-deps-postgres",
+  "private": true,
+  "dependencies": {
+    "pg": "8.23.1",
+    "@types/pg": "8.23.1"
+  }
+}

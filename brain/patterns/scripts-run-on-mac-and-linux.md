@@ -5,8 +5,11 @@ metadata:
   type: reference
 ---
 
-Gigabrain moved from a Linux machine to a Mac and four things broke on the same
-day (2026-10-12). Only one of them was loud:
+**In short:** on a new machine, gigabrain's scripts fail quietly (a "clean" scan, a 1-case
+eval). Run the self-checks and read stderr before trusting any green result.
+
+Gigabrain moved from Linux to a Mac and four things broke the same day
+(2026-10-12). Only one was loud:
 
 - **bash 3.2** (`/usr/bin/env bash` on macOS): `declare -A` errors and the
   script carries on, so the secret-scan pre-commit hook printed "clean" with a
@@ -33,6 +36,5 @@ first time, run its own check (`check-library`, `kit selftest`,
 absolute `/home/...` or `/Users/...` path in a committed JSON file.
 
 **Next time:** run the self-checks first and grep stderr for "invalid option".
-Fix the portability issue before trusting any green result.
 
 Related: [[claude-config-changes-need-human-installer]]

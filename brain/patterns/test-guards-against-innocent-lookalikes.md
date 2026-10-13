@@ -5,13 +5,15 @@ metadata:
   type: project
 ---
 
-A guard that silently passes or wrongly blocks is worse than none.
+**In short:** a guard (hook, permission rule, scanner) that silently passes or wrongly
+blocks is worse than none. Test it with deny, ask **and** innocent look-alike
+cases, inside the real repo.
 
 **Evidence:**
 - 2026-10-01: a pre-commit scan passed before `git init`, then after it climbed
   one directory too high; in commit mode it would have scanned nothing and
   reported clean.
-- 2026-10-02: a PreToolUse Bash guard (block `git push`/`commit`, block
+- 2026-10-02: a Bash guard hook (PreToolUse; block `git push`/`commit`, block
   migrations without an inline local DB host) passed every deny case, but the
   table also contained `grep -rn 'git push' docs`, which it wrongly denied.
   Fix: anchor git rules to the start of each `&&`/`;`/`|` segment.
@@ -64,5 +66,5 @@ A guard that silently passes or wrongly blocks is worse than none.
 
 **Signal:** writing or changing any hook, permission rule or scanner that
 decides allow/deny on command text.
-**Next time:** table first (deny, ask, innocent look-alikes, wrapped and
-chained forms), fail-closed default, background reviewer on the rewrite.
+**Next time:** test table first (deny, ask, innocent look-alikes, wrapped and
+chained forms), ask-by-default on parse failure, background reviewer on the rewrite.

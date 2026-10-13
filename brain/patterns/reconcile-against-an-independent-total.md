@@ -5,12 +5,13 @@ metadata:
   type: feedback
 ---
 
-**Rule:** before trusting an export's money or counts, reconcile it per unit (store, day) against a
-**different table that records the same fact independently**, e.g. line items vs payments received.
-Don't reconcile against a reporting copy or against the same query re-run; that's circular.
+**In short:** before trusting an export's money or counts, check it per unit (store, day)
+against a **different table that records the same fact independently**, e.g.
+line items vs payments received. A reporting copy or the same query re-run is
+circular.
 
 **Why:** 2026-10-05, POS export from an ERP:
-- The vendor's BI copy had the right receipt count but 1.65× the lines and revenue, apparently join-multiplied. It was unusable as ground truth.
+- The vendor's BI (reporting) copy had the right receipt count but 1.65× the lines and revenue, apparently multiplied by a join. Unusable as ground truth.
 - Deleted lines carried junk quantities: billions in value from barcodes typed into the quantity field.
 - Register X/Z summary reports were stored as receipt types with payment rows, so payments looked exactly 2× items.
 
@@ -24,4 +25,4 @@ then went into the exporter as calibrated, commented constants.
 4. Write the verified rule into the code and the project memory, with the date and the evidence.
 
 **Signal:** "revenue", "totals", "sales per X", an export or dashboard of money, a vendor-made reporting DB.
-**Next time:** name the independent counterpart in the done-criteria ("store-day revenue = payments, per store, to the cent").
+**Next time:** name the counterpart in the done-criteria ("store-day revenue = payments, per store, to the cent").

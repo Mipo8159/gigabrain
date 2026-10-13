@@ -1,10 +1,11 @@
 # kit: gigabrain for every project
 
-gigabrain has two halves. The **brain** (habits, patterns, coaching) and the
-**library** (imported skills and checklists) are global. The **kit** applies
-them to each repo, adjusts per project, and keeps every project healthy as
-gigabrain changes. Its architecture comes from ECC's install system (manifests,
-an ownership record, doctor/repair, ask rules), cut down to one Python file.
+The **brain** (habits, patterns, coaching) and the **library** (imported
+skills and checklists) are global. The **kit** applies them to each repo,
+adjusts them per project, and keeps every project healthy as gigabrain
+changes. Its design comes from ECC's install system (manifests, a record of
+what it owns, doctor and repair commands, ask rules), cut down to one Python
+file.
 
 ## Daily use
 
@@ -32,8 +33,9 @@ so it can't be committed by accident.
 | `.git/info/exclude` | the kit's own files (+ scaffold for client repos) | yes |
 | `.claude/gigabrain.json` | **your knobs**: `kind`, `memory`, `include_stacks`, `exclude_stacks`, `hooks` | yes |
 
-`ask` rules always prompt, even in auto mode and even with a global `allow: Bash`
-(deny > ask > allow; verified against the Claude Code permissions docs 2026-10-03).
+`ask` rules always prompt, even in auto mode and even with a global `allow: Bash`.
+Deny beats ask, and ask beats allow (checked against the Claude Code
+permissions docs, 2026-10-03).
 They live in the personal `settings.local.json`, never the team's `settings.json`.
 
 ## Adjusting a project
@@ -45,10 +47,14 @@ Edit `.claude/gigabrain.json`, then `kit apply .`:
   "include_stacks": ["kafka"], "hooks": "strict" }
 ```
 
-New stacks go in `kit/stacks.json` (indicators → skills, checklists, ask rules).
+New stacks go in `kit/stacks.json`: the files that indicate the stack, and
+the skills, checklists and ask rules it brings.
 Every name it references must exist in `library/` (checked by `kit doctor`).
 
-## Guard hooks (`global/hooks/guard.py`, one process per event, ~35 ms; `kit selftest` pins 140+ command cases)
+## Guard hooks
+
+`global/hooks/guard.py` runs once per event (~35 ms). `kit selftest` pins
+140+ command cases.
 
 | Check | Profiles | Behaviour |
 |---|---|---|
@@ -64,7 +70,7 @@ Profile: `GIGABRAIN_HOOK_PROFILE`, else the project's `gigabrain.json` `hooks`, 
 
 ## What was deliberately not taken from ECC
 
-Per-tool-call observation and auto-generated skills (memory-poisoning risk;
-`/retro` with the full session is the better signal), 15 harness adapters, the
+Watching every tool call and auto-generating skills (risk of poisoning
+memory; `/retro` with the full session is the better signal), 15 harness adapters, the
 component-alias layer, LLM summaries in hooks, telemetry hooks, MCP health
 probing, and the always-loaded rule packs (folded into review checklists).

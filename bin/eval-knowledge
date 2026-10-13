@@ -1,0 +1,482 @@
+#!/usr/bin/env python3
+"""Knowledge evals: does a gigabrain skill make Claude write *correct* code?
+
+Each case is a small project plus a task, under evals/knowledge/<domain>/<case>/:
+
+  task.md     frontmatter (timeout, services, deps, check) + the task prompt.
+              The prompt reads like a normal ticket: it never names the trap.
+  fixture/    the starting project, copied into a fresh temp git repo.
+  hidden/     tests Claude never sees. They are copied in only after Claude
+              stops, then `check` runs (default: node --test 'hidden/**/*.test.*').
+              Exit code 0 = pass. Nothing else is graded.
+
+Arms (--arms, default base,skill):
+  base   vanilla Claude: --setting-sources project, so no CLAUDE.md, no brain,
+         no gigabrain skills. Only what the model already knows.
+  skill  the same, plus the domain skill loaded with --plugin-dir. It must
+         trigger on its own description, like in real use.
+  brain  Giga's real setup: user settings, CLAUDE.md with brain/CORE.md, all global
+         skills. Base vs brain is the test of gigabrain as a whole.
+  core   base + brain/CORE.md as appended system prompt (no skills, agents, hooks).
+         Ablation: --core-file <copy with one rule cut> --core-label no-<rule>.
+
+A skill line earns its place only when it turns a base failure into a pass.
+Cases base already passes cost runs and teach nothing: retire or harden them.
+
+Usage:
+  bin/eval-knowledge [--domain kafka] [--case 'glob'] [--arms base,skill]
+                     [--runs 2] [-j 3] [--model opus] [--skill-dir path]
+  bin/eval-knowledge --list
+  bin/eval-knowledge --verify-fixtures  # hidden tests must FAIL on the bare fixture and on
+                                        # wrong/, and PASS on solution/ (no model call)
+  bin/eval-knowledge --mode review      # wrong/ arrives as a teammate's PR; Claude reviews + fixes
+Results: evals/knowledge/results/<timestamp>/ (gitignored): results.jsonl,
+summary.md, and runs/<id>/ with the diff and transcript of every run.
+"""
+import argparse
+import concurrent.futures as cf
+import datetime
+import fnmatch
+import json
+import os
+import pathlib
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+CASES = ROOT / "evals" / "knowledge"
+DEPS_SRC = CASES / "_deps"
+CACHE = pathlib.Path.home() / ".cache" / "gigabrain" / "knowledge-deps"
+LOCK = threading.Lock()
+# No bypassPermissions: edits are auto-accepted, Bash only for these; anything else is denied in -p mode.
+ALLOWED = ["Read", "Write", "Edit", "Glob", "Grep", "TodoWrite", "Skill",
+           *(f"Bash({c}:*)" for c in ("node", "npm", "npx", "tsc", "ls", "cat", "head", "tail", "mkdir", "wc",
+                                       "git diff", "git status", "redis-cli",
+                                       # 2026-10-13: rm/mv were missing, so base couldn't delete dead files while
+                                       # brain (user settings) could: a permission gap graded as a skill gap.
+                                       "rm", "mv", "git rm", "git mv"))]
+
+
+def parse_task(path):
+    """Tiny frontmatter reader: `key: value` lines between --- fences."""
+    text = path.read_text()
+    meta, body = {}, text
+    if text.startswith("---"):
+        _, fm, body = text.split("---", 2)
+        for line in fm.strip().splitlines():
+            if ":" in line:
+                k, v = line.split(":", 1)
+                meta[k.strip()] = v.strip()
+    meta["services"] = [s.strip() for s in meta.get("services", "").strip("[]").split(",") if s.strip()]
+    return meta, body.strip()
+
+
+def find_cases(domain=None, pattern=None):
+    out = []
+    for task in sorted(CASES.glob("*/*/task.md")):
+        d, c = task.parent.parent.name, task.parent.name
+        if d.startswith("_") or (domain and d != domain):
+            continue
+        # --case takes globs, comma-separated; braces are expanded too (fnmatch has no {a,b}).
+        pats = [p for p in re.split(r"[,{}]", pattern or "") if p]
+        if pats and not any(fnmatch.fnmatch(c, p) or fnmatch.fnmatch(f"{d}/{c}", p) for p in pats):
+            continue
+        out.append(task.parent)
+    return out
+
+
+# ---------- shared dependencies (installed once, symlinked into every run) ----------
+
+def deps_dir(name):
+    src = DEPS_SRC / name / "package.json"
+    if not src.exists():
+        sys.exit(f"deps set '{name}' missing: {src}")
+    dst = CACHE / name
+    with LOCK:
+        stamp = dst / ".installed"
+        if not stamp.exists() or stamp.read_text() != src.read_text():
+            dst.mkdir(parents=True, exist_ok=True)
+            shutil.copy(src, dst / "package.json")
+            print(f"[deps] npm install {name} ...", flush=True)
+            subprocess.run(["npm", "install", "--no-audit", "--no-fund", "--loglevel=error"], cwd=dst, check=True)
+            stamp.write_text(src.read_text())
+    return dst / "node_modules"
+
+
+# ---------- services ----------
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+class Services:
+    """Starts what cases need, once per eval run; each run gets its own database / key prefix."""
+
+    def __init__(self):
+        self.pg_port = None
+        self.redis = []
+        self.n = 0
+
+    def postgres(self):
+        with LOCK:
+            if self.pg_port is None:
+                self.pg_port = 55432
+                name = "gb-knowledge-pg"
+                running = subprocess.run(["docker", "ps", "-q", "-f", f"name={name}"], capture_output=True, text=True).stdout.strip()
+                if not running:
+                    # Another eval process may be starting it right now: a name clash is fine, readiness decides.
+                    subprocess.run(["docker", "run", "-d", "--name", name, "-e", "POSTGRES_PASSWORD=pg",
+                                    "-p", f"{self.pg_port}:5432", "postgres:17", "-c", "max_connections=300"],
+                                   capture_output=True)
+                    subprocess.run(["docker", "start", name], capture_output=True)
+                for _ in range(90):
+                    if subprocess.run(["docker", "exec", name, "pg_isready", "-U", "postgres", "-h", "127.0.0.1"],
+                                      capture_output=True).returncode == 0:
+                        break
+                    time.sleep(1)
+                time.sleep(1)
+            self.n += 1
+            db = f"run{os.getpid()}_{self.n}_{int(time.time())}"
+        subprocess.run(["docker", "exec", "gb-knowledge-pg", "psql", "-U", "postgres", "-c", f"CREATE DATABASE {db}"],
+                       check=True, capture_output=True)
+        return {"DATABASE_URL": f"postgres://postgres:pg@127.0.0.1:{self.pg_port}/{db}"}
+
+    def kafka(self):
+        """One KRaft broker for the whole eval run (default image config advertises localhost:9092).
+        Runs share it, so each run gets a unique KAFKA_PREFIX for its topic and group names."""
+        name = "gb-knowledge-kafka"
+        with LOCK:
+            if not getattr(self, "kafka_up", False):
+                running = subprocess.run(["docker", "ps", "-q", "-f", f"name={name}"], capture_output=True, text=True).stdout.strip()
+                if not running:
+                    subprocess.run(["docker", "run", "-d", "--name", name, "-p", "9092:9092", "apache/kafka:4.3.1"],
+                                   capture_output=True)
+                    subprocess.run(["docker", "start", name], capture_output=True)
+                for _ in range(90):
+                    if subprocess.run(["docker", "exec", name, "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server",
+                                       "localhost:9092", "--list"], capture_output=True).returncode == 0:
+                        break
+                    time.sleep(1)
+                self.kafka_up = True
+            self.n += 1
+            prefix = f"r{os.getpid()}_{self.n}_{int(time.time())}_"
+        return {"KAFKA_BROKERS": "localhost:9092", "KAFKA_PREFIX": prefix}
+
+    def redis_server(self):
+        port = free_port()
+        p = subprocess.Popen(["redis-server", "--port", str(port), "--save", "", "--appendonly", "no"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with LOCK:
+            self.redis.append(p)
+        time.sleep(0.3)
+        return {"REDIS_URL": f"redis://127.0.0.1:{port}"}
+
+    def env_for(self, names):
+        env = {}
+        for s in names:
+            if s == "postgres":
+                env.update(self.postgres())
+            elif s == "redis":
+                env.update(self.redis_server())
+            elif s == "kafka":
+                env.update(self.kafka())
+            else:
+                sys.exit(f"unknown service {s}")
+        return env
+
+    def stop(self):
+        for p in self.redis:
+            p.terminate()
+
+
+# ---------- one run ----------
+
+def stage_plugin(domain, skill_dir, tmp):
+    src = pathlib.Path(skill_dir) if skill_dir else ROOT / "global" / "skills" / domain
+    if not (src / "SKILL.md").exists():
+        return None
+    plug = tmp / "plugin"
+    (plug / ".claude-plugin").mkdir(parents=True)
+    (plug / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "gb", "version": "0.0.0",
+                                                                     "description": "gigabrain skill under test"}))
+    shutil.copytree(src, plug / "skills" / domain)
+    return plug
+
+
+def sh(cmd, cwd, env=None, timeout=None):
+    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str))
+
+
+REVIEW_PROMPT = """A teammate opened a PR on this branch: it is the last commit (`git show HEAD`).
+It implements this ticket:
+
+---
+{ticket}
+---
+
+Review the PR as a senior engineer before it merges. If you find bugs, fix them directly in the code
+(keep the public API the ticket specifies). Finish with a short summary of what you changed and why."""
+
+
+def prepare_workdir(case, meta, wd, env, pr=None):
+    shutil.copytree(case / "fixture", wd, dirs_exist_ok=True) if (case / "fixture").exists() else wd.mkdir(parents=True)
+    if meta.get("deps"):
+        nm = deps_dir(meta["deps"])
+        # A private copy, not a symlink: an agent's `npm install` must not write into the shared
+        # cache (2026-10-12). APFS clone (cp -c) / reflink makes it near-free; plain copy as fallback.
+        for cmd in (["cp", "-cR", str(nm), str(wd / "node_modules")],
+                    ["cp", "-R", "--reflink=auto", str(nm), str(wd / "node_modules")]):
+            if subprocess.run(cmd, capture_output=True).returncode == 0:
+                break
+        else:
+            shutil.copytree(nm, wd / "node_modules", symlinks=True)
+    sh("git init -q && git add -A && git -c user.email=e@x -c user.name=eval commit -qm fixture", wd)
+    if pr:  # review mode: the plausible-but-wrong implementation arrives as the teammate's PR commit
+        shutil.copytree(pr, wd, dirs_exist_ok=True)
+        sh("git add -A && git -c user.email=dev@team -c user.name=teammate commit -qm 'feat: implement ticket'", wd)
+    if (case / "setup.sh").exists():
+        r = sh(["bash", str(case / "setup.sh")], wd, env=env, timeout=120)
+        if r.returncode:
+            raise RuntimeError(f"setup.sh failed: {r.stderr[-500:]}")
+
+
+def run_check(case, meta, wd, env):
+    hidden = wd / "hidden"
+    if hidden.exists():
+        shutil.rmtree(hidden)
+    shutil.copytree(case / "hidden", hidden)
+    check = meta.get("check") or "node --test --test-reporter=dot 'hidden/**/*.test.*'"  # globs, not dirs
+    r = sh(check, wd, env=env, timeout=int(meta.get("check_timeout", 180)))
+    return r.returncode == 0, (r.stdout + r.stderr)[-4000:]
+
+
+def run_one(case, arm, i, args, services, outdir):
+    meta, prompt = parse_task(case / "task.md")
+    domain = case.parent.name
+    pr = None
+    if args.mode == "review":
+        pr = case / "wrong"
+        prompt = REVIEW_PROMPT.format(ticket=prompt)
+    label = arm if args.mode == "write" else f"{arm}-{args.mode}"
+    if arm == "core" and args.core_label:
+        label = f"core-{args.core_label}"
+    if args.no_exec:
+        label += "-noexec"
+    if args.model:
+        label += f"@{args.model}"
+    rid = f"{domain}__{case.name}__{label}__{i}"
+    rdir = outdir / "runs" / rid
+    rdir.mkdir(parents=True)
+    tmp = pathlib.Path(tempfile.mkdtemp(prefix="gbk-"))
+    wd = tmp / "work"
+    env = {**os.environ, **services.env_for(meta["services"])}
+    for k in ("CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"):
+        env.pop(k, None)
+    env["GIGABRAIN_NO_SIGNALS"] = "1"
+    rec = {"domain": domain, "case": case.name, "arm": label, "run": i, "t": datetime.datetime.now().isoformat(timespec="seconds")}
+    try:
+        prepare_workdir(case, meta, wd, env, pr)
+        cmd = ["claude", "-p", prompt, "--setting-sources", "project", "--no-session-persistence",
+               "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits",
+               "--allowedTools", *ALLOWED, "--disallowedTools", "WebFetch", "WebSearch", "Agent"]
+        if meta.get("allow_agents") == "true":  # process cases: the brain's reviewer/verifier agents may run
+            cmd[cmd.index("Agent")] = "NoSuchTool"
+        if args.no_exec:  # knowledge only: no running code, tests or tsc, so no feedback loop to self-correct
+            cmd = [c for c in cmd if not c.startswith("Bash(")]
+            cmd += ["Bash"]  # appended to the trailing --disallowedTools list
+        if args.model:
+            cmd += ["--model", args.model]
+        if arm == "brain":
+            # Giga's real setup: user + project settings, ~/.claude/CLAUDE.md (CORE), every global skill.
+            # Hooks still run headless-safe (coach.py skips sdk entrypoints).
+            i_ss = cmd.index("--setting-sources")
+            del cmd[i_ss:i_ss + 2]
+        if arm == "core":
+            # base + only the CORE text as system prompt: isolates CORE from skills/agents/hooks.
+            # --core-file swaps in an ablated copy (one rule removed) for ablation runs.
+            cmd += ["--append-system-prompt", pathlib.Path(args.core_file).read_text()]
+        if arm == "skill":
+            plug = stage_plugin(domain, args.skill_dir, tmp)
+            if not plug:
+                rec.update(status="skip", reason="no skill yet")
+                return rec
+            cmd += ["--plugin-dir", str(plug)]
+        t0 = time.time()
+        try:
+            p = subprocess.run(cmd, cwd=wd, env=env, capture_output=True, text=True, timeout=int(meta.get("timeout", 900)))
+            out, timed_out = p.stdout, False
+        except subprocess.TimeoutExpired as e:
+            out, timed_out = (e.stdout or b"").decode() if isinstance(e.stdout, bytes) else (e.stdout or ""), True
+        rec["secs"] = round(time.time() - t0)
+        (rdir / "transcript.jsonl").write_text(out)
+        tools, skill_used, cost, turns = [], False, None, None
+        result_ok, result_text = False, "no result event"
+        for line in out.splitlines():
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if ev.get("type") == "assistant":
+                for c in ev.get("message", {}).get("content", []):
+                    if c.get("type") == "tool_use":
+                        tools.append(c["name"])
+                        if c["name"] == "Skill":
+                            skill_used = True
+            if ev.get("type") == "result":
+                cost, turns = ev.get("total_cost_usd"), ev.get("num_turns")
+                result_ok = ev.get("subtype") == "success" and not ev.get("is_error")
+                result_text = (ev.get("result") or "")[:300]
+                (rdir / "final.md").write_text(ev.get("result") or "")
+        sh("git add -A", wd)  # diff vs the last commit: in review mode that is only Claude's fixes to the PR
+        (rdir / "diff.patch").write_text(sh("git diff --cached -- . ':!node_modules'", wd).stdout)
+        # Process cases grade behaviour too: the check can read what Claude did and said.
+        env["EVAL_TRANSCRIPT"] = str(rdir / "transcript.jsonl")
+        env["EVAL_FINAL"] = str(rdir / "final.md")
+        ok, log = run_check(case, meta, wd, env)
+        (rdir / "check.log").write_text(log)
+        # A rate limit, API error or crash is not a knowledge gap: never count it as a fail.
+        if not ok and not result_ok and not timed_out:
+            rec.update(status="error", reason=f"claude run failed: {result_text}"[:300])
+            return rec
+        rec.update(status="pass" if ok else "fail", timed_out=timed_out, cost=cost, turns=turns,
+                   tools=len(tools), skill_used=skill_used)
+    except Exception as e:  # a broken case must not kill the whole run
+        rec.update(status="error", reason=str(e)[:300])
+    finally:
+        if not args.keep:
+            shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            rec["workdir"] = str(wd)
+    return rec
+
+
+# ---------- fixture self-check (no model) ----------
+
+def verify_fixtures(cases, services):
+    bad = 0
+    for case in cases:
+        meta, _ = parse_task(case / "task.md")
+        verdicts = []
+        checks = [("bare", None, False), ("solution", case / "solution", True)]
+        if (case / "wrong").is_dir():
+            checks.append(("wrong", case / "wrong", False))
+        for label, overlay, want in checks:
+            if label == "solution" and not overlay.exists():
+                verdicts.append("solution: MISSING")
+                bad += 1
+                continue
+            # Fresh services per check: a shared KAFKA_PREFIX / database let the bare run's leftover
+            # topics and offsets flake the solution run (2026-10-13, kafka author).
+            env = {**os.environ, **services.env_for(meta["services"])}
+            t = tempfile.mkdtemp(prefix="gbk-v-")
+            try:
+                wd = pathlib.Path(t) / "work"
+                prepare_workdir(case, meta, wd, env)
+                if overlay:
+                    shutil.copytree(overlay, wd, dirs_exist_ok=True)
+                ok, log = run_check(case, meta, wd, env)
+                good = ok == want
+                bad += not good
+                verdicts.append(f"{label}: {'pass' if ok else 'fail'}{'' if good else ' <-- WRONG'}")
+                if not good:
+                    print("\n".join("    " + l for l in log.splitlines()[-25:]))
+            finally:
+                shutil.rmtree(t, ignore_errors=True)  # py3.9 TemporaryDirectory dies on stragglers under .git
+        print(f"{case.parent.name}/{case.name}: " + ", ".join(verdicts), flush=True)
+    return bad
+
+
+def summarize(recs, outdir):
+    rows = {}
+    for r in recs:
+        rows.setdefault((r["domain"], r["case"]), {}).setdefault(r["arm"], []).append(r)
+    arms = sorted({r["arm"] for r in recs})
+    lines = ["| case | " + " | ".join(arms) + " | note |", "|---|" + "---|" * len(arms) + "---|"]
+    for (d, c), by in sorted(rows.items()):
+        cells, rate = [], {}
+        for a in arms:
+            rs = by.get(a, [])
+            p = sum(r["status"] == "pass" for r in rs)
+            n = sum(r["status"] in ("pass", "fail") for r in rs)
+            rate[a] = p / n if n else None
+            extra = ""
+            if a == "skill" and rs:
+                extra = f" (skill fired {sum(bool(r.get('skill_used')) for r in rs)}/{len(rs)})"
+            errs = sum(r["status"] == "error" for r in rs)
+            cells.append((f"{p}/{n}" if n else "-") + extra + (f" err{errs}" if errs else ""))
+        note = ""
+        if rate.get("base") == 1:
+            note = "base passes: no lesson here, harden or retire"
+        elif rate.get("base") is not None and rate.get("skill") is not None:
+            note = "skill helps" if rate["skill"] > rate["base"] else ("skill hurts" if rate["skill"] < rate["base"] else "no change")
+        lines.append(f"| {d}/{c} | " + " | ".join(cells) + f" | {note} |")
+    cost = sum(r.get("cost") or 0 for r in recs)
+    lines.append(f"\nruns: {len(recs)}, cost (API-equivalent): ${cost:.2f}")
+    text = "\n".join(lines)
+    (outdir / "summary.md").write_text(text + "\n")
+    return text
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--domain")
+    ap.add_argument("--case")
+    ap.add_argument("--arms", default="base,skill")
+    ap.add_argument("--runs", type=int, default=2)
+    ap.add_argument("-j", "--jobs", type=int, default=3)
+    ap.add_argument("--model")
+    ap.add_argument("--skill-dir", help="test a draft skill folder instead of global/skills/<domain>")
+    ap.add_argument("--core-file", default=str(ROOT / "brain" / "CORE.md"),
+                    help="arm core: system-prompt text (default brain/CORE.md); pass an ablated copy")
+    ap.add_argument("--core-label", help="arm core: label suffix, e.g. no-reproduce")
+    ap.add_argument("--keep", action="store_true", help="keep temp workdirs")
+    ap.add_argument("--mode", choices=["write", "review"], default="write",
+                    help="review: the case's wrong/ implementation arrives as a teammate's PR to review and fix")
+    ap.add_argument("--no-exec", action="store_true",
+                    help="deny Bash: Claude can't run code or tests, so only knowledge counts")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--verify-fixtures", action="store_true")
+    args = ap.parse_args()
+
+    cases = find_cases(args.domain, args.case)
+    if args.mode == "review":
+        cases = [c for c in cases if (c / "wrong").is_dir()]
+    if args.list:
+        for c in cases:
+            print(f"{c.parent.name}/{c.name}")
+        return
+    if not cases:
+        sys.exit("no cases match")
+    services = Services()
+    try:
+        if args.verify_fixtures:
+            sys.exit(1 if verify_fixtures(cases, services) else 0)
+        outdir = CASES / "results" / datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        outdir.mkdir(parents=True)
+        jobs = [(c, a, i) for c in cases for a in args.arms.split(",") for i in range(args.runs)]
+        recs = []
+        with cf.ThreadPoolExecutor(args.jobs) as ex, (outdir / "results.jsonl").open("a") as f:
+            futs = [ex.submit(run_one, c, a, i, args, services, outdir) for c, a, i in jobs]
+            for fu in cf.as_completed(futs):
+                r = fu.result()
+                recs.append(r)
+                f.write(json.dumps(r) + "\n")
+                f.flush()
+                print(f"[{len(recs)}/{len(jobs)}] {r['domain']}/{r['case']} {r['arm']}#{r['run']}: {r['status']}"
+                      f" {r.get('secs', '')}s {r.get('reason', '')}", flush=True)
+        print(summarize(recs, outdir))
+        print(f"results: {outdir}")
+    finally:
+        services.stop()
+
+
+if __name__ == "__main__":
+    main()

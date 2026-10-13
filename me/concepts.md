@@ -1,8 +1,12 @@
 # Concepts: what Giga can actually do
 
-Levels: **seen** (read or watched it) → **explain** (explained it unaided,
-correctly) → **build** (wrote it yourself, it worked) → **teach** (made someone
-else, or a doc, get it). Raise a level only on evidence, and record the evidence.
+Four levels, lowest first:
+1. **seen**: read or watched it.
+2. **explain**: explained it correctly, unaided.
+3. **build**: wrote it yourself, and it worked.
+4. **teach**: got someone else (or a doc) to understand it.
+
+Raise a level only on evidence, and record that evidence.
 
 | Concept | Track | Level | Evidence | Next step |
 |---|---|---|---|---|
@@ -10,11 +14,11 @@ else, or a doc, get it). Raise a level only on evidence, and record the evidence
 | Dual-write problem | messaging | seen | issue-flow step 00 exercises B, D | tracker step 2–3 (tutor) |
 | Transactional outbox | messaging | seen | theory | **build**: tracker step 3 |
 | Inbox / idempotent consumer | messaging | seen | theory | tracker step 4 |
-| Retries + DLQ | messaging | seen | theory | tracker step 6 |
-| CQRS | messaging | seen | theory | tracker step 8 |
+| Retries + DLQ (dead-letter queue) | messaging | seen | theory | tracker step 6 |
+| CQRS (separate write and read models) | messaging | seen | theory | tracker step 8 |
 | Saga (choreography vs orchestration) | distributed | seen | earlier `saga` repo | tracker step 10 |
 | Hexagonal architecture | design | build | mogulkhan slices, auxiliary ports/adapters | teach: write the "why" in your own words |
-| DI with decorator metadata (SWC) | node | build | auctionize esbuild → SWC fix | — |
+| DI (dependency injection) with decorator metadata (SWC compiler) | node | build | auctionize esbuild → SWC fix | — |
 | Serverless on AWS (Lambda, DynamoDB, Cognito) | aws | build | auxiliary deployed 2026-08-18 | explain: single-table design aloud |
 | DynamoDB transactional counters | aws | seen | job/quota model (planned) | build in auxiliary upload pipeline |
 | Incremental sync (cursor/window, ledger, idempotent export) | data | seen | 2026-10-05: asked for "a cursor so each run pulls only fresh data"; saw ledger + window design and its failure modes | explain: why a cursor must not advance on a partial run |

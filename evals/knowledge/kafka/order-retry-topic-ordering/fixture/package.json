@@ -1,0 +1,7 @@
+{
+  "name": "fulfilment-consumer",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test 'test/**/*.test.ts'" },
+  "dependencies": { "kafkajs": "2.2.4" }
+}

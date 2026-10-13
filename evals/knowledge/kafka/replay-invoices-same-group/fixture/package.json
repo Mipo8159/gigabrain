@@ -1,0 +1,7 @@
+{
+  "name": "invoice-mailer",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node src/main.ts" },
+  "dependencies": { "kafkajs": "2.2.4" }
+}

@@ -5,7 +5,9 @@ metadata:
   type: project
 ---
 
-"It builds and the unit path ran" isn't "it will work when deployed." Close the gap in layers:
+**In short:** "it builds and the unit path ran" is not "it will work when deployed". Prove
+it in layers: packaging, a provider dry-run, error ordering, infra checks,
+offline validation.
 
 1. **Packaging:** build the real production Dockerfile locally. A `npm ci --only=production`
    stage, a Node version floor (firebase-admin 14 needs Node ≥ 21) or a generated
@@ -17,7 +19,7 @@ metadata:
 3. **Error ordering as evidence:** a malformed target that comes back `INVALID_ARGUMENT`
    means auth already passed. Bad credentials fail earlier (401/403). Log `error.message`,
    not just the code, so a payload error and a target error can be told apart.
-4. **Infra in parallel:** a read-only verifier agent checks egress (subnet → NAT/IGW, SG),
+4. **Infra in parallel:** a read-only verifier agent checks outbound network access (subnet route to NAT/IGW, security group),
    secret IAM (`simulate-principal-policy`), and that a sibling system already sends
    successfully with the same credentials.
 5. **Researcher answers marked "doc-knowledge" are hypotheses.** The installed SDK's `.d.ts`
@@ -26,10 +28,9 @@ metadata:
 6. **Local-only layer, when no external call is allowed** (2026-10-05): run the SDK's own
    payload validator offline on the exact message the service builds, plus a **control case**
    it must reject (FCM: a numeric `data` value), so the check can't pass vacuously. A queue
-   with `removeOnComplete` keeps no payload to inspect, so capture the job as it is written with
-   `redis-cli MONITOR` during the run. Use targets with no tokens so the worker completes with
-   `sent:0` and nothing leaves the machine. An ORM getter can be what keeps an INTEGER id a
+   with `removeOnComplete` keeps no payload, so capture the job as written with `redis-cli MONITOR`.
+   Use targets with no tokens so the worker ends with `sent:0` and nothing leaves the machine. An ORM getter can be what keeps an INTEGER id a
    string in the payload. Name it, because deleting it breaks every send silently when the
    send errors are swallowed.
-7. What stays unprovable without a device: OS display (foreground handling), the iOS APNs key
-   in the provider console, and real token validity. Name them as owner-side checks.
+7. Unprovable without a device: OS display (foreground handling), the iOS APNs key in the
+   provider console, and real token validity. Name them as owner-side checks.

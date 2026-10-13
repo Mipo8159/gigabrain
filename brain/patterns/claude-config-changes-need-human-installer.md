@@ -40,5 +40,9 @@ headless Read of that path was also blocked. It worked with
 that allow rule, and must use Read with an absolute path and say when the read fails.
 The classifier also refused Claude's edits to that allow rule and to the
 secret-scan allowlist, which is consistent with point 1: write the diff and let Giga apply it.
+When Giga asked for it in-session ("do these steps for me", 2026-10-14), the same edits went
+through. Fixed and proven: after `bin/install.sh`, a rerun showed the reviewer reading 4 checklists.
+So for an unattended run, queue config changes as proposals; in an attended run,
+apply them on Giga's explicit request.
 
 Related: [[steer-parallelism-and-agent-roles]]

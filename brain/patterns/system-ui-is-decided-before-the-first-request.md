@@ -5,6 +5,9 @@ metadata:
   type: project
 ---
 
+**In short:** for "can layer X change this UI", first find who renders it and when,
+relative to the first request.
+
 **Question asked:** a product owner wanted the iOS OAuth consent dialog
 ("App wants to use <domain> to sign in") to show the brand domain instead of a
 long backend host. Can the backend change it?
@@ -17,17 +20,16 @@ answer was a firm "no role", reached without a device, from the order of events
 plus confirming the server never reads its own Host.
 
 **What the client *can* do (the mobile dev first said "nothing"):**
-- `preferEphemeralSession: true` → no shared Safari cookies → iOS has nothing to
-  ask consent for, so no dialog. Cost: no Safari SSO, so the user re-picks the account.
+- `preferEphemeralSession: true`: no shared Safari cookies, so iOS has nothing
+  to ask consent for and shows no dialog. Cost: no Safari single sign-on; the user re-picks the account.
 - Point the start URL at a branded host (DNS + TLS + reverse proxy to the API).
   Safe if the server builds redirect/callback URLs from config or state, not the Host header.
   iOS may still shorten the host to the registrable domain.
 - A native provider SDK gets rid of the sheet, but needs a backend endpoint that
   verifies an ID token. Embedded WebViews are blocked by Google (`disallowed_useragent`).
 
-**Rule:** for "can layer X change this UI", first find who renders it and when
-relative to the first request. "Can't do anything" from one layer usually means
-nobody has traced which layer owns the string.
+**Rule:** "Can't do anything" from one layer usually means nobody traced which
+layer owns the string.
 
 Status: the ephemeral-session behaviour comes from docs, and was not yet checked
 on a device in that session.

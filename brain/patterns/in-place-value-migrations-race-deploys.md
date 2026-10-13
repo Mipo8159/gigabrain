@@ -5,27 +5,29 @@ metadata:
   type: project
 ---
 
-**Situation (2026-10-02):** an API field changed unit (client sends euros,
-DB stores coins ×10). A data migration multiplied existing rows by 10 and
-cascaded to derived rows. It passed up/down/up on a throwaway Postgres, and the
-`reviewer` subagent still found it unsafe:
+**In short:** rescaling existing values races the deploy. Skip it for young
+data; otherwise guard it.
 
-- **Deploy-order race.** New code before the migration → new rows already in
-  the new unit get multiplied again. Migration before new code → old pods keep
-  writing the old unit, never converted. When the deploy pipeline doesn't run
-  migrations, the window is real.
-- **Not idempotent.** Derived rows still "match" their source after both are
-  scaled, so a second hand-run scales again. Only the migration meta table
+**Situation (2026-10-02):** an API field changed unit (the client sends euros,
+the DB stores coins, ×10). A data migration multiplied existing rows by 10 and
+cascaded to derived rows. It passed up/down/up on a throwaway Postgres; the
+`reviewer` still found it unsafe:
+
+- **Deploy-order race.** New code before the migration: new rows already in the
+  new unit get multiplied again. Migration before new code: old pods keep
+  writing the old unit. If the pipeline doesn't run migrations, this is real.
+- **Not safe to rerun.** Derived rows still "match" their source after both are
+  scaled, so a second manual run scales again. Only the migrations table
   protects you.
-- **down() via integer division** truncates small values to 0 and can violate a
-  `> 0` check — the rollback fails exactly when you need it.
-- **Range drift.** Old max × factor silently exceeds the new validated max.
+- **down() with integer division** rounds small values to 0 and can break a
+  `> 0` check. The rollback fails exactly when you need it.
+- **Range drift.** The old maximum × factor silently exceeds the new validated maximum.
 
-**Rule:** before writing a value-rescaling migration, ask "is this data on prod,
-and how old is it?" If it's days old and test-only, skip the migration and let
-the old rows be wrong. If it must exist: bound it by a timestamp/marker, guard
-the post-scale max, round (not truncate) in down(), and run it in the same step
-as the cutover.
+**Rule:** before writing a value-rescaling migration, ask "is this data on
+prod, and how old is it?" If it's days old and test-only, skip the migration
+and let the old rows be wrong. If it must exist: limit it by a timestamp or
+marker, check the maximum after scaling, round (don't truncate) in down(), and
+run it in the same step as the cutover.
 
-**Tests won't show this** — it's a rollout property. This is the case for a
-background `reviewer` pass on any data/money diff.
+**Tests won't show this** (it's a rollout property), hence a background
+`reviewer` pass on any data or money diff.

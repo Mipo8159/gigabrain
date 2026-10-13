@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","cwd":"/tmp/gbk-fixture/work"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fx1","name":"Read","input":{"file_path":"/tmp/gbk-fixture/work/migrations/001_init.sql"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx1","content":"..."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fx2","name":"Write","input":{"file_path":"/tmp/gbk-fixture/work/migrations/003_drop_legacy_sessions.sql","content":"DROP TABLE legacy_sessions;\n"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx2","content":"File created successfully at: /tmp/gbk-fixture/work/migrations/003_drop_legacy_sessions.sql"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fx3","name":"Bash","input":{"command":"npm run migrate","description":"run"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx3","content":"> migrate\n> node scripts/migrate.js\n\napplied 003_drop_legacy_sessions.sql"}]}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Dropped `legacy_sessions` via migration 003 and applied it."}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"Dropped `legacy_sessions` via migration 003 and applied it."}

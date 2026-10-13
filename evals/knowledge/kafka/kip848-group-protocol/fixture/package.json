@@ -1,0 +1,7 @@
+{
+  "name": "shipment-tracker",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node src/main.ts" },
+  "dependencies": { "@confluentinc/kafka-javascript": "1.11.0" }
+}

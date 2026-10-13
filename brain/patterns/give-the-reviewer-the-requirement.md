@@ -5,22 +5,26 @@ metadata:
   type: project
 ---
 
-On 7 fixture cases (`bin/eval-intent`, 2026-10-12): `reviewer` **without** the
-spec caught 4/7 planted business gaps; `reviewer` **with** the spec 7/7; the
-purpose-built `intent-reviewer` 6/7, and its one miss was a false alarm on the
-control case (it marks correct-but-untested code `at-risk`). So the requirement
-in context did the work; the new agent's value is the *shape* of its report
+**In short:** give the reviewer the spec. That, not a special agent, is what
+catches business gaps.
+
+On 7 test cases (`bin/eval-intent`, 2026-10-12):
+- `reviewer` **without** the spec caught 4 of 7 planted business gaps.
+- `reviewer` **with** the spec caught 7 of 7.
+- The purpose-built `intent-reviewer` caught 6 of 7. Its one miss was a false
+  alarm on the control case (it marks correct but untested code `at-risk`).
+
+The requirement did the work. The new agent adds the *shape* of its report
 (traceability table, coverage line, overclaims, ranked plan), not detection.
 
-**Why:** an agent was built first and measured second; the three-arm eval
-(no spec / spec / new agent) is what separated "the input helped" from "the
-agent helped". One run per case, so these are noise-level numbers.
+**Why:** the agent was built first, measured second. Only the three-arm eval
+separated "the input helped" from "the agent helped". One run per case: noise-level.
 
 **How to apply:** whenever a ticket, spec or contract exists, pass it to
-`reviewer` too. Choose `intent-reviewer` / `/intent-review audit` when the
-deliverable is the report itself (an inherited repo, a take-home, an
-interview). Any new review agent gets a three-arm eval with a negative
-control before it is wired into a workflow.
+`reviewer` too. Use `intent-reviewer` or `/intent-review audit` when the report
+itself is the deliverable (an inherited repo, a take-home, an interview). Any
+new review agent gets a three-arm eval with a negative control before it joins
+a workflow.
 
 **Signal:** "build an agent that checks X", or a review that has a spec available but isn't given it.
 **Next time:** run the baseline with the extra input first; build the agent only if the eval shows a gap it closes.

@@ -1,0 +1,1 @@
+{ "name": "expense-sharing", "type": "module", "private": true, "scripts": { "test": "node --test" } }

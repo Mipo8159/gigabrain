@@ -28,8 +28,8 @@ own tooling) and anything an installed plugin already covers officially.
 ## 2. Triage (then one approval)
 
 - **New source:** clone it read-only next to gigabrain
-  (`~/projects/<name>`), check the licence (no licence or
-  non-permissive → stop and tell Giga), add an entry to `library/sources.json`.
+  (`~/projects/<name>`) and check the licence. If there is none, or it isn't
+  permissive, stop and tell Giga. Otherwise add an entry to `library/sources.json`.
 - **`--update`:** `git -C <local> fetch`, then `bin/check-library.py --drift`.
   For each commit touching absorbed paths, read the diff
   (`git -C <local> diff <pin>..origin/<branch> -- <path>`) and classify:
@@ -38,8 +38,8 @@ own tooling) and anything an installed plugin already covers officially.
   raise it). Also list new upstream items that pass the stack filter.
 - For every candidate item, compare with what exists: `global/skills`,
   `library/skills`, `library/plugins/*/skills`, `library/checklists`, installed
-  plugin skills. Overlap → skip with a reason in `sources.json` `skipped`, or
-  merge into the existing entry. An off-stack item that passes goes into an
+  plugin skills. If it overlaps, skip it with a reason in `sources.json`
+  `skipped`, or merge it into the existing entry. An off-stack item that passes goes into an
   opt-in bundle in `library/plugins.json`, not the global set.
 - Present **one table**: item · take/skip/merge · why. Get Giga's one OK. Then
   run steps 3–5 without further questions.

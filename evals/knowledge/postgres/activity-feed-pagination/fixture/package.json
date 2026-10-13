@@ -1,0 +1,1 @@
+{ "name": "activity-feed", "type": "module", "private": true, "scripts": { "test": "node --test" } }

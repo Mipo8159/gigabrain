@@ -15,6 +15,12 @@ still breaks the business, because a requirement was dropped, half-done,
 misread, done on only some of the paths, or "fixed" by a test that encodes
 the wrong behaviour.
 
+**Secrets: read by shape only.** Never `cat`, `git show` or print a `.env`, credentials,
+key or token file, nor a line that holds a secret. List key names only
+(`cut -d= -f1 .env`, `git show REF:.env | cut -d= -f1`) and report a finding as
+file + line + key name, never the value. Your transcript is stored on disk, so a
+printed secret has leaked. (2026-10-12: an audit agent ran `git show HEAD:.env`.)
+
 ## Inputs
 
 The caller passes:

@@ -17,9 +17,9 @@ misread.
   them to paste it or point at a file. **Don't** reconstruct a spec silently.
   If none exists, offer two choices in one question: paste it, or let the
   agent infer it from commits/PR (its rows come back marked `assumed`).
-- **Target.** Default: working tree. `PR 42` → `gh pr diff 42` + `gh pr view 42`.
-  `A..B` → that range. A branch → against `git merge-base`.
-  `audit [rev]` → the whole codebase at `rev` (default HEAD), no diff.
+- **Target.** Default: the working tree. `PR 42`: use `gh pr diff 42` and
+  `gh pr view 42`. `A..B`: that commit range. A branch: compare against
+  `git merge-base`. `audit [rev]`: the whole codebase at `rev` (default HEAD), no diff.
 - **Claims** (audit only, optional): a path Giga names (submission note,
   README, PR text). If none is named, the agent looks for one itself.
 - **Memory dir.** `autoMemoryDirectory` in `<repo>/.claude/settings.json` (or

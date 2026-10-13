@@ -13,12 +13,12 @@ skill grows. `brain/CORE.md` is already loaded (via `~/.claude/CLAUDE.md`).
 | `brain/patterns/` | reusable technical decisions (library picks, gotchas, designs) | `/curate` |
 | `library/` | imported skills + reviewer checklists, pinned to upstream (see `library/README.md`) | `/absorb` + `bin/absorb-adapt.py` |
 | `brain/library-ledger.md` | confidence + evidence per library entry | `/retro`, `/curate` |
-| `kit/` | `stacks.json` (stack → skills/checklists/ask rules), `projects.json` registry, `audit-accept.json` | Claude + Giga; registry by `bin/kit` |
+| `kit/` | `stacks.json` (each stack's skills, checklists and ask rules), the `projects.json` registry, `audit-accept.json` | Claude and Giga; the registry by `bin/kit` |
 | `memory/<project>/` | project facts; a project's `autoMemoryDirectory` points here | auto-memory |
-| `inbox/` | **gitignored** harvest candidates, untrusted | coach hook (signals), `/retro` |
-| `me/roadmap.md` | gap-closing phases + `Now:` milestone the coach hook injects | `/retro` (moves `Now:`) + Giga |
+| `inbox/` | **gitignored**, untrusted: candidate lessons and coach signals | coach hook (signals), `/retro` |
+| `me/roadmap.md` | phases that close gaps, plus the `Now:` milestone the coach hook adds to prompts | `/retro` (moves `Now:`) and Giga |
 | `me/scorecard.md` | AI-usage scores, re-scored monthly | `/curate` + Giga |
-| `me/concepts.md` | topic → seen / explain / build / teach | `/curate` + Giga |
+| `me/concepts.md` | each topic's level: seen, explain, build or teach | `/curate` and Giga |
 | `me/journal/` | one file per day, 3 lines per session | `/curate` |
 | `ai-craft/` | Track 0: drills + prompt log | Giga + Claude |
 | `global/` | installed into `~/.claude` by `bin/install.sh` (symlinks) | edit here, never in ~/.claude |
@@ -28,8 +28,8 @@ skill grows. `brain/CORE.md` is already loaded (via `~/.claude/CLAUDE.md`).
 
 - **Never commit** (see CORE). Hand over a summary instead.
 - Before handover, run `.githooks/pre-commit` manually; it is the secret scan.
-- Editing a skill/agent/hook: edit under `global/`. The symlinks make it live
-  immediately. Say which sessions need a restart (hooks and CLAUDE.md load at
+- To change a skill, agent or hook, edit it under `global/`. The symlinks make
+  it live immediately. Say which sessions need a restart (hooks and CLAUDE.md load at
   session start).
 - `brain/` entries use the same frontmatter as memory files
   (`name`, `description`, `metadata.type`) and link with `[[name]]`.

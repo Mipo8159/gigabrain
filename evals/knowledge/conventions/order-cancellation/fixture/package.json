@@ -1,0 +1,6 @@
+{
+  "name": "orders-core",
+  "private": true,
+  "type": "module",
+  "scripts": { "relay": "node src/events/relay-main.ts", "test": "node --test 'test/**/*.test.ts'" }
+}

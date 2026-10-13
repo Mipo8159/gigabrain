@@ -1,0 +1,1 @@
+{ "name": "catalog-service", "type": "module", "private": true, "scripts": { "test": "node --test" } }

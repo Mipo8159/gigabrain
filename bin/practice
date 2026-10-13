@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Practice gym: Giga solves the knowledge-eval tickets himself, hidden tests grade him.
+
+Every case under evals/knowledge/<domain>/<case>/ is a real ticket with a trap a senior
+engineer should catch. Vanilla Claude passes almost all of them (see each NOTES.md), so they
+are now training material for a human.
+
+  bin/practice list [domain]          # cases, with heldout + whether you've passed it
+  bin/practice start <domain/case>    # copies the project to ~/practice/<domain>/<case>, prints the ticket
+  bin/practice check <domain/case>    # runs the hidden tests against your work (services started for you)
+  bin/practice hint <domain/case>     # prints the trap's BRIEF entry: read only when stuck
+  bin/practice review <domain/case>   # same project, but starts from a teammate's buggy PR (wrong/): find it
+  bin/practice solution <domain/case> # diff of the reference fix vs your work (after you pass, or give up)
+
+Progress is kept in ~/practice/.progress.json (local only, never committed).
+Learning rule (skill `tutor`): write the core logic yourself; ask Claude for hints, not code.
+"""
+import importlib.machinery
+import importlib.util
+import json
+import os
+import pathlib
+import re
+import shutil
+import subprocess
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+CASES = ROOT / "evals" / "knowledge"
+HOME = pathlib.Path(os.environ.get("PRACTICE_HOME", pathlib.Path.home() / "practice"))
+PROGRESS = HOME / ".progress.json"
+
+# Reuse the eval runner's service + dependency helpers instead of duplicating them.
+_loader = importlib.machinery.SourceFileLoader("eval_knowledge", str(ROOT / "bin" / "eval-knowledge"))
+ek = importlib.util.module_from_spec(importlib.util.spec_from_loader("eval_knowledge", _loader))
+_loader.exec_module(ek)
+
+
+def load_progress():
+    try:
+        return json.loads(PROGRESS.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_progress(p):
+    HOME.mkdir(parents=True, exist_ok=True)
+    PROGRESS.write_text(json.dumps(p, indent=1, sort_keys=True) + "\n")
+
+
+def case_dir(ref):
+    c = CASES / ref
+    if not (c / "task.md").exists():
+        sys.exit(f"no such case: {ref}  (try: bin/practice list)")
+    return c
+
+
+def workdir(ref, mode="write"):
+    return HOME / (ref + ("-review" if mode == "review" else ""))
+
+
+def cmd_list(domain=None):
+    prog = load_progress()
+    for c in ek.find_cases(domain):
+        ref = f"{c.parent.name}/{c.name}"
+        meta, body = ek.parse_task(c / "task.md")
+        first = next((l for l in body.splitlines() if l.strip()), "")[:70]
+        mark = "✓" if prog.get(ref, {}).get("passed") else " "
+        tag = " [heldout]" if meta.get("heldout") == "true" else ""
+        print(f" {mark} {ref:<52}{tag}  {first}")
+
+
+def cmd_start(ref, mode="write"):
+    c = case_dir(ref)
+    wd = workdir(ref, mode)
+    if wd.exists():
+        print(f"already started: {wd}  (delete it to restart)")
+    else:
+        meta, _ = ek.parse_task(c / "task.md")
+        ek.prepare_workdir(c, meta, wd, dict(os.environ), c / "wrong" if mode == "review" else None)
+    meta, body = ek.parse_task(c / "task.md")
+    print(f"\n=== {ref} ({mode}) — your workspace: {wd}\n")
+    if mode == "review":
+        print("A teammate opened a PR (last commit: `git show HEAD`). Review it, find the bug, fix it.\nTicket:\n")
+    print(body)
+    if meta["services"]:
+        print(f"\nServices: {', '.join(meta['services'])} — `bin/practice check` starts them; "
+              "for your own runs see the env it prints.")
+    print(f"\nWhen ready: bin/practice check {ref}{' --review' if mode == 'review' else ''}")
+
+
+def cmd_check(ref, mode="write"):
+    c = case_dir(ref)
+    wd = workdir(ref, mode)
+    if not wd.exists():
+        sys.exit(f"not started: bin/practice start {ref}")
+    meta, _ = ek.parse_task(c / "task.md")
+    services = ek.Services()
+    try:
+        env = {**os.environ, **services.env_for(meta["services"])}
+        shown = {k: v for k, v in env.items() if k in ("DATABASE_URL", "REDIS_URL", "KAFKA_BROKERS", "KAFKA_PREFIX")}
+        if shown:
+            print("env:", " ".join(f"{k}={v}" for k, v in shown.items()))
+        ok, log = ek.run_check(c, meta, wd, env)
+    finally:
+        services.stop()
+        shutil.rmtree(wd / "hidden", ignore_errors=True)  # keep the tests hidden between attempts
+    # Show which tests failed (names + assertion message), not the test source.
+    lines = [l for l in log.splitlines() if re.search(r"✖|not ok|AssertionError|Error:|expected|actual", l)]
+    print("\n".join(lines[:30]) if not ok else "")
+    prog = load_progress()
+    rec = prog.setdefault(ref + ("#review" if mode == "review" else ""), {"attempts": 0, "passed": False})
+    rec["attempts"] += 1
+    rec["passed"] = rec["passed"] or ok
+    save_progress(prog)
+    print(f"\n{'PASS' if ok else 'FAIL'} — attempt {rec['attempts']}"
+          + ("" if ok else f".  Stuck? bin/practice hint {ref}"))
+    return 0 if ok else 1
+
+
+def cmd_hint(ref):
+    c = case_dir(ref)
+    brief = (c.parent / "BRIEF.md").read_text()
+    words = set(re.findall(r"[a-z]{4,}", c.name.replace("-", " ")))
+    # Pick the BRIEF trap whose text shares the most words with the case name.
+    blocks = re.split(r"\n(?=#{2,4} |\*\*\d+[.)]|\d+\. \*\*)", brief)
+    blocks = [b for b in blocks if not re.match(r"#+ (Mental model|Versions)", b.strip())] or blocks
+    # Also match on the ticket's own words: case names are short, tickets name the APIs involved.
+    _, body = ek.parse_task(c / "task.md")
+    words |= set(re.findall(r"[A-Za-z][A-Za-z.]{5,}", body.lower()))
+    best = max(blocks, key=lambda b: sum(w in b.lower() for w in words))
+    print(best.strip()[:2500])
+
+
+def cmd_solution(ref):
+    c = case_dir(ref)
+    wd = workdir(ref)
+    for f in sorted((c / "solution").rglob("*")):
+        if f.is_file():
+            rel = f.relative_to(c / "solution")
+            mine = wd / rel
+            print(f"=== {rel}")
+            if mine.exists():
+                subprocess.run(["diff", "-u", str(mine), str(f)])
+            else:
+                print(f.read_text())
+
+
+def main():
+    a = sys.argv[1:]
+    if not a or a[0] in ("-h", "--help"):
+        print(__doc__)
+        return 0
+    cmd, rest = a[0], a[1:]
+    review = "--review" in rest
+    rest = [r for r in rest if r != "--review"]
+    if cmd == "list":
+        return cmd_list(rest[0] if rest else None)
+    if not rest:
+        sys.exit(f"usage: bin/practice {cmd} <domain/case>")
+    ref = rest[0].strip("/")
+    if cmd == "start":
+        return cmd_start(ref)
+    if cmd == "review":
+        return cmd_start(ref, "review")
+    if cmd == "check":
+        return cmd_check(ref, "review" if review else "write")
+    if cmd == "hint":
+        return cmd_hint(ref)
+    if cmd == "solution":
+        return cmd_solution(ref)
+    sys.exit(f"unknown command {cmd}")
+
+
+if __name__ == "__main__":
+    sys.exit(main() or 0)

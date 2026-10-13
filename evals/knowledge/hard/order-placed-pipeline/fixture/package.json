@@ -1,0 +1,19 @@
+{
+  "name": "orders-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "migrate": "node src/db/migrate.ts",
+    "test": "node --test --test-force-exit 'test/**/*.test.ts'"
+  },
+  "dependencies": {
+    "kafkajs": "2.2.4",
+    "pg": "8.23.1",
+    "redis": "6.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1"
+  }
+}

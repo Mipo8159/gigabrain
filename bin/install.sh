@@ -60,6 +60,11 @@ s["cleanupPeriodDays"] = 365  # keep transcripts a year: they are the raw materi
 ask = s.setdefault("permissions", {}).setdefault("ask", [])
 for rule in ["Bash(git commit:*)", "Bash(git push:*)"]:
     if rule not in ask: ask.append(rule)
+# 2026-10-13: the reviewer could not read library/checklists from other repos (blocked outside cwd,
+# proven by eval process/review-pass-password-reset). Read-only allow for the library.
+allow = s["permissions"].setdefault("allow", [])
+lib_read = f"Read(/{G}/library/**)"
+if lib_read not in allow: allow.append(lib_read)
 hooks = s.setdefault("hooks", {})
 def ensure(event, cmd, matcher=None, timeout=None):
     groups = hooks.setdefault(event, [])
@@ -79,7 +84,7 @@ ensure("PostToolUse", guard, "Edit|Write|MultiEdit", 10)
 ensure("SessionStart", guard, None, 10)
 ensure("Stop", guard, None, 150)
 json.dump(s, open(path, "w"), indent=2); open(path, "a").write("\n")
-print("  cleanupPeriodDays=365, ask: git commit/push, SessionStart: inbox-status+guard, UserPromptSubmit: coach,"
+print("  cleanupPeriodDays=365, ask: git commit/push, allow: Read library/**, SessionStart: inbox-status+guard, UserPromptSubmit: coach,"
       " PreToolUse/PostToolUse/Stop: guard")
 EOF
 

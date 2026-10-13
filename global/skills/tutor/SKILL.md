@@ -37,8 +37,8 @@ Before anything, state the split in two lines:
    prediction from step 1; the gap between the two is where the learning is.
 6. **Explain back.** Giga explains the mechanism in 3–5 sentences, without
    looking. Correct what's wrong, then update `me/concepts.md` in gigabrain
-   (raise the level only on evidence: built it → `build`, explained it
-   correctly unaided → `explain`).
+   (raise the level only on evidence: built it means `build`, explained it
+   correctly without help means `explain`).
 
 ## Don't
 

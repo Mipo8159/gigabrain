@@ -1,0 +1,1 @@
+{ "name": "ledger-consumer", "type": "module", "private": true, "scripts": { "test": "node --test" } }

@@ -49,16 +49,16 @@ Entry format = memory format: frontmatter `name` / `description` /
 
 ## 4. Prune (every run, not optional)
 
-- CORE.md over ~120 lines → merge or demote the weakest lines to their entry files.
-- Any brain entry contradicted by newer evidence → fix it or delete it, and say so.
-- Entries untouched for 90+ days with no recent evidence → list them for Giga
+- CORE.md over ~120 lines: merge lines, or move the weakest ones into their entry files.
+- A brain entry contradicted by newer evidence: fix it or delete it, and say so.
+- Entries untouched for 90+ days with no recent evidence: list them for Giga
   as "still true?". Don't delete these silently.
 - **Library** (`brain/library-ledger.md`, rules in `library/README.md`):
-  - confidence ≥ 0.7 with evidence from 2+ projects → promote: distil the rule
+  - Confidence 0.7 or more, with evidence from 2+ projects: promote. Distil the rule
     the evidence actually proved into `brain/patterns/<slug>.md` (not the whole
     chapter), link it from the ledger row. The four-part bar still applies.
-  - confidence < 0.3, or no evidence 90+ days after the row's `Added`
-    date → put it under "Ask Giga" (drop it from `sources.json`, re-run
+  - Confidence below 0.3, or no evidence 90+ days after the row's `Added`
+    date: put it under "Ask Giga" (drop it from `sources.json`, re-run
     `bin/absorb-adapt.py`, delete its folder and ledger row on a yes).
   - `bin/check-library.py --drift` (after `git -C <local> fetch` for each
     source): if upstream commits touch absorbed paths, report "run

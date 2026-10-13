@@ -5,8 +5,9 @@ and learning material for AWS, message brokers, horizontal scaling, system
 design, DDD, databases, Node.js and Kubernetes, ideally with visualisation and
 hands-on project generation.
 
-Nothing here is absorbed yet. A repo moves to `../sources.json` only through
-`/absorb`, which reads the actual files. Stars measure popularity, not quality.
+Nothing here is absorbed unless marked. A repo moves to `../sources.json` only
+through `/absorb`, which reads the actual files. Stars measure popularity, not
+quality.
 
 Stars, last push and licence come from the GitHub API on 2026-10-05.
 

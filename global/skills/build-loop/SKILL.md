@@ -80,7 +80,7 @@ Show the contract, get one approval. **That is the last interruption.**
 
 ## Phase 3 — The loop
 
-Iterate: implement → run the verify command → read the actual output → fix →
+Iterate: implement, run the verify command, read the actual output, fix,
 repeat. Until every box is checked.
 
 **Green means the command ran and you read its output in this session.** Not

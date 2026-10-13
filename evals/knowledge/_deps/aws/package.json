@@ -1,0 +1,16 @@
+{
+  "name": "knowledge-deps-aws",
+  "private": true,
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1150.0",
+    "@aws-sdk/client-eventbridge": "3.1150.0",
+    "@aws-sdk/client-s3": "3.1150.0",
+    "@aws-sdk/client-sqs": "3.1150.0",
+    "@aws-sdk/lib-dynamodb": "3.1150.0",
+    "@aws-sdk/s3-request-presigner": "3.1150.0",
+    "@aws-sdk/util-dynamodb": "3.996.9",
+    "@smithy/node-http-handler": "4.12.1",
+    "@types/aws-lambda": "8.10.164",
+    "@types/node": "24.19.2"
+  }
+}

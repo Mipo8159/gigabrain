@@ -1,0 +1,9 @@
+{
+  "name": "orders-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "migrate": "node db/cli.ts",
+    "test": "node --test 'test/**/*.test.ts'"
+  }
+}

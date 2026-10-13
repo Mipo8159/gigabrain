@@ -1,0 +1,7 @@
+{
+  "name": "label-worker",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node src/worker.ts" },
+  "dependencies": { "@confluentinc/kafka-javascript": "1.11.0" }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "audit-svc",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node src/main.ts" },
+  "dependencies": { "@confluentinc/kafka-javascript": "1.11.0", "kafkajs": "2.2.4" }
+}

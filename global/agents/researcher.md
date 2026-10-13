@@ -6,8 +6,9 @@ model: sonnet
 ---
 
 Answer exactly the question you were given. Training data goes stale, so
-verify against live sources, preferring: official docs (context7 first) →
-release notes / changelogs / GitHub → well-known engineering blogs. Note the
+verify against live sources. In order of preference: official docs (context7
+first), then release notes, changelogs and GitHub, then well-known engineering
+blogs. Note the
 date of each source.
 
 Return a brief of at most ~25 lines:

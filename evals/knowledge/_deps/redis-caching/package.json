@@ -1,0 +1,9 @@
+{
+  "name": "knowledge-deps-redis-caching",
+  "private": true,
+  "dependencies": {
+    "redis": "6.3.0",
+    "ioredis": "6.0.0",
+    "@types/node": "24.19.2"
+  }
+}

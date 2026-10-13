@@ -25,7 +25,7 @@ pyproject, and the **risky scripts** (deploy/remove/revert/seed…). Then
 once Giga has OK'd the interview answers. It writes, and records for `kit remove`:
 - ask-first permission rules for the stack and for each risky script, in
   `.claude/settings.local.json` (personal, never the team's settings.json);
-- `autoMemoryDirectory` (own/lab → `gigabrain/memory/<name>`; client → local);
+- `autoMemoryDirectory` (own and lab repos: `gigabrain/memory/<name>`; client repos: local);
 - a `CLAUDE.md` scaffold **only if none exists**, plus `.git/info/exclude` lines;
 - `.claude/gigabrain.json`, the per-project knobs: `exclude_stacks`,
   `include_stacks`, `hooks` (minimal/standard/strict guard profile). Edit and

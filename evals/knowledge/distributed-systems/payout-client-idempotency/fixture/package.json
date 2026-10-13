@@ -1,0 +1,1 @@
+{ "name": "payouts-client", "type": "module", "private": true, "scripts": { "test": "node --test" } }

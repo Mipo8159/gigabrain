@@ -5,25 +5,25 @@ metadata:
   type: feedback
 ---
 
-Two shapes Giga keeps asking for:
+**In short:** give the short answer first, and answer "how does X work"
+questions with one table plus an honest list of gaps.
 
-1. **Action questions → short first.** ≤5 numbered steps or ≤10 lines, then
-   offer the long version in one line instead of writing it.
-2. **"How does X work / are we using X / in what way" → a map.** One table
-   (thing → what it does → used how / status), then an honest gap list
-   (what is unused, unproven, or should have been used).
+1. **"What do I do" questions: short first.** At most 5 steps or 10 lines,
+   then offer the long version in one line instead of writing it.
+2. **"How does X work", "are we using X": a map.** One table (the thing, what
+   it does, how it's used or its status), then an honest gap list: what is
+   unused, unproven, or should have been used.
 
 **Evidence:** 2026-10-01: "these are alot of instructions, please narrow it down
-to few usefull steps"; "what are these folders, how do they work?".
+to few usefull steps" and "what are these folders, how do they work?".
 2026-10-02: "are you aware of our gigabrain repo? how have you onboarded?" and
-"are we using agents? in what way? or hooks and skills?" — both answered with an
-inventory table + "not used, and why" + an untested-caveat, and Giga moved on
-without a follow-up.
+"are we using agents? in what way? or hooks and skills?". Both got an inventory
+table, a "not used, and why" list and an untested-caveat. Giga moved on.
 
-**Why:** Giga checks the mental model before acting; a wall of prose gets sent
-back, and a map without gaps hides what is only instructed vs actually enforced
-or proven.
+**Why:** Giga checks their mental model before acting. A wall of prose gets
+sent back. A map without gaps hides the difference between "only instructed"
+and "actually enforced or proven".
 
-**How to apply:** status words must be honest — "tested by piping JSON, not yet
-fired in a live session" beats "the hook protects you". Pairs with
+**How to apply:** honest status words. "Tested by piping JSON, not yet fired
+live" beats "the hook protects you". Goes with
 [[giga-wants-argued-recommendations]].

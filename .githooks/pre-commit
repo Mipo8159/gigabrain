@@ -1,63 +1,119 @@
-#!/usr/bin/env bash
-# Secret scan for gigabrain. Runs on `git commit` (core.hooksPath=.githooks),
-# or by hand: .githooks/pre-commit --all
-# Prints file:line and the pattern NAME only — never the matched value.
-cd "$(dirname "$(readlink -f "$0")")/.." || exit 1   # always the repo root
+#!/usr/bin/env python3
+"""Secret scan for gigabrain. Runs on `git commit` (core.hooksPath=.githooks),
+or by hand: .githooks/pre-commit --all
+Prints file:line and the pattern NAME only — never the matched value.
 
-if [ "$1" = "--all" ] || ! git rev-parse --git-dir >/dev/null 2>&1; then
-  files=$(find . -type f -not -path './.git/*' -not -path './inbox/*' -not -path './node_modules/*')
-else
-  files=$(git diff --cached --name-only --diff-filter=ACM)
-fi
+Python, not bash: 2026-10-12 the bash version used `declare -A` (bash 4+), died on
+macOS bash 3.2, and still printed "clean". Any internal error now exits 1.
+"""
+import hashlib
+import os
+import re
+import subprocess
+import sys
 
-declare -A P=(
-  [aws-access-key]='(AKIA|ASIA)[A-Z0-9]{16}'
-  [google-oauth-secret]='GOCSPX-[A-Za-z0-9_-]{10,}'
-  [private-key]='-----BEGIN [A-Z ]*PRIVATE KEY-----'
-  [github-token]='gh[pousr]_[A-Za-z0-9]{30,}'
-  [anthropic-key]='sk-ant-[A-Za-z0-9_-]{20,}'
-  [slack-token]='xox[baprs]-[A-Za-z0-9-]{10,}'
-  [assigned-secret]='(password|passwd|secret|api_?key|token)[[:space:]]*[:=][[:space:]]*["'"'"']?[A-Za-z0-9/+_-]{12,}'
-)
+ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+os.chdir(ROOT)  # always the repo root
 
-# Reviewed false positives: "<path> <sha256 of the exact line, first 16 hex>"
-# in .githooks/secret-allowlist. Any change to the line changes its hash, so
-# the line is scanned again. Add entries only after inspecting the line masked.
-allowed() { # allowed <file> <lineno>
-  [ -f .githooks/secret-allowlist ] || return 1
-  local h; h=$(sed -n "${2}p" "$1" | sha256sum | cut -c1-16)
-  grep -qxF "${1#./} $h" .githooks/secret-allowlist
+P = {
+    "aws-access-key": r"(AKIA|ASIA)[A-Z0-9]{16}",
+    "google-oauth-secret": r"GOCSPX-[A-Za-z0-9_-]{10,}",
+    "private-key": r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    "github-token": r"gh[pousr]_[A-Za-z0-9]{30,}",
+    "anthropic-key": r"sk-ant-[A-Za-z0-9_-]{20,}",
+    "slack-token": r"xox[baprs]-[A-Za-z0-9-]{10,}",
+    "assigned-secret": r"(password|passwd|secret|api_?key|token)\s*[:=]\s*[\"']?[A-Za-z0-9/+_-]{12,}",
 }
+P = {k: re.compile(v, re.I) for k, v in P.items()}  # grep -i, as before
 
-hits=0
-for f in $files; do
-  [ -f "$f" ] || continue
-  for name in "${!P[@]}"; do
-    lines=$(grep -nEio -- "${P[$name]}" "$f" 2>/dev/null | cut -d: -f1 | sort -u |
-            while read -r n; do allowed "$f" "$n" || echo "$n"; done | tr '\n' ',' | sed 's/,$//')
-    if [ -n "$lines" ]; then
-      echo "  ✗ $f lines $lines: $name"
-      hits=1
-    fi
-  done
-done
+SKIP_DIRS = {".git", "inbox", "node_modules"}
 
-# Client internals must never reach brain/ (it is pushed to GitHub).
-# Terms are case-insensitive; one per line in .githooks/client-terms.
-if [ -f .githooks/client-terms ]; then
-  for f in $files; do
-    case "$f" in ./brain/*|brain/*) ;; *) continue ;; esac
-    [ -f "$f" ] || continue
-    while IFS= read -r term; do
-      term="${term%%#*}"; term="$(echo "$term" | xargs)"; [ -z "$term" ] && continue
-      lines=$(grep -nio -- "$term" "$f" 2>/dev/null | cut -d: -f1 | sort -u | tr '\n' ',' | sed 's/,$//')
-      if [ -n "$lines" ]; then echo "  ✗ $f lines $lines: client term"; hits=1; fi
-    done < .githooks/client-terms
-  done
-fi
 
-if [ $hits -ne 0 ]; then
-  echo "pre-commit: possible secrets found (values masked). Redact, or commit with --no-verify if a false positive."
-  exit 1
-fi
-echo "pre-commit: secret scan clean"
+def files_to_scan():
+    in_repo = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True).returncode == 0
+    if "--all" in sys.argv or not in_repo:
+        out = []
+        for d, dirs, names in os.walk("."):
+            dirs[:] = [x for x in dirs if not (d == "." and x in SKIP_DIRS) and x != "node_modules"]
+            out += [os.path.join(d, n) for n in names]
+        return out
+    r = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                       capture_output=True, text=True, check=True)
+    return [f for f in r.stdout.splitlines() if f]
+
+
+def load_allowlist():
+    # Reviewed false positives: "<path> <sha256 of the exact line incl. newline, first 16 hex>".
+    # Any change to the line changes its hash, so the line is scanned again.
+    try:
+        with open(".githooks/secret-allowlist") as f:
+            return {l.strip() for l in f if l.strip()}
+    except FileNotFoundError:
+        return set()
+
+
+def read_lines(path):
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if b"\0" in data[:8192]:
+        return None  # binary
+    return data.decode("utf-8", "replace").splitlines(keepends=True)
+
+
+def main():
+    allow = load_allowlist()
+    hits = 0
+    files = files_to_scan()
+    for f in files:
+        if not os.path.isfile(f):
+            continue
+        lines = read_lines(f)
+        if lines is None:
+            continue
+        rel = f[2:] if f.startswith("./") else f
+        for name, rx in P.items():
+            nums = []
+            for i, line in enumerate(lines, 1):
+                if rx.search(line):
+                    h = hashlib.sha256((line if line.endswith("\n") else line + "\n").encode()).hexdigest()[:16]
+                    if f"{rel} {h}" not in allow:
+                        nums.append(str(i))
+            if nums:
+                print(f"  ✗ {f} lines {','.join(nums)}: {name}")
+                hits += 1
+
+    # Client internals must never reach brain/ (it is pushed to GitHub).
+    # Terms are case-insensitive; one per line in .githooks/client-terms.
+    try:
+        with open(".githooks/client-terms") as tf:
+            terms = [t.split("#", 1)[0].strip().lower() for t in tf]
+        terms = [t for t in terms if t]
+    except FileNotFoundError:
+        terms = []
+    for f in files:
+        rel = f[2:] if f.startswith("./") else f
+        if not rel.startswith("brain/") or not os.path.isfile(f):
+            continue
+        lines = read_lines(f) or []
+        for t in terms:
+            nums = [str(i) for i, line in enumerate(lines, 1) if t in line.lower()]
+            if nums:
+                print(f"  ✗ {f} lines {','.join(nums)}: client term")
+                hits += 1
+
+    if hits:
+        print("pre-commit: possible secrets found (values masked). Redact, or commit with --no-verify if a false positive.")
+        return 1
+    print(f"pre-commit: secret scan clean ({len(files)} files)")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception as e:  # never report "clean" after a crash
+        print(f"pre-commit: scan FAILED to run ({type(e).__name__}: {e}); treating as dirty")
+        sys.exit(1)

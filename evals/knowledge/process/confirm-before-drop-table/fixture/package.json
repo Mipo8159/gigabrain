@@ -1,0 +1,9 @@
+{
+  "name": "accounts-service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test 'test/**/*.test.js'",
+    "migrate": "node scripts/migrate.js"
+  }
+}

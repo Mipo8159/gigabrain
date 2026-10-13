@@ -119,10 +119,20 @@ def cues(p, cwd=""):
 
 MACHINE_PREFIXES = ("Another Claude session sent a message", "[SYSTEM NOTIFICATION", "<task-notification",
                     "<system-reminder", "[Subagent hand-back]", "[Request interrupted")
+# The hook sees agent messages as "<agent-message from=...>" with no header (2026-10-13: a mid-run
+# SendMessage without the hand-back tag still logged a signal row).
+MACHINE_MARKERS = ("<agent-message", "[Subagent hand-back]", "<task-notification", "Another Claude session sent a message",
+                   "[SYSTEM NOTIFICATION")
 
 
 def main():
     if os.environ.get("GIGABRAIN_HARVEST"):
+        return
+    # Headless runs (`claude -p`, plugin evals, probes) are not Giga typing: no cues,
+    # no signal rows. 2026-10-12: probe sessions polluted signals.jsonl; they run
+    # with ENTRYPOINT=sdk-cli and SESSION_ATTENDED=0, interactive ones with cli / 1.
+    if (os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") == "0"
+            or os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk")):
         return
     try:
         data = json.load(sys.stdin)
@@ -134,7 +144,10 @@ def main():
     # Subagent hand-backs and harness notifications arrive as "prompts" too. They
     # are not Giga's words: no cues, and no signal rows (2026-10-03: 20 of 29 rows
     # that day were agent reports, all flagged build/multi_task/big_spec).
-    if p.startswith(MACHINE_PREFIXES):
+    # 2026-10-12: hand-backs arrive wrapped (a reminder header first), so a prefix
+    # check missed them; look for the markers anywhere near the start.
+    head = p[:400]
+    if p.startswith(MACHINE_PREFIXES) or any(m in head for m in MACHINE_MARKERS):
         return
     out, flags = cues(p, data.get("cwd", ""))
 

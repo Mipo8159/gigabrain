@@ -2,7 +2,7 @@
 
 Two fake take-home submissions live **outside** gigabrain, so an audit run inside them can't
 see these keys: `~/Desktop/workdir/sweeft/practice-task-tracker` and `practice-shop-orders`.
-Both are Express + pg (plain JS), `npm test` is green (bugs and all), `docker compose up -d` gives Postgres.
+Both are Express with pg (plain JS). `npm test` passes, bugs and all. `docker compose up -d` starts Postgres.
 
 A third, `practice-trial-day-review` (Koa + Sequelize + MySQL), replicates a real interview
 task: review a teammate's submission (branch `solution/peter-griffin`). Its key includes the

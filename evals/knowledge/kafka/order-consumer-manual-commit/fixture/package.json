@@ -1,0 +1,7 @@
+{
+  "name": "orders-svc",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node src/main.ts", "test": "node --test 'test/**/*.test.ts'" },
+  "dependencies": { "kafkajs": "2.2.4" }
+}

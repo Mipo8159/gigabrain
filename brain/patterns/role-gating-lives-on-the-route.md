@@ -5,20 +5,22 @@ metadata:
   type: project
 ---
 
-**Evidence (2026-10-02):** asked to let only the top admin role change a user
-field from the admin panel. The backend already accepted the field on a generic
-`PUT /users/:id` that the lower admin role could also call. A UI-only check
-would have looked done and changed nothing. The same endpoint also accepted
-`role`, so a lower admin could promote themselves to top admin and then get the
-"protected" route anyway.
+**In short:** a role restriction lives on the server route that writes the field, not in
+the UI. Check every route that can write it, including the one that sets
+`role`.
 
-**Rule:** before building a role-restricted control, read the role decorator
-or guard on every route that writes that field. If the write is reachable by a
-broader role, the fix belongs on the server:
+**Evidence (2026-10-02):** asked to let only the top admin role change a user
+field in the admin panel. The backend already accepted it on a generic
+`PUT /users/:id` the lower admin role could call, so a UI-only check would have
+changed nothing. That endpoint also accepted `role`: a lower admin could
+promote themselves and reach the "protected" route anyway.
+
+**Rule:** read the role guard on every route that writes the field. If a
+broader role can reach it, fix it on the server:
 1. Give the privileged field its own route, with the narrow role guard.
 2. Remove the field from the shared update schema. If the validator strips
    unknown keys (zod `z.object`, class-validator `whitelist`), a lower role's
-   attempt is silently dropped. Confirm the global pipe really strips.
+   attempt is silently dropped. Confirm the global validation pipe really strips.
 3. Check `role` itself the same way. A privileged field is only as safe as the
    path to the privileged role.
 

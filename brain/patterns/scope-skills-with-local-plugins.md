@@ -5,9 +5,11 @@ metadata:
   type: reference
 ---
 
-Every global skill's name and description sits in context in every session. A
-NestJS repo listing Cisco and homelab skills is noise. Phase 1 (2026-10-12),
-checked against the live docs and a CLI 2.1.x:
+**In short:** every global skill's description costs context in every session (a NestJS
+repo listing Cisco skills is noise), so off-stack skills go in opt-in local
+plugins.
+
+Phase 1 (2026-10-12), checked against the live docs and CLI 2.1.x:
 
 - **Opt-in bundles:** `library/.claude-plugin/marketplace.json` with
   relative-path plugins. A marketplace added from a local path loads them **in

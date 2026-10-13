@@ -5,16 +5,19 @@ metadata:
   type: project
 ---
 
-`~/.claude/settings.json` allows `Bash` outright, sets `defaultMode: auto`,
-and allows Read/Glob/Grep/WebSearch/WebFetch/Skill/Artifact/Task. A short `deny`
-list still hard-blocks catastrophic commands (`rm -rf /`, `rm -rf ~`, `sudo rm`,
-force-push, `mkfs`, `dd` to a device).
+**In short:** any shell command runs unprompted (Giga's choice), but confirm
+anything that can't be undone or leaves the machine.
 
-**Why:** Giga chose this on 2026-08-13 over a curated allowlist, after being told
-plainly that it lets me run any shell command in the tree without asking. They had
-already made the same choice for `mogulkhan/.claude/settings.json`.
+`~/.claude/settings.json` allows `Bash` outright, sets `defaultMode: auto`, and
+allows Read, Glob, Grep, WebSearch, WebFetch, Skill, Artifact and Task. A short
+`deny` list still blocks the catastrophic commands: `rm -rf /`, `rm -rf ~`,
+`sudo rm`, force-push, `mkfs`, and `dd` to a device.
 
-**How to apply:** the absence of a prompt is not a judgment call being made for me.
-Still confirm before anything irreversible or outward-facing — pushing, deploying,
-deleting data, touching other projects on this machine — and still look at a target
-before overwriting it. Supports [[working-style-interview-then-autonomous-loop]].
+**Why:** Giga chose this on 2026-08-13 over a hand-picked allow list, after
+being told plainly it lets Claude run any shell command without asking. Same
+choice as `mogulkhan/.claude/settings.json`.
+
+**How to apply:** no prompt doesn't mean the action was judged safe. Confirm
+anything irreversible or outward-facing: pushing, deploying, deleting data,
+touching other projects here. Look at a target before overwriting it. Supports
+[[working-style-interview-then-autonomous-loop]].

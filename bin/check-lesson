@@ -1,0 +1,103 @@
+#!/usr/bin/env node
+// Render check for a teaching page (skill `teach`). Usage: bin/check-lesson <page.html> (lessons live in ~/.cache/gigabrain/learn, see bin/learn) [--shots dir]
+//
+// Loads the page in headless Chromium and checks, mechanically:
+//   - no console errors and no uncaught page errors
+//   - at least 4 <figure> elements that contain an <svg>
+//   - every [data-stepper] changes the page when its [data-step="next"] button is clicked
+//   - at least 5 [data-quiz]; clicking one [data-option] in each makes its [data-feedback] visible
+//   - no horizontal scroll at phone width (390 px), in light and dark colour schemes
+// Exit 0 = pass. Screenshots (desktop + phone, light + dark) go to --shots (default: a temp dir).
+// Playwright lives in ~/.cache/gigabrain/render (npm i playwright && npx playwright install chromium).
+const path = require('node:path');
+const fs = require('node:fs');
+const os = require('node:os');
+const { createRequire } = require('node:module');
+
+const renderDir = path.join(os.homedir(), '.cache', 'gigabrain', 'render');
+let chromium;
+try {
+  ({ chromium } = createRequire(path.join(renderDir, 'package.json'))('playwright'));
+} catch {
+  console.error(`playwright missing: cd ${renderDir} && npm i playwright && npx playwright install chromium`);
+  process.exit(2);
+}
+
+const args = process.argv.slice(2);
+const file = args.find(a => !a.startsWith('--'));
+if (!file) { console.error('usage: bin/check-lesson <page.html> [--shots dir]'); process.exit(2); }
+const shotsIdx = args.indexOf('--shots');
+const shots = shotsIdx >= 0 ? args[shotsIdx + 1] : fs.mkdtempSync(path.join(os.tmpdir(), 'lesson-shots-'));
+const url = 'file://' + path.resolve(file);
+
+(async () => {
+  const browser = await chromium.launch();
+  const problems = [];
+  const facts = {};
+  try {
+    for (const scheme of ['light', 'dark']) {
+      for (const [label, viewport] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
+        const page = await browser.newPage({ viewport, colorScheme: scheme });
+        const errors = [];
+        page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+        page.on('pageerror', e => errors.push(String(e)));
+        await page.goto(url, { waitUntil: 'load' });
+        await page.waitForTimeout(300);
+        await page.screenshot({ path: path.join(shots, `${label}-${scheme}.png`), fullPage: false });
+        if (errors.length) problems.push(`${label}/${scheme}: console errors: ${errors.slice(0, 3).join(' | ')}`);
+        if (label === 'phone') {
+          const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+          if (overflow > 2) problems.push(`${scheme}: horizontal scroll at 390px (${overflow}px wider)`);
+        }
+        if (label === 'desktop' && scheme === 'light') {
+          facts.svgFigures = await page.locator('figure:has(svg)').count();
+          if (facts.svgFigures < 4) problems.push(`only ${facts.svgFigures} <figure> with SVG (need 4+)`);
+
+          const steppers = page.locator('[data-stepper]');
+          facts.steppers = await steppers.count();
+          if (facts.steppers < 1) problems.push('no [data-stepper]');
+          for (let i = 0; i < facts.steppers; i++) {
+            const s = steppers.nth(i);
+            const before = await s.innerHTML();
+            const next = s.locator('[data-step="next"]').first();
+            if (!(await next.count())) { problems.push(`stepper ${i + 1}: no [data-step="next"] button`); continue; }
+            await next.scrollIntoViewIfNeeded();
+            await next.click();
+            await page.waitForTimeout(150);
+            if ((await s.innerHTML()) === before) problems.push(`stepper ${i + 1}: clicking next changed nothing`);
+          }
+
+          const quizzes = page.locator('[data-quiz]');
+          facts.quizzes = await quizzes.count();
+          if (facts.quizzes < 5) problems.push(`only ${facts.quizzes} [data-quiz] (need 5+)`);
+          let reacting = 0;
+          for (let i = 0; i < facts.quizzes; i++) {
+            const q = quizzes.nth(i);
+            const opt = q.locator('[data-option]').first();
+            const fb = q.locator('[data-feedback]').first();
+            if (!(await opt.count()) || !(await fb.count())) { problems.push(`quiz ${i + 1}: needs [data-option] and [data-feedback]`); continue; }
+            await opt.scrollIntoViewIfNeeded();
+            await opt.click();
+            await page.waitForTimeout(100);
+            const shown = await fb.evaluate(el => {
+              const cs = getComputedStyle(el);
+              return cs.display !== 'none' && cs.visibility !== 'hidden' && !el.hidden && el.textContent.trim().length > 20;
+            });
+            if (shown) reacting++; else problems.push(`quiz ${i + 1}: feedback not shown after a click`);
+          }
+          facts.quizzesReacting = reacting;
+          facts.practiceLinks = await page.locator('text=/bin\\/practice/').count();
+        }
+        await page.close();
+      }
+    }
+  } finally {
+    await browser.close();
+  }
+  console.log(JSON.stringify({ file, ...facts, shots }, null, 0));
+  if (problems.length) {
+    console.log('FAIL\n' + problems.map(p => '  - ' + p).join('\n'));
+    process.exit(1);
+  }
+  console.log('PASS');
+})().catch(e => { console.error('check-lesson crashed:', e.message); process.exit(2); });
