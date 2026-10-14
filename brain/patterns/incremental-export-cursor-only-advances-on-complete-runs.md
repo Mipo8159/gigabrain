@@ -14,6 +14,10 @@ real bug or review finding the first time:
 5. **A duplicate key within one run stops the run**, because a multiplied join becomes duplicate records downstream.
 6. **Refuse a full re-emit when the ledger already has rows**, unless forced. It duplicates every append-only row in the target.
 7. **Key personal data with a keyed hash (HMAC)**, not a plain hash: phone or ID spaces are small enough to brute-force.
+9. **Consumers must take every artifact exactly once, in order.** Artifacts are deltas and the target is often
+   append-only (a CRM import that can't update records duplicates them). So serve only artifacts whose ledger commit
+   succeeded, ask the ledger rather than listing the directory, and have the client record the ids it fetched in its
+   own state file, not infer them from which folders exist. Otherwise deleting an imported folder brings it back.
 8. **Make output deterministic** (`STRING_AGG ... WITHIN GROUP (ORDER BY …)`), or hashes flap. Use language-neutral date literals (`'YYYYMMDD'` on SQL Server).
 
 **Why:** 2026-10-05: a background reviewer found a cursor-advancing partial run (silent permanent data
@@ -22,5 +26,7 @@ fresh exporter. 15 offline tests had passed. The tests also caught the "warned f
 
 **How to apply:** use this as the checklist when designing any sync, export or ETL job. Write one offline
 test per rule, using a fake extractor that emits the real CSV/row shape.
-**Signal:** "only fetch new rows", "cursor", "each run should pull fresh data", "cron sync", "export to CSV/CRM".
+2026-10-14: rule 9 was designed in before the download client was built; a real pull then delivered a
+53-row delta beside the 170 MB backfill, and the second click fetched nothing.
+**Signal:** "let the client download the files", "only fetch new rows", "cursor", "each run should pull fresh data", "cron sync", "export to CSV/CRM".
 **Next time:** paste rules 1–8 into the plan before writing code, not after review.

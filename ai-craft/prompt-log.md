@@ -163,6 +163,11 @@ The goal is to *see* your own patterns change over the months.
 - **Why:** goal and scope were clear and the research question was well placed up front. "2026 standards" and "comprehensible" had no proof, so Claude had to propose the checker rules and the rollout in a 4-question batch (Giga answered in one go, choosing "all 9 at once").
 
 
+## 2026-10-14: "something like an exe file … once clicked creates folder with all csv files" (outcome without channel)
+- **Before:** "the client should be able to download those data csv files … I need a simple solution, something like an exe file. that when clicked initiates the download process and updates files. folder -> .exe file, once clicked creates folder with all csv files."
+- **After:** "Client downloader for a non-technical user. Windows for sure, Mac/Linux nice-to-have. Delivered as a private GitHub repo; I configure server + token in a .env on their PC, they only double-click. Each click pulls fresh data first, then downloads only new files. Done when it works against localhost on my PC, twice in a row (second click: nothing new)."
+- **Why:** the outcome was clear and Claude built it in one pass. But the channel (zip vs repo), the OS list and "who sets it up" came 3–4 prompts later, and each one rebuilt the packaging. The final shape was in the last prompt; putting it in the first would have saved two rebuilds.
+
 ### 2026-10-15 · exams for every lesson + an AWS SAA track
 - **Before:** "I need to be able to learn quick … please impart exams also in our studies. make 5 exam tickets for each parts … aws_associate … 5 variants for that exam, as close to it as possible … questions with 4 or more answers."
 - **After:** "Add exams: 5 variants per topic (20 scenario questions, 4+ options, architecture at scale, snippets OK), plus `aws-associate` = 5 × 65 SAA-C03-style variants, exams only. Done when every file passes a checker, a docs fact-check of ~10% AWS keys finds 0 wrong, and my first attempt lands in a log you can read. Long coding tickets are out; I code in real projects."
