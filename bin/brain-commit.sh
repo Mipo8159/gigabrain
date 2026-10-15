@@ -22,9 +22,18 @@ others=$(git diff --cached --name-only | grep -vxF -f <(printf '%s\n' "$@") || t
 
 git add -- "$@" || exit 1
 git diff --cached --quiet && { echo "nothing to commit"; exit 2; }
+# Giga's own unpushed commits must not ride along on our push (2026-10-15: a retro push
+# published Giga's local "advanced learning" commit). Count them before committing.
+ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null) || ahead=""
 git commit -q -m "$msg" || { echo "commit blocked (pre-commit scan). Fix the wording, don't --no-verify"; git reset -q -- "$@"; exit 1; }
 echo "committed $(git rev-parse --short HEAD): $msg"
-if git remote get-url origin >/dev/null 2>&1; then
+if ! git remote get-url origin >/dev/null 2>&1; then
+  :
+elif [ -z "$ahead" ]; then
+  echo "not pushed: the branch has no upstream; push it yourself"
+elif [ "$ahead" -gt 0 ]; then
+  echo "not pushed: $ahead earlier commit(s) of yours are unpushed; review them, then git push"
+else
   git push -q 2>&1 && echo "pushed" || echo "push failed (offline/auth?); the next retro will push it"
 fi
 exit 0

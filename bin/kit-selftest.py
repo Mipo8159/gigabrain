@@ -309,10 +309,40 @@ def installer_cases():
     check("install: unrelated settings kept", s["model"] == "x" and "Read" in s["permissions"]["allow"])
 
 
+def brain_commit_cases():
+    # 2026-10-15: a /retro push also published Giga's own unpushed commit. brain-commit.sh must
+    # push only when its commit is the sole unpushed one; otherwise commit and leave the push to Giga.
+    import shutil
+    remote, repo = TMP / "bc-remote.git", TMP / "bc-repo"
+    git = lambda *a, cwd=repo: subprocess.run(["git", *a], cwd=cwd, capture_output=True, text=True, env=ENV)
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    for k, v in (("user.email", "t@t"), ("user.name", "t"), ("core.hooksPath", "/dev/null")):
+        git("config", k, v)
+    (repo / "bin").mkdir(); (repo / "brain").mkdir()
+    shutil.copy(G / "bin/brain-commit.sh", repo / "bin/brain-commit.sh")
+    (repo / "README").write_text("x\n"); git("add", "."); git("commit", "-qm", "init")
+    git("remote", "add", "origin", str(remote)); git("push", "-qu", "origin", "main")
+    bc = lambda msg, f: subprocess.run(["bash", str(repo / "bin/brain-commit.sh"), msg, f], cwd=repo,
+                                       capture_output=True, text=True, env=ENV)
+    remote_head = lambda: git("rev-parse", "main", cwd=remote).stdout.strip()
+
+    (repo / "brain/a.md").write_text("a\n"); r = bc("brain: a", "brain/a.md")
+    check("brain-commit pushes when its commit is the only unpushed one",
+          "pushed" in r.stdout and remote_head() == git("rev-parse", "HEAD").stdout.strip())
+
+    (repo / "README").write_text("giga's local work\n"); git("commit", "-qam", "giga local")
+    before = remote_head()
+    (repo / "brain/b.md").write_text("b\n"); r = bc("brain: b", "brain/b.md")
+    check("brain-commit does not push Giga's unpushed commits along with its own",
+          "not pushed: 1 earlier commit" in r.stdout and remote_head() == before
+          and git("log", "-1", "--format=%s").stdout.strip() == "brain: b")
+
+
 if __name__ == "__main__":
     import shutil, traceback
     MEM_BEFORE = sorted(p.name for p in (G / "memory").iterdir())
-    for case in (guard_cases, handoff_cases, kit_cases, installer_cases):
+    for case in (guard_cases, handoff_cases, kit_cases, installer_cases, brain_commit_cases):
         try:
             case()
         except Exception:  # one broken case must not hide the others
