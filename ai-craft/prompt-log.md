@@ -162,3 +162,8 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "First: is there an existing skill/repo for interactive single-file lessons (adopt or borrow?). Then upgrade teach + rebuild all 9 lessons. Done when bin/check-lesson (made stricter: predict-reveal, live figure, steppers with Back, recall, phone) passes on all 9 and I approve kafka. Offline pages, 3 agents at a time."
 - **Why:** goal and scope were clear and the research question was well placed up front. "2026 standards" and "comprehensible" had no proof, so Claude had to propose the checker rules and the rollout in a 4-question batch (Giga answered in one go, choosing "all 9 at once").
 
+
+### 2026-10-15 · exams for every lesson + an AWS SAA track
+- **Before:** "I need to be able to learn quick … please impart exams also in our studies. make 5 exam tickets for each parts … aws_associate … 5 variants for that exam, as close to it as possible … questions with 4 or more answers."
+- **After:** "Add exams: 5 variants per topic (20 scenario questions, 4+ options, architecture at scale, snippets OK), plus `aws-associate` = 5 × 65 SAA-C03-style variants, exams only. Done when every file passes a checker, a docs fact-check of ~10% AWS keys finds 0 wrong, and my first attempt lands in a log you can read. Long coding tickets are out; I code in real projects."
+- **Why:** sizes, audience and the AWS target were clear. Missing: the proof, and the "no long coding, snippets yes" boundary, which surfaced only in the answer to the lessons question.
