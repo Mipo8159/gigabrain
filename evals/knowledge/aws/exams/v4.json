@@ -1,0 +1,673 @@
+{
+  "topic": "aws",
+  "variant": 4,
+  "of": 5,
+  "title": "AWS for Node backends — variant 4",
+  "description": "Leans on multi-tenant SaaS and IoT: fair queues, outbox via streams, schedulers, key design, batch validation, KMS, runtime upgrades and standby readiness.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "delivery",
+      "name": "Delivery, retries and failure routing (SQS, Lambda, EventBridge, Step Functions)",
+      "weight": 0.3
+    },
+    {
+      "id": "dynamo",
+      "name": "DynamoDB keys, hot partitions and conditional writes",
+      "weight": 0.25
+    },
+    {
+      "id": "sdk",
+      "name": "SDK clients, timeouts, throttling and partial failures",
+      "weight": 0.2
+    },
+    {
+      "id": "storage",
+      "name": "S3 uploads and object integrity",
+      "weight": 0.1
+    },
+    {
+      "id": "region",
+      "name": "Multi-region and failover",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "aws-v4-q01",
+      "domain": "delivery",
+      "stem": "A multi-tenant SaaS runs report generation from one SQS standard queue. When one large tenant enqueues 200,000 jobs, small tenants' jobs wait over an hour behind them. Per-tenant ordering doesn't matter. Which change gives small tenants predictable latency with the least new infrastructure?",
+      "options": [
+        {
+          "text": "Move to a FIFO queue with `MessageGroupId` set to the tenant id so tenants are processed in parallel and in order.",
+          "correct": false,
+          "why": "FIFO adds ordering the workload doesn't need, plus throughput limits and the head-of-line blocking that comes with groups."
+        },
+        {
+          "text": "Create one queue per tenant and a Lambda per queue.",
+          "correct": false,
+          "why": "It isolates tenants but multiplies queues, functions and alarms with the tenant count."
+        },
+        {
+          "text": "Set `MessageGroupId` to the tenant id on the standard queue so SQS fair queues limit the noisy tenant's impact on dwell time.",
+          "correct": true,
+          "why": "On standard queues, a `MessageGroupId` turns on fair queues (since July 2025): SQS prioritises other tenants' messages when one tenant builds a backlog. It doesn't add ordering."
+        },
+        {
+          "text": "Raise the consumer's concurrency so the backlog drains faster.",
+          "correct": false,
+          "why": "Draining faster helps everyone a bit but small tenants still queue behind the big backlog."
+        }
+      ],
+      "explain": "For noisy-neighbour problems on a shared queue, SQS fair queues (a `MessageGroupId` on a standard queue) reduce one tenant's impact on others' dwell time without the cost of FIFO. `MessageGroupId` on a standard queue gives fairness, never ordering.",
+      "refs": [
+        "https://aws.amazon.com/about-aws/whats-new/2025/07/amazon-sqs-introduces-fair/"
+      ]
+    },
+    {
+      "id": "aws-v4-q02",
+      "domain": "delivery",
+      "stem": "A SaaS delivers outbound webhooks to customers' endpoints from an SQS-driven Lambda. When a customer endpoint is slow, the Lambda sometimes times out after the POST was received, the message is retried, and customers complain about duplicate `invoice.paid` webhooks. Which design is standard?",
+      "options": [
+        {
+          "text": "Delete the SQS message before making the POST so a timeout can't cause a retry.",
+          "correct": false,
+          "why": "That makes delivery at-most-once: a failed POST is never retried, which is worse for billing events."
+        },
+        {
+          "text": "Include a stable event id (and timestamp) in every webhook and document that receivers must dedupe on it.",
+          "correct": true,
+          "why": "Delivery to an external endpoint is inherently at-least-once; a stable id per event lets receivers make retries harmless."
+        },
+        {
+          "text": "Set `maxReceiveCount: 1` so each webhook is attempted only once before the DLQ.",
+          "correct": false,
+          "why": "One attempt means any transient customer outage loses the webhook into a DLQ."
+        },
+        {
+          "text": "Raise the Lambda timeout to 15 minutes so that a slow customer endpoint can never push the invocation past its timeout again.",
+          "correct": false,
+          "why": "A slow endpoint can still exceed any timeout, and long waits tie up concurrency for every other customer."
+        }
+      ],
+      "explain": "When the side effect is in someone else's system, you can't make it exactly-once yourself. Make delivery at-least-once with retries and give every event a stable id the receiver can dedupe on, as payment providers do.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q03",
+      "domain": "delivery",
+      "stem": "An EventBridge rule triggers a Lambda target with a target DLQ and a retry policy configured. A code bug makes the function throw on 5% of events. Those events are lost, yet the target DLQ is empty. Why, and where should failures be captured?",
+      "options": [
+        {
+          "text": "EventBridge only uses the DLQ after 185 attempts; wait 24 hours for them to appear.",
+          "correct": false,
+          "why": "The target retry policy applies to delivery failures, and the function errors here never count as those."
+        },
+        {
+          "text": "The DLQ policy is missing `events.amazonaws.com`; fix the queue policy.",
+          "correct": false,
+          "why": "A permissions problem would be a real gap, but the events aren't reaching the DLQ step at all, because delivery to Lambda succeeded."
+        },
+        {
+          "text": "Enable `ReportBatchItemFailures` on the rule so per-event failures go to the DLQ.",
+          "correct": false,
+          "why": "That setting belongs to Lambda event source mappings for queues and streams, not EventBridge rules."
+        },
+        {
+          "text": "EventBridge invokes Lambda asynchronously, so delivery succeeds; configure the function's async on-failure destination (or DLQ) for errors.",
+          "correct": true,
+          "why": "Once Lambda accepts the async invoke, EventBridge is done. Function errors are retried by Lambda (twice by default) and then go to the function's on-failure destination, if any."
+        }
+      ],
+      "explain": "Map each failure to the layer that owns it. EventBridge's retry policy and DLQ cover failing to hand the event to the target; for Lambda targets, function errors are handled by Lambda's asynchronous invocation settings and destinations.",
+      "refs": [
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-dlq.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q04",
+      "domain": "delivery",
+      "stem": "A metering consumer uses partial batch responses and `ReportBatchItemFailures` is enabled. Whenever any record fails, all 10 records in the batch are retried, inflating usage counts. Which line causes it?",
+      "code": "export const handler = async (event: SQSEvent): Promise<SQSBatchResponse> => {\n  const batchItemFailures: SQSBatchItemFailure[] = [];\n  for (const record of event.Records) {\n    try {\n      await recordUsage(JSON.parse(record.body));\n    } catch {\n      batchItemFailures.push({ itemIdentifier: record.receiptHandle });\n    }\n  }\n  return { batchItemFailures };\n};",
+      "options": [
+        {
+          "text": "`itemIdentifier` is set to `receiptHandle`; Lambda doesn't recognise it as a message id and fails the whole batch.",
+          "correct": true,
+          "why": "`itemIdentifier` must be the `messageId`. An unknown identifier makes Lambda treat the entire batch as failed."
+        },
+        {
+          "text": "Returning an empty array when everything succeeds is read as 'all failed'.",
+          "correct": false,
+          "why": "An empty `batchItemFailures` list means the whole batch succeeded."
+        },
+        {
+          "text": "Records are processed sequentially; partial responses require `Promise.all` so they are processed concurrently.",
+          "correct": false,
+          "why": "Concurrency doesn't affect how the response is interpreted; sequential processing is fine."
+        },
+        {
+          "text": "`record.body` must be parsed before the try block or Lambda can't map failures to records.",
+          "correct": false,
+          "why": "Where the parse happens has no effect on how Lambda reads the returned identifiers."
+        }
+      ],
+      "explain": "Partial batch responses must identify failures by `messageId`. A receipt handle, body, `undefined` or empty string is treated as malformed and fails the whole batch, which silently reintroduces duplicates.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q05",
+      "domain": "delivery",
+      "stem": "A subscription service writes a `Subscription` item to DynamoDB, then calls `PutEvents` to publish `SubscriptionCreated`. When the Lambda times out between the two calls, the CRM never hears about the subscription. Retries can't help because the item already exists. Which design removes this dual-write gap?",
+      "options": [
+        {
+          "text": "Wrap the `PutItem` and `PutEvents` in a `TransactWriteItems` so both commit or neither does.",
+          "correct": false,
+          "why": "DynamoDB transactions cover DynamoDB items only; they can't include an EventBridge call."
+        },
+        {
+          "text": "Publish the event first, then write the item.",
+          "correct": false,
+          "why": "That flips the failure: the CRM can now hear about subscriptions that were never stored."
+        },
+        {
+          "text": "Retry `PutEvents` up to 10 times inside the Lambda before returning, with exponential backoff and jitter between attempts.",
+          "correct": false,
+          "why": "Retries help transient errors, but a timeout or crash between the two calls still loses the event."
+        },
+        {
+          "text": "Only write the item, and publish from its DynamoDB stream through EventBridge Pipes to the bus.",
+          "correct": true,
+          "why": "The stream records every committed change, and Pipes delivers it with retries; the database write becomes the single source of the event."
+        }
+      ],
+      "explain": "Writing to a database and publishing an event are two systems with no shared transaction. Use change data capture (DynamoDB Streams with EventBridge Pipes or a Lambda) or an outbox item, so the event is derived from the committed write.",
+      "refs": [
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-pipes.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-errors.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q06",
+      "domain": "delivery",
+      "stem": "A SaaS billing system must send a 'trial ends tomorrow' email exactly 13 days after each signup, for about 50,000 signups a day. A developer proposes sending an SQS message with `DelaySeconds` set to 13 days. What should be used instead?",
+      "options": [
+        {
+          "text": "SQS with `DelaySeconds` capped at its maximum, re-enqueued until 13 days have passed.",
+          "correct": false,
+          "why": "SQS delays max out at 15 minutes, so this re-enqueues over 1,200 times per signup, which is costly and fragile."
+        },
+        {
+          "text": "A one-time EventBridge Scheduler schedule per signup that targets the email Lambda or queue.",
+          "correct": true,
+          "why": "EventBridge Scheduler is designed for millions of one-time schedules with retries and DLQs, and delivers at the set time."
+        },
+        {
+          "text": "A cron Lambda every minute that scans all users and emails anyone whose trial ends tomorrow and hasn't been emailed yet.",
+          "correct": false,
+          "why": "It works at small scale, but scans the whole user table every minute and has to dedupe its own overlapping runs."
+        },
+        {
+          "text": "A Step Functions Standard execution per signup with a 13-day `Wait` state.",
+          "correct": false,
+          "why": "It works but keeps 650,000 executions open and pays per state transition, for what one scheduler entry does."
+        }
+      ],
+      "explain": "Match delay mechanisms to their range: SQS delays and visibility for seconds to minutes (max 15 minutes delay), EventBridge Scheduler for one-off or recurring events days or months ahead, and Step Functions waits when the delay is part of a larger workflow.",
+      "refs": [
+        "https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html",
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q07",
+      "domain": "dynamo",
+      "stem": "An invoicing SaaS needs 'latest 20 invoices for a customer' and 'get invoice by id' on a DynamoDB table. Customers have from 3 to 300,000 invoices. Which key design serves both with single requests?",
+      "options": [
+        {
+          "text": "`pk = INVOICE#<id>` and a `Scan` filtered on `customerId` for the list.",
+          "correct": false,
+          "why": "Get-by-id is cheap, but the list scans the whole table for every page."
+        },
+        {
+          "text": "`pk = CUSTOMER#<id>`, `sk = INVOICE#<ISO timestamp>#<id>`, query with `ScanIndexForward: false, Limit: 20`, plus a GSI on invoice id.",
+          "correct": true,
+          "why": "Items for a customer sort by time in one partition, so the newest 20 is one query; the GSI covers lookup by id."
+        },
+        {
+          "text": "`pk = CUSTOMER#<id>` with all invoices in a list attribute on one item.",
+          "correct": false,
+          "why": "Large customers would exceed the 400 KB item limit, and every new invoice rewrites the whole item."
+        },
+        {
+          "text": "`pk = <yyyy-mm>`, `sk = CUSTOMER#<id>#<invoiceId>`, querying the current month first and stepping back month by month until 20 are found.",
+          "correct": false,
+          "why": "Every customer's invoices for a month share one key, which is hot, and the list may need many month queries."
+        }
+      ],
+      "explain": "Model DynamoDB keys on access patterns: partition by the entity you list within, sort by what you order on, and add a GSI for each extra lookup. `ScanIndexForward: false` with `Limit` returns the newest N directly when no filter is involved.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q08",
+      "domain": "dynamo",
+      "stem": "A support SaaS stores each ticket's conversation as a list of messages on the ticket item. A few enterprise tickets have started failing every update with `ValidationException: Item size has exceeded the maximum allowed size`. Which redesign fits?",
+      "options": [
+        {
+          "text": "Compress the messages list with gzip and store it as binary.",
+          "correct": false,
+          "why": "Compression buys time but the item still grows without bound, and every append rewrites the whole thing."
+        },
+        {
+          "text": "Move the messages to S3 and keep only a pointer on the ticket.",
+          "correct": false,
+          "why": "S3 suits large blobs, but appends become rewrite-the-object, and you lose queryable, paginated messages."
+        },
+        {
+          "text": "Store each message as its own item under the ticket's partition (`sk = MSG#<timestamp>`).",
+          "correct": true,
+          "why": "Item-per-message keeps every write small, avoids the 400 KB item limit, and lets the UI paginate the conversation."
+        },
+        {
+          "text": "Split the ticket into `TICKET#1`, `TICKET#2`… overflow items whenever the current one is about to fill up.",
+          "correct": false,
+          "why": "It works but rebuilds item-per-message by hand with awkward boundaries and races on which item to append to."
+        }
+      ],
+      "explain": "DynamoDB items are capped at 400 KB and every update rewrites the item. Unbounded collections belong in separate items under one partition key, sorted by the sort key, not in a growing attribute.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-use-s3-too.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q09",
+      "domain": "dynamo",
+      "stem": "A prepaid API-credits service decrements credits per request: `GetItem` for the balance, check `balance >= cost`, then `PutItem` with the new balance. At 500 req/s per large customer, audits show balances higher than they should be. Which write fixes it?",
+      "options": [
+        {
+          "text": "An `UpdateItem` with `SET balance = balance - :cost` and `ConditionExpression: balance >= :cost`.",
+          "correct": true,
+          "why": "The decrement and the check happen atomically on the server, so concurrent requests can't overwrite each other or overdraw."
+        },
+        {
+          "text": "Keep `GetItem`/`PutItem` but read with `ConsistentRead: true` so each request sees the latest balance.",
+          "correct": false,
+          "why": "Two requests can still read the same balance before either writes; one write overwrites the other (a lost update)."
+        },
+        {
+          "text": "A `TransactWriteItems` containing the same `PutItem` with the computed balance.",
+          "correct": false,
+          "why": "The transaction still writes a value computed from a stale read, unless a condition checks the old value."
+        },
+        {
+          "text": "Move credits to Redis and use `DECRBY`, syncing back to DynamoDB every few seconds.",
+          "correct": false,
+          "why": "`DECRBY` is atomic, but the sync adds a window where a crash loses debits, plus a second datastore to run."
+        }
+      ],
+      "explain": "Read-modify-write from the client loses updates under concurrency. Let DynamoDB do the arithmetic (`SET x = x - :v` or `ADD`) and put the invariant in a `ConditionExpression`, so both happen atomically.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q10",
+      "domain": "dynamo",
+      "stem": "An IoT platform deduplicates device readings and writes them with `BatchWriteItem` in chunks of 25. After a firmware bug made devices resend readings, whole chunks started failing with `ValidationException`, and the job retries them forever. What's going on?",
+      "options": [
+        {
+          "text": "`BatchWriteItem` rejects the whole request if two items in it share a key; dedupe by key within each chunk before sending.",
+          "correct": true,
+          "why": "Duplicate keys in one batch fail the entire batch with a validation error, which retries can never fix."
+        },
+        {
+          "text": "The table is throttling, and `ValidationException` is how throttling surfaces for batch writes.",
+          "correct": false,
+          "why": "Throttling surfaces as `UnprocessedItems` or throughput errors, not validation errors."
+        },
+        {
+          "text": "Batches over 10 items need `TransactWriteItems`.",
+          "correct": false,
+          "why": "`BatchWriteItem` accepts up to 25 items; transactions are a different tool."
+        },
+        {
+          "text": "The readings need a `ConditionExpression` with `attribute_not_exists` to skip duplicates.",
+          "correct": false,
+          "why": "`BatchWriteItem` doesn't support condition expressions at all."
+        }
+      ],
+      "explain": "Know which batch errors are retryable. `UnprocessedItems` is retryable with backoff; a `ValidationException` (duplicate keys, more than 25 items, conditions) never succeeds on retry. Dedupe and chunk before sending, and send non-retryable failures to a DLQ instead of looping.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q11",
+      "domain": "dynamo",
+      "stem": "A ticketing SaaS uses a 2025 multi-attribute GSI: partition attributes `[tenantId, region]`, sort attributes `[status, priority, createdAt]`. A new screen needs open tickets for a tenant in one region created after a date, across all priorities. Which query is valid?",
+      "options": [
+        {
+          "text": "Equality on `tenantId` and `region`, equality on `status`, and `createdAt > :d`.",
+          "correct": false,
+          "why": "It skips `priority`; sort attributes must be used as a left-to-right prefix, so a condition on `createdAt` needs `priority` first."
+        },
+        {
+          "text": "Equality on `tenantId` only, with `status = OPEN` and `createdAt > :d`.",
+          "correct": false,
+          "why": "Every partition attribute (`tenantId` and `region`) needs an equality condition."
+        },
+        {
+          "text": "Equality on `tenantId`, `region` and `status`, with no sort-key condition beyond that, then filter `createdAt > :d`.",
+          "correct": true,
+          "why": "This uses a valid prefix (`status`) and filters the date; for a hot screen, add an index whose sort order puts `createdAt` right after `status`."
+        },
+        {
+          "text": "Equality on `tenantId` and `region`, `status = OPEN`, `priority BETWEEN 1 AND 5` to cover every priority, and `createdAt > :d`.",
+          "correct": false,
+          "why": "A range condition is only allowed on the last sort attribute given, and here it's on `priority` in the middle."
+        }
+      ],
+      "explain": "Multi-attribute GSI keys follow composite-key rules: equality on every partition attribute; sort attributes as a left-to-right prefix; a range or `begins_with` only on the last one used. Order the sort attributes for the queries you actually run.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q12",
+      "domain": "sdk",
+      "stem": "A capacity review assumes each API request makes at most 3 DynamoDB calls in the worst case, because the client sets `maxAttempts: 3` and 'retries 3 times'. Each request does 2 logical DynamoDB operations, and the API retries a failed request once. How many DynamoDB attempts can one user action generate in the worst case?",
+      "options": [
+        {
+          "text": "6, because 2 operations × 3 attempts each.",
+          "correct": false,
+          "why": "This counts the SDK correctly but leaves out the API layer's own retry, which re-runs both operations."
+        },
+        {
+          "text": "12, because 2 attempts of the request × 2 operations × 3 attempts each.",
+          "correct": true,
+          "why": "`maxAttempts: 3` means three tries in total per call; the outer retry doubles the whole sequence."
+        },
+        {
+          "text": "16, because 2 × 2 × (1 + 3) with 3 retries after the first try.",
+          "correct": false,
+          "why": "`maxAttempts` counts the first try; it isn't 'retries on top'."
+        },
+        {
+          "text": "3, because the SDK shares a retry budget across all calls in a request.",
+          "correct": false,
+          "why": "Each `send()` has its own attempts; the retry quota is client-wide but doesn't cap a single request to 3."
+        }
+      ],
+      "explain": "`maxAttempts` counts the first attempt. Worst-case load = product of attempts across every layer that retries. Write that number down when sizing capacity or setting timeouts.",
+      "refs": [
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q13",
+      "domain": "sdk",
+      "stem": "Security turned on SSE-KMS with a customer managed key for the `orders` SQS queue. Right after, the producer Lambda's `SendMessage` calls start failing with KMS access errors, while the consumer still works for older messages. Which two permissions does the producer's role need on the key? (Choose two.)",
+      "options": [
+        {
+          "text": "`kms:GenerateDataKey`",
+          "correct": true,
+          "why": "SQS asks KMS for a data key to encrypt messages on behalf of the sender."
+        },
+        {
+          "text": "`kms:Decrypt`",
+          "correct": true,
+          "why": "Producers also need `kms:Decrypt` on the key, as the SQS docs list for sending to an encrypted queue."
+        },
+        {
+          "text": "`kms:Encrypt`",
+          "correct": false,
+          "why": "SQS uses envelope encryption with data keys rather than calling `Encrypt` on the message for you."
+        },
+        {
+          "text": "`kms:CreateGrant`",
+          "correct": false,
+          "why": "Grants delegate key use to other principals; the producer doesn't need to create any."
+        },
+        {
+          "text": "`sqs:SetQueueAttributes`",
+          "correct": false,
+          "why": "That changes queue configuration; sending doesn't need it, and granting it widens the role."
+        }
+      ],
+      "explain": "Encrypted queues move part of the permission model to KMS. Producers need `kms:GenerateDataKey` and `kms:Decrypt`, consumers `kms:Decrypt`; CDK's `grantSendMessages` and `grantConsumeMessages` add these when the queue has a key.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-key-management.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q14",
+      "domain": "sdk",
+      "stem": "A team is moving 40 Lambda functions from `nodejs20.x` to `nodejs24.x`. Several were written as `exports.handler = (event, context, callback) => { ... callback(null, result) }`. Which change is needed for those functions?",
+      "options": [
+        {
+          "text": "None; the runtime still wraps callback handlers, it just logs a deprecation warning on each invocation.",
+          "correct": false,
+          "why": "Callback handlers are only supported up to Node 22; on Node 24 they need to change."
+        },
+        {
+          "text": "Set `context.callbackWaitsForEmptyEventLoop = false` so the callback can return early.",
+          "correct": false,
+          "why": "That setting controls when a callback-style invocation finishes; it doesn't make callbacks supported on Node 24."
+        },
+        {
+          "text": "Rewrite them as `async` handlers that return the result (or throw), awaiting all work.",
+          "correct": true,
+          "why": "Async handlers are the supported model on Node 24 and make un-awaited work visible as a bug."
+        },
+        {
+          "text": "Wrap the old handler with `util.promisify` and export the result.",
+          "correct": false,
+          "why": "`promisify` expects the callback last and returns a function you still need to call; it's a fragile half-step."
+        }
+      ],
+      "explain": "From `nodejs24.x`, Lambda supports only async (promise-returning) handlers. Converting is also a chance to find un-awaited work that callbacks used to hide.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/nodejs-handler.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q15",
+      "domain": "sdk",
+      "stem": "A Lambda (ESM module) loads a feature-flag config at module scope with `const configPromise = loadConfig();` and handlers call `getFlags()`, which reads a variable set when that promise resolves. After deploys, the first few requests in each new environment behave as if all flags are off. Which change fixes it?",
+      "options": [
+        {
+          "text": "Move `loadConfig()` inside the handler so every invocation awaits fresh flags.",
+          "correct": false,
+          "why": "Correct but slow: each request pays the config fetch, which the module-scope load was meant to avoid."
+        },
+        {
+          "text": "Add `setTimeout(..., 500)` in the handler before reading flags on cold start.",
+          "correct": false,
+          "why": "A sleep guesses how long the load takes and adds latency without guaranteeing the config is there."
+        },
+        {
+          "text": "Raise memory so the config loads faster during init.",
+          "correct": false,
+          "why": "Faster loading narrows the race but the handler still doesn't wait for the promise."
+        },
+        {
+          "text": "Use top-level `await loadConfig()` in the ES module so init completes before the first invocation.",
+          "correct": true,
+          "why": "With top-level await, Lambda finishes module initialisation, including the config, before invoking the handler."
+        }
+      ],
+      "explain": "Async work started at module scope without being awaited races with the first invocations. In ESM Lambdas, use top-level `await` for init, so it's done once per environment and finished before the handler runs.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/nodejs-handler.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q16",
+      "domain": "storage",
+      "stem": "A document-signing SaaS presigns PUT URLs with `signableHeaders: new Set([\"content-type\"])` and `ContentType: \"application/pdf\"` so only PDFs are accepted. After a frontend refactor, every upload fails with `403 SignatureDoesNotMatch`. The new code uses `fetch(url, { method: 'PUT', body: file })`. What is the cause?",
+      "options": [
+        {
+          "text": "Signed headers make S3 require HTTPS client certificates.",
+          "correct": false,
+          "why": "Signed headers have nothing to do with client certificates; they bind header values to the signature."
+        },
+        {
+          "text": "`fetch` now omits `Content-Type: application/pdf`, so the signed header doesn't match.",
+          "correct": true,
+          "why": "When `content-type` is signed, the client must send exactly the same value; a missing or different type fails the signature."
+        },
+        {
+          "text": "The URL expired because the refactor added a few seconds of latency before each upload.",
+          "correct": false,
+          "why": "Expiry gives an `AccessDenied` 'Request has expired' error, and a few seconds won't exceed a normal expiry."
+        },
+        {
+          "text": "The CRC32 checksum in the URL doesn't match the PDF body, so S3 rejects every upload with a signature error.",
+          "correct": false,
+          "why": "Checksum mismatches are a real issue with default presigning, but they don't surface as `SignatureDoesNotMatch` caused by a header change."
+        }
+      ],
+      "explain": "Signing a header turns it into a contract: the client must send that exact value. That's how you enforce content type on a presigned PUT, and why frontend changes to headers can break uploads.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q17",
+      "domain": "storage",
+      "stem": "An analytics SaaS lets customers export datasets to S3 with a multipart uploader that uses a fixed 8 MiB part size. Exports above about 78 GiB now fail during upload. Which change fixes it?",
+      "options": [
+        {
+          "text": "Lower the part size to 5 MiB, the minimum.",
+          "correct": false,
+          "why": "Smaller parts mean more of them; the failure comes from hitting the part count limit sooner."
+        },
+        {
+          "text": "Switch large exports to a single `PutObject`.",
+          "correct": false,
+          "why": "Single PUTs are capped at 5 GB."
+        },
+        {
+          "text": "Compute the part size as `max(5 MiB, ceil(size / 10000))` so no upload needs more than 10,000 parts.",
+          "correct": true,
+          "why": "Multipart uploads are limited to 10,000 parts; 8 MiB × 10,000 is about 78 GiB, so the part size must grow with the object."
+        },
+        {
+          "text": "Upload the parts in parallel instead of sequentially.",
+          "correct": false,
+          "why": "Parallelism improves speed but not the part count."
+        }
+      ],
+      "explain": "S3 multipart limits: 5 MiB minimum part (except the last), 10,000 parts, 5 TiB per object. Derive the part size from the object size, or let `lib-storage` `Upload` handle it.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q18",
+      "domain": "region",
+      "stem": "A fintech ledger must have **zero data loss** if a Region fails and strongly consistent reads in any Region; write latency can rise to tens of milliseconds. It is on DynamoDB. Which option fits?",
+      "options": [
+        {
+          "text": "A global table in multi-Region eventual consistency mode across three Regions, with strongly consistent reads.",
+          "correct": false,
+          "why": "In eventual-consistency mode, strongly consistent reads only reflect the local replica, and writes acknowledged in a failed Region can be lost."
+        },
+        {
+          "text": "A single-Region table with point-in-time recovery and cross-Region backup copies.",
+          "correct": false,
+          "why": "Backups give minutes-to-hours RPO and a slow restore, not zero data loss."
+        },
+        {
+          "text": "A global table in multi-Region strong consistency mode (three Regions, or two plus a witness).",
+          "correct": true,
+          "why": "MRSC replicates each write to another Region before acknowledging it, giving zero RPO and strongly consistent reads anywhere, at the cost of higher write latency."
+        },
+        {
+          "text": "Two independent tables written in parallel by the application, with a reconciliation job running every few minutes.",
+          "correct": false,
+          "why": "Dual writes from the app diverge on partial failure, and reconciliation is custom and lags."
+        }
+      ],
+      "explain": "Choose the global-table mode from the RPO and consistency requirement: eventual consistency gives low-latency local writes with last-writer-wins and a small RPO; multi-Region strong consistency gives zero RPO and global strong reads, paying in write latency and a three-Region footprint.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q19",
+      "domain": "region",
+      "stem": "Dozens of SaaS microservices publish to an EventBridge bus in `us-east-1` with the bus ARN hard-coded. During a regional impairment, `PutEvents` failed for 40 minutes. The team wants event ingestion to fail over to `us-west-2` automatically with minimal producer changes. Which option fits?",
+      "options": [
+        {
+          "text": "Add a rule on the `us-east-1` bus that forwards every event to a bus in `us-west-2`.",
+          "correct": false,
+          "why": "Cross-Region forwarding helps consumers elsewhere, but it runs in the impaired Region, so ingestion still fails."
+        },
+        {
+          "text": "Have each producer catch `PutEvents` errors and resend the same entries to a standby bus in `us-west-2` after a short backoff.",
+          "correct": false,
+          "why": "It works, but every service has to implement and test the failover logic, and they'll do it differently."
+        },
+        {
+          "text": "Buffer events in an SQS queue in `us-east-1` and forward them later.",
+          "correct": false,
+          "why": "The buffer is in the impaired Region too, so it fails along with the bus."
+        },
+        {
+          "text": "An EventBridge global endpoint with primary and secondary Regions and a health check, which producers publish to.",
+          "correct": true,
+          "why": "A global endpoint routes `PutEvents` to the secondary Region when its Route 53 health check fails, with one producer config change."
+        }
+      ],
+      "explain": "Use managed failover for the ingestion point (EventBridge global endpoints, Route 53 records) rather than custom logic in every producer. Anything that buffers or forwards from the failing Region fails with it.",
+      "refs": [
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-global-endpoints.html"
+      ]
+    },
+    {
+      "id": "aws-v4-q20",
+      "domain": "region",
+      "stem": "A SaaS keeps a warm standby in `eu-central-1` for its `eu-west-1` stack (Lambda, DynamoDB global table, SQS) with an RTO of 10 minutes. In a game day, failover took 3 hours. Which two things should be in place before the next incident? (Choose two.)",
+      "options": [
+        {
+          "text": "The full stack deployed continuously to the standby Region by the same pipeline, not deployed during the incident.",
+          "correct": true,
+          "why": "Deploying during an incident adds build, deploy and debugging time; a continuously deployed standby only needs traffic switched."
+        },
+        {
+          "text": "Service quotas in the standby Region (Lambda concurrency, DynamoDB, SQS limits as needed) raised to production levels ahead of time.",
+          "correct": true,
+          "why": "New accounts and Regions start at default quotas; production traffic would throttle immediately after failover."
+        },
+        {
+          "text": "A runbook step to run `cdk deploy` into the standby Region once failover is declared.",
+          "correct": false,
+          "why": "It's cheaper day to day, but deployment time, failures and missing context make a 10-minute RTO unrealistic."
+        },
+        {
+          "text": "Secrets read from Secrets Manager in `eu-west-1` by the standby stack over the network.",
+          "correct": false,
+          "why": "The standby then depends on the failed Region; secrets need replicas in the standby Region."
+        },
+        {
+          "text": "Data encrypted with a single-Region KMS key in `eu-west-1`, shared to the standby by key policy.",
+          "correct": false,
+          "why": "A single-Region key can't be used from another Region's services during an outage; use multi-Region keys or a key per Region."
+        }
+      ],
+      "explain": "A standby is only warm if it already runs and has room. Deploy it continuously, raise quotas in advance, and remove every runtime dependency on the primary Region (secrets, keys, config), then prove it with regular drills.",
+      "refs": [
+        "https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route53-recovery.html"
+      ]
+    }
+  ]
+}

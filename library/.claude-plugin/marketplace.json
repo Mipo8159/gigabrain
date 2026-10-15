@@ -21,6 +21,11 @@
       "name": "content",
       "source": "./plugins/content",
       "description": "Marketing and outreach: content engine, brand voice, email ops, SEO."
+    },
+    {
+      "name": "knowledge",
+      "source": "./plugins/knowledge",
+      "description": "Backend stack knowledge (opt-in): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14: evals showed no lift over vanilla."
     }
   ]
 }

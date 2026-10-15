@@ -1,0 +1,607 @@
+{
+  "topic": "distributed-systems",
+  "variant": 2,
+  "of": 5,
+  "title": "Distributed systems at scale — variant 2",
+  "description": "Monotonic reads, conflict handling, time-ordered hotspots, sequencers, late-committing outbox rows, Kafka exactly-once limits and shuffle sharding.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "consistency",
+      "name": "Consistency, replication and quorums",
+      "weight": 0.2
+    },
+    {
+      "id": "partitioning",
+      "name": "Partitioning, consensus and clocks",
+      "weight": 0.2
+    },
+    {
+      "id": "effects",
+      "name": "Idempotency, outbox and sagas",
+      "weight": 0.2
+    },
+    {
+      "id": "overload",
+      "name": "Timeouts, retries, breakers and load shedding",
+      "weight": 0.25
+    },
+    {
+      "id": "regions",
+      "name": "Multi-region, cells and blast radius",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "distributed-systems-v2-q01",
+      "domain": "consistency",
+      "stem": "A recipe site reads comments from four async Postgres replicas behind a round-robin pool; their lag ranges from 50 ms to 3 s. Users report that a new comment shows up on refresh, vanishes on the next refresh, then comes back. Seconds of staleness are fine; going *backwards in time* is not. What is the cheapest fix?",
+      "options": [
+        {
+          "text": "Add two more replicas so each one carries less load and lags less.",
+          "correct": false,
+          "why": "Less load can shrink lag, but replicas still lag by different amounts, so alternating between them still moves a user backwards in time."
+        },
+        {
+          "text": "Route all comment reads to the primary, which is never stale and needs no extra logic in the application.",
+          "correct": false,
+          "why": "It removes the anomaly, but it gives up the replicas and loads the primary with a guarantee much stronger than users asked for."
+        },
+        {
+          "text": "Stick each user session to one replica.",
+          "correct": true,
+          "why": "A single replica only moves forward, so each user gets monotonic reads while staying on cheap, slightly stale replicas."
+        },
+        {
+          "text": "Cache each comment page in Redis for 10 seconds so successive refreshes agree with each other.",
+          "correct": false,
+          "why": "Refreshes within 10 s agree, but each cache fill may come from a more-lagged replica than the last, so the page can still go backwards."
+        }
+      ],
+      "explain": "Monotonic reads (never seeing older data after newer) is weaker and cheaper than read-your-writes or linearizability. Pin a session to one replica, or track the highest position a client has seen and only read from replicas at or past it. Match the guarantee to the complaint instead of jumping to the primary."
+    },
+    {
+      "id": "distributed-systems-v2-q02",
+      "domain": "consistency",
+      "stem": "An internal feature-flag service stores each flag as a JSON document. Two admins edited the same flag a few seconds apart; the API server that handled the second save had a clock 3 s behind, so last-write-wins by `updated_at` kept the *older* edit and silently dropped the newer one. The team wants no silent loss. What should the API do?",
+      "options": [
+        {
+          "text": "Tighten NTP sync so server clocks stay within 10 ms of each other, which makes timestamp order trustworthy.",
+          "correct": false,
+          "why": "It shrinks the window, but any skew or truly concurrent save still lets last-write-wins drop an edit with no error."
+        },
+        {
+          "text": "Make saves conditional on a version: `UPDATE ... WHERE version = $seen`, and return 409 on mismatch.",
+          "correct": true,
+          "why": "A save based on an outdated read is rejected instead of overwriting, so the second admin sees the conflict and re-applies their change."
+        },
+        {
+          "text": "Take `updated_at` from the admin's browser clock instead of the server clock.",
+          "correct": false,
+          "why": "Browser clocks are even less trustworthy than servers, so it just moves the skew to another machine."
+        },
+        {
+          "text": "Use Lamport timestamps instead of wall-clock time to decide which write wins.",
+          "correct": false,
+          "why": "Lamport clocks give an order consistent with causality, but concurrent edits still get ordered arbitrarily and one is still dropped silently."
+        }
+      ],
+      "explain": "Last-write-wins is a policy for silently dropping writes, and clock skew decides who loses. When losing an update is not acceptable, detect conflicts instead: optimistic concurrency with a version or ETag (`If-Match`), so a stale writer gets an error and can merge."
+    },
+    {
+      "id": "distributed-systems-v2-q03",
+      "domain": "consistency",
+      "stem": "A sportswear shop serves its product catalogue (names, images, descriptions, prices) in us-east, eu-west and ap-southeast. Reads go to the single primary in us-east and add up to 180 ms for APAC users. Prices change a few times a day, and the business needs customers to pay the current price. Which design fits?",
+      "options": [
+        {
+          "text": "Local async replicas for browsing; re-read the price from the primary at checkout.",
+          "correct": true,
+          "why": "Browsing gets local latency with seconds of staleness, and the one step that must be correct, the price paid, reads the source of truth."
+        },
+        {
+          "text": "Keep every catalogue read strongly consistent on the primary, and add a CDN for images only.",
+          "correct": false,
+          "why": "The CDN helps images, but every catalogue read still crosses the world for consistency that browsing doesn't need."
+        },
+        {
+          "text": "Replicate synchronously to all three regions, so every regional read is current at all times.",
+          "correct": false,
+          "why": "Reads become local and current, but every catalogue write now waits on the slowest region, and a region outage blocks writes."
+        },
+        {
+          "text": "Cache catalogue pages for 24 hours at the edge in every region.",
+          "correct": false,
+          "why": "It is very fast and cheap, but a price change can take a day to show, and checkout would charge stale prices."
+        }
+      ],
+      "explain": "PACELC: even with no partition, you trade latency against consistency. Spend consistency only where it matters: serve most reads from nearby, possibly stale replicas, and re-validate at the step with a real invariant (the price charged, the stock reserved)."
+    },
+    {
+      "id": "distributed-systems-v2-q04",
+      "domain": "consistency",
+      "stem": "A flash-sale service at READ COMMITTED sold 1,240 units of a sneaker with 1,000 in stock. Twelve Node pods run the code below. Which change stops the overselling with the least new infrastructure?",
+      "code": "const { rows } = await db.query(\n  'SELECT stock FROM items WHERE id = $1', [id]);\nif (rows[0].stock <= 0) throw new SoldOut();\nawait db.query(\n  'UPDATE items SET stock = $1 WHERE id = $2',\n  [rows[0].stock - 1, id]);",
+      "options": [
+        {
+          "text": "Wrap the two statements in `BEGIN ... COMMIT` at READ COMMITTED.",
+          "correct": false,
+          "why": "A transaction groups the statements, but at READ COMMITTED two transactions can read the same stock and both write `stock - 1`, so the race remains."
+        },
+        {
+          "text": "Guard the function with a JavaScript mutex (for example `async-mutex`) so only one purchase runs at a time.",
+          "correct": false,
+          "why": "It serialises calls inside one process, but twelve pods each have their own mutex, so they still race against each other."
+        },
+        {
+          "text": "Do it in one statement: `UPDATE items SET stock = stock - 1 WHERE id = $1 AND stock > 0`, and treat 0 rows as sold out.",
+          "correct": true,
+          "why": "The check and the decrement happen atomically under the row lock, so concurrent buyers can't both take the last unit."
+        },
+        {
+          "text": "Keep a stock counter in Redis and check it before running the Postgres update.",
+          "correct": false,
+          "why": "It adds a second store, and the check-then-act across two systems still races, so the two counts can drift apart."
+        }
+      ],
+      "explain": "A read-then-write across separate statements is a lost-update race, whatever the isolation level's name suggests. Push the invariant into one atomic conditional write (`WHERE stock > 0`, compare-and-set) on the single owner of the data, and treat 'no row changed' as the answer."
+    },
+    {
+      "id": "distributed-systems-v2-q05",
+      "domain": "partitioning",
+      "stem": "A telemetry platform writes 300,000 events/s to a range-partitioned store with row key `<UUIDv7>`. Ingest stalls because one node is pegged while 23 others sit idle; adding nodes didn't help. Queries are always 'events for device X between t1 and t2'. Which row key fixes it?",
+      "options": [
+        {
+          "text": "Switch the row key to `<timestamp>#<device_id>` so it is sorted by time first and easy to scan.",
+          "correct": false,
+          "why": "It keeps time-range scans simple, but the key still starts with time, so all new writes still land in the newest range."
+        },
+        {
+          "text": "Use `<device_id>#<timestamp>`.",
+          "correct": true,
+          "why": "Writes spread across devices, so across all ranges, and each device's time-range query is still one contiguous scan."
+        },
+        {
+          "text": "Keep UUIDv7 and pre-split the key space into 24 ranges at startup so every node owns one from day one.",
+          "correct": false,
+          "why": "Pre-splitting helps random keys, but UUIDv7 is time-ordered, so new keys still fall into the last range."
+        },
+        {
+          "text": "Replace UUIDv7 with UUIDv4 to make keys random.",
+          "correct": false,
+          "why": "Writes spread evenly, but 'device X between t1 and t2' becomes a scan of the whole table."
+        }
+      ],
+      "explain": "In range partitioning, a key that starts with time sends all current writes to one range. Lead the key with something high-cardinality that you also query by (device, tenant), then time, so writes spread while range scans stay local. Time-ordered IDs such as UUIDv7 have the same hotspot."
+    },
+    {
+      "id": "distributed-systems-v2-q06",
+      "domain": "partitioning",
+      "stem": "A `payment-events` topic on Kafka 4 has 12 partitions keyed by `account_id`, and consumers rely on per-account order. To add consumer parallelism, ops raised it to 24 partitions in place during the day. For a while, `Refunded` events were processed before their `Captured` events. How should they add parallelism next time?",
+      "options": [
+        {
+          "text": "Create a new topic with more partitions, cut producers over, and switch consumers once the old topic is drained.",
+          "correct": true,
+          "why": "Each account's events are all in the old topic, then all in the new one, so per-key order holds across the change."
+        },
+        {
+          "text": "Raise the partition count in place again, but only at night when traffic is low and fewer accounts are in flight.",
+          "correct": false,
+          "why": "Less traffic means fewer reordered accounts, but the key-to-partition mapping still changes, so any account with events in flight can still reorder."
+        },
+        {
+          "text": "Produce with null keys so the sticky partitioner spreads load evenly.",
+          "correct": false,
+          "why": "Load spreads well, but events for one account land in different partitions, which gives up per-account ordering entirely."
+        },
+        {
+          "text": "Keep 12 partitions and run 24 consumers in the group.",
+          "correct": false,
+          "why": "It looks like more parallelism, but a partition goes to only one consumer in a group, so 12 consumers sit idle."
+        }
+      ],
+      "explain": "The default partitioner maps a key with `hash(key) % partitions`, so changing the count moves keys to new partitions while older events for them are still unconsumed. Size partitions for future parallelism up front. When you must grow, migrate to a new topic with a drain-then-switch cutover."
+    },
+    {
+      "id": "distributed-systems-v2-q07",
+      "domain": "partitioning",
+      "stem": "A billing scheduler elects a leader with a Postgres advisory lock. After a quiet weekend two instances both ran Monday's billing. Investigation shows the leader's lock disappeared while it still believed it was leader. Which change fixes leader election?",
+      "code": "const pool = new pg.Pool({ max: 5, idleTimeoutMillis: 30_000 });\n\nasync function campaign() {\n  const { rows } = await pool.query(\n    'SELECT pg_try_advisory_lock(42) AS ok');\n  isLeader = rows[0].ok;\n}\n\nasync function resign() {\n  await pool.query('SELECT pg_advisory_unlock(42)');\n  isLeader = false;\n}",
+      "options": [
+        {
+          "text": "Set `idleTimeoutMillis: 0` so the pool never closes the connection that holds the lock.",
+          "correct": false,
+          "why": "The lock would survive idle periods, but `resign()` can still run on a different pooled connection, so the unlock fails and the lock stays held."
+        },
+        {
+          "text": "Use `pg_advisory_xact_lock(42)` through `pool.query` instead.",
+          "correct": false,
+          "why": "A transaction-level lock is released when that statement's implicit transaction ends, so leadership would last a single query."
+        },
+        {
+          "text": "Hold one dedicated client for the whole term, and treat its `error` or `end` as lost leadership.",
+          "correct": true,
+          "why": "A session-level advisory lock belongs to one backend connection, so the leader must own that connection and step down when it dies."
+        },
+        {
+          "text": "Put PgBouncer in transaction-pooling mode in front of Postgres so connections are reused more efficiently.",
+          "correct": false,
+          "why": "Transaction pooling hands the server connection to other clients between transactions, which breaks session-level advisory locks even more."
+        }
+      ],
+      "explain": "Session-level advisory locks are bound to a backend connection. Through a pool, the lock lives on whichever connection ran the query, and an idle timeout can close it silently. Leadership must hold a dedicated connection and step down on connection loss, plus fencing tokens for the writes."
+    },
+    {
+      "id": "distributed-systems-v2-q08",
+      "domain": "partitioning",
+      "stem": "An auction site runs bid-handling on 30 servers. The winner is the bid with the earliest `Date.now()` stamped by whichever server received it. Clocks drift up to 50 ms apart, and a 'losing' bidder proved their bid arrived first. Bids for one auction arrive at most a few hundred per second. How should the order of bids be decided?",
+      "options": [
+        {
+          "text": "Upgrade to PTP-based time sync so clocks agree within microseconds and the stamps become trustworthy.",
+          "correct": false,
+          "why": "Skew shrinks a lot, but it is never zero, and two servers can still stamp the same instant. Cross-machine timestamps aren't an ordering mechanism."
+        },
+        {
+          "text": "Route each auction's bids to one sequencer, such as a partition keyed by `auction_id`, and use its arrival order.",
+          "correct": true,
+          "why": "One owner per auction defines a single authoritative order, and a few hundred bids/s fits easily in one partition."
+        },
+        {
+          "text": "Use the timestamp from the bidder's device, which is closer to the moment the user clicked.",
+          "correct": false,
+          "why": "It feels fairer, but client clocks are arbitrary and can be set on purpose, so bidders could win by changing their clock."
+        },
+        {
+          "text": "Attach Lamport timestamps to bids and pick the lowest one.",
+          "correct": false,
+          "why": "Lamport clocks respect causality, but independent bids from different servers are concurrent, so their order is arbitrary, not 'who was first'."
+        }
+      ],
+      "explain": "Never compare timestamps from different machines to decide who was first. When order matters, give the contended thing a single owner (a sequencer, a partition leader, a database row) and let its arrival order define 'first'. Partition by the contended key so the sequencer doesn't become a global bottleneck."
+    },
+    {
+      "id": "distributed-systems-v2-q09",
+      "domain": "effects",
+      "stem": "An outbox relay polls every 200 ms with `SELECT * FROM outbox WHERE id > $lastId ORDER BY id LIMIT 500` and then advances `lastId`. Consumers occasionally never receive an event, yet the outbox row exists. Ids come from a `bigserial`, and some writer transactions run for a few seconds. What fixes the lost events?",
+      "options": [
+        {
+          "text": "Claim unsent rows by state (`sent_at IS NULL`, `FOR UPDATE SKIP LOCKED`) with no id cursor.",
+          "correct": true,
+          "why": "Rows are found by state, not position, so a row that committed late is still unsent and is picked up on the next poll."
+        },
+        {
+          "text": "Order by `created_at` instead of `id` and keep a timestamp cursor that advances after each successful batch.",
+          "correct": false,
+          "why": "`created_at` is set when the row is inserted, not when it commits, so a long transaction still commits behind the cursor and is skipped."
+        },
+        {
+          "text": "Only read rows older than 5 seconds, so slow transactions have time to commit.",
+          "correct": false,
+          "why": "It makes losses rarer, but any transaction longer than 5 s, or a stalled one, still commits behind the cursor and is lost."
+        },
+        {
+          "text": "Run the writers at SERIALIZABLE so ids commit in sequence order.",
+          "correct": false,
+          "why": "SERIALIZABLE prevents anomalies between transactions, but it doesn't make commit order follow sequence order, because sequences are allocated outside it."
+        }
+      ],
+      "explain": "Sequence order is not commit order: a transaction can take id 10 and commit after id 11 is already visible. A relay that advances an id cursor skips late commits forever. Use state-based claiming (`sent_at IS NULL` with `SKIP LOCKED`), a snapshot-aware cursor (`xid8` and `pg_snapshot_xmin`), or CDC from the WAL."
+    },
+    {
+      "id": "distributed-systems-v2-q10",
+      "domain": "effects",
+      "stem": "A `POST /orders` endpoint charges the card, then inserts the order, which has a unique index on `idempotency_key`. Mobile clients retry after 2 s. Logs show pairs of concurrent retries that both charged the card; one insert then failed the unique index. Which server design closes the gap?",
+      "options": [
+        {
+          "text": "Look the key up with `SELECT ... FOR UPDATE` before charging, and skip the charge if a row exists.",
+          "correct": false,
+          "why": "It feels like a lock, but before the first request finishes there is no row to lock, so both concurrent requests see nothing and both charge."
+        },
+        {
+          "text": "Keep the unique index on `orders.idempotency_key`, and refund the card whenever that insert fails.",
+          "correct": false,
+          "why": "It cleans up afterwards, but the customer was charged twice for a while, and a failed refund leaves the double charge in place."
+        },
+        {
+          "text": "Claim the key first with an atomic `INSERT ... ON CONFLICT DO NOTHING`; only the winner charges.",
+          "correct": true,
+          "why": "Claiming is atomic, so exactly one request does the work, and losers get 409 (in progress) or the stored response."
+        },
+        {
+          "text": "Cache the key in Redis with `GET`, and `SET` it after a successful charge.",
+          "correct": false,
+          "why": "Two concurrent retries both miss the `GET` before either sets the key, so it is the same check-then-act race in a different store."
+        }
+      ],
+      "explain": "An idempotency key must be claimed atomically before the side effect, not recorded after it. Insert an `in_progress` row with the request fingerprint, let only the inserter proceed, and store the response for replay. Return 409 while in progress and 422 if the same key arrives with a different body."
+    },
+    {
+      "id": "distributed-systems-v2-q11",
+      "domain": "effects",
+      "stem": "A travel-booking flow chains seven steps (flight, hotel, car, insurance, payment, loyalty, confirmation) owned by five teams, using choreography: each service reacts to the previous service's event. Nobody can tell where a stuck booking is, compensations are spread across five codebases, and two services now listen to each other's events in a cycle. What should they move to?",
+      "options": [
+        {
+          "text": "A two-phase commit across the seven services, coordinated by the booking service.",
+          "correct": false,
+          "why": "It would give atomicity, but external flight and hotel APIs don't take part in 2PC, and locks held across seven services block on any slow participant."
+        },
+        {
+          "text": "Keep choreography, but add a `BookingStepCompleted` event that every service publishes.",
+          "correct": false,
+          "why": "More events help tracing a little, but the flow and its compensations are still spread across five codebases, and the cycles remain."
+        },
+        {
+          "text": "An orchestrated saga: one workflow (for example on Temporal) with persisted state calls each step and its compensation.",
+          "correct": true,
+          "why": "The flow and the compensations live in one place, each booking's state can be queried, and there are no event cycles."
+        },
+        {
+          "text": "Move the seven services onto one shared database so a local transaction can cover the whole booking.",
+          "correct": false,
+          "why": "One transaction is simpler, but it couples five teams' schemas and still can't include the external partner APIs."
+        }
+      ],
+      "explain": "Choreography suits short flows with few participants. As steps and teams grow, an orchestrator makes the saga explicit: one place holds the sequence, the compensations and the persisted state. A durable workflow engine adds crash recovery for free."
+    },
+    {
+      "id": "distributed-systems-v2-q12",
+      "domain": "effects",
+      "stem": "A payments consumer reads `payments` from Kafka, writes a receipt row to Postgres and sends an email through a mail API. The team turned on Kafka transactions and `isolation.level=read_committed` and announced 'exactly-once receipts and emails'. After a consumer crash, some customers got two emails. Which two statements are correct? (Choose two.)",
+      "options": [
+        {
+          "text": "Kafka transactions make consuming offsets and producing *to Kafka* atomic; Postgres writes and the email are outside them.",
+          "correct": true,
+          "why": "Exactly-once in Kafka covers read-process-write within Kafka. Side effects in other systems can still repeat when a batch is reprocessed."
+        },
+        {
+          "text": "Dedupe by payment id in Postgres in the same transaction as the receipt, and send the email with an idempotency key derived from that id.",
+          "correct": true,
+          "why": "Each external effect is then idempotent on a stable id, so reprocessing after a crash doesn't duplicate it."
+        },
+        {
+          "text": "`enable.idempotence=true` on the producer also makes the consumer skip messages it has already processed.",
+          "correct": false,
+          "why": "The idempotent producer dedupes the producer's own retries in the log. It has no effect on what a consumer reprocesses."
+        },
+        {
+          "text": "`read_committed` stops a message from being delivered again after a consumer crash.",
+          "correct": false,
+          "why": "`read_committed` hides records from aborted transactions. Uncommitted offsets are still redelivered after a crash."
+        },
+        {
+          "text": "Raising `session.timeout.ms` to 5 minutes stops the duplicate emails after a consumer crash.",
+          "correct": false,
+          "why": "A longer timeout delays rebalancing, but the crashed consumer's uncommitted messages are still redelivered when it rebalances."
+        }
+      ],
+      "explain": "'Exactly-once' only holds inside the system that provides it. Kafka transactions cover Kafka offsets and Kafka output. Every effect outside Kafka (database rows, emails, HTTP calls) needs its own idempotency, keyed on a stable message id, ideally committed with the effect."
+    },
+    {
+      "id": "distributed-systems-v2-q13",
+      "domain": "overload",
+      "stem": "A partner API in maintenance returns `503` with `Retry-After: Wed, 15 Oct 2026 09:30:00 GMT`. Your 400 sync workers parse it as shown, and the partner blocked your account for hammering them. Your jobs have a 2-minute budget. What should the client do?",
+      "code": "const ra = res.headers.get('retry-after');\nconst waitMs = parseInt(ra, 10) * 1000;   // NaN for an HTTP-date\nawait sleep(waitMs);                       // sleep(NaN) resolves at once\nreturn retry();",
+      "options": [
+        {
+          "text": "Ignore `Retry-After` and use capped exponential backoff with jitter for every 503, since the client's own policy is predictable.",
+          "correct": false,
+          "why": "Your own backoff is better than none, but it ignores the partner's explicit signal and may retry long before the maintenance window ends."
+        },
+        {
+          "text": "Treat an unparseable `Retry-After` as 1 second.",
+          "correct": false,
+          "why": "It stops the instant retry, but 400 workers retrying every second during maintenance is still hammering, and the date form is valid and should be honoured."
+        },
+        {
+          "text": "Always sleep the full `Retry-After` value, however long it is, because the partner knows best.",
+          "correct": false,
+          "why": "It respects the partner, but a 30-minute wait inside a 2-minute budget holds the worker and its job far past any useful time."
+        },
+        {
+          "text": "Parse seconds *or* an HTTP-date, clamp at 0, and fail fast if the wait exceeds the remaining budget.",
+          "correct": true,
+          "why": "This follows RFC 9110's two forms, never turns a date into an instant retry, and doesn't sleep past the deadline."
+        }
+      ],
+      "explain": "`Retry-After` is either delay-seconds or an HTTP-date, and the date form is the one clients forget. A parse failure must never turn into 'retry now'. When the server's wait exceeds your remaining deadline, fail fast and reschedule rather than sleeping a doomed request."
+    },
+    {
+      "id": "distributed-systems-v2-q14",
+      "domain": "overload",
+      "stem": "A quote service normally handles 800 req/s at 25 ms mean latency per instance, which is about 20 requests in flight (Little's law). When its database slowed, latency hit 2 s, in-flight requests rose past 1,600, and pods were OOM-killed one after another. What protects the service?",
+      "options": [
+        {
+          "text": "Raise the Node heap so pods survive more in-flight requests.",
+          "correct": false,
+          "why": "Pods live longer, but in-flight work keeps growing with latency, so it only delays the crash while every request gets slower."
+        },
+        {
+          "text": "Cap in-flight requests per pod at about 40 and reject the excess at once with 503.",
+          "correct": true,
+          "why": "Admitted work stays bounded whatever the latency, memory stays flat, and callers get a fast answer they can act on."
+        },
+        {
+          "text": "Put a 10,000-entry in-process queue in front of the handlers to absorb bursts smoothly.",
+          "correct": false,
+          "why": "It absorbs short bursts, but at 2 s per request the queue holds minutes of work, so callers time out while pods keep memory busy."
+        },
+        {
+          "text": "Raise the database pool to 1,600 connections so every in-flight request has one.",
+          "correct": false,
+          "why": "It removes the wait for a connection, but the database is the slow part, and 1,600 connections makes it slower still."
+        }
+      ],
+      "explain": "Little's law: in-flight = throughput × latency. When a dependency slows, in-flight work grows even at the same request rate. Bound concurrency, not just request rate, and reject excess early, so a slow dependency becomes fast errors instead of an outage."
+    },
+    {
+      "id": "distributed-systems-v2-q15",
+      "domain": "overload",
+      "stem": "A breaker in front of a geocoding service opens on errors and moves to half-open after 30 s. Each time it does, the 400 calls queued up in the meantime go straight through, the still-fragile geocoder falls over, and the breaker re-opens. This cycle has repeated for an hour. What should change?",
+      "options": [
+        {
+          "text": "In half-open, let one probe call through (or a few), and fail the rest fast until it succeeds.",
+          "correct": true,
+          "why": "The recovering service sees a trickle instead of the whole herd, and the breaker closes only after the probe proves it is healthy."
+        },
+        {
+          "text": "Raise the reset timeout from 30 s to 5 minutes so the geocoder has longer to recover between attempts.",
+          "correct": false,
+          "why": "Recovery gets more time, but when the breaker half-opens the same queued herd still floods in, so the cycle just gets slower."
+        },
+        {
+          "text": "Lower the failure threshold so the breaker re-opens sooner.",
+          "correct": false,
+          "why": "It cuts each flood short, but the flood that knocks the geocoder over still happens at every half-open."
+        },
+        {
+          "text": "Add retries with backoff inside the breaker so queued calls succeed on a later attempt.",
+          "correct": false,
+          "why": "Retries add load to a dependency that is already failing, which makes the flood bigger."
+        }
+      ],
+      "explain": "Half-open is a careful test of recovery, not a reopening. Admit a single probe (or a small fixed number) and fail everything else fast until it resolves. Calls that queue while the breaker is open should mostly fail fast rather than wait to be released together."
+    },
+    {
+      "id": "distributed-systems-v2-q16",
+      "domain": "overload",
+      "stem": "An ad-serving fleet's load-balancer health check calls `/health`, which pings Postgres and Redis. During a 3-minute Postgres slowdown, every instance failed its check at once, the load balancer removed them all, and even cached ad responses (which didn't need Postgres) went down. What should `/health` check?",
+      "options": [
+        {
+          "text": "Keep the database ping, but raise the health-check timeout to 10 s so slowdowns don't trip it.",
+          "correct": false,
+          "why": "It survives this slowdown, but a longer outage still fails every instance at once, and real failures are now detected slowly."
+        },
+        {
+          "text": "Remove the load-balancer health check entirely and rely on autoscaling to replace bad instances.",
+          "correct": false,
+          "why": "No instance can be evicted by a shared dependency, but a crashed or wedged instance now keeps receiving traffic."
+        },
+        {
+          "text": "Only whether this process can serve; dependency failures stay in request handling.",
+          "correct": true,
+          "why": "A shared dependency failure no longer evicts the whole fleet, while a broken instance is still removed."
+        },
+        {
+          "text": "Cache the database ping result for 60 s so the check puts less load on Postgres.",
+          "correct": false,
+          "why": "It reduces load, but every instance still fails together once the cached result turns bad."
+        }
+      ],
+      "explain": "A health check that includes shared dependencies turns one dependency's trouble into a whole-fleet eviction. Load-balancer checks should reflect the instance's own health. Handle dependency failures by degrading (cache, fallback, fast error), and watch them in monitoring, not in routing."
+    },
+    {
+      "id": "distributed-systems-v2-q17",
+      "domain": "overload",
+      "stem": "A product page in a Node service fans out to pricing, stock and a slow recommendations service, all through one shared HTTP agent with `maxSockets: 50`. When recommendations went from 80 ms to 9 s, all 50 sockets were held by recommendation calls and pricing calls queued, so checkout broke too. What is the fix?",
+      "options": [
+        {
+          "text": "Raise the shared agent's `maxSockets` to 500 so a slow recommendations service can't use up the pool.",
+          "correct": false,
+          "why": "A bigger pool takes longer to fill, but a slow enough dependency still fills it, and 500 sockets can overload the other services."
+        },
+        {
+          "text": "Give each dependency its own bounded pool, and give recommendations a short timeout and an empty fallback.",
+          "correct": true,
+          "why": "This is a bulkhead: recommendations can only use up its own sockets, and the page renders without them."
+        },
+        {
+          "text": "Retry recommendations twice when they exceed 1 s.",
+          "correct": false,
+          "why": "Retrying a slow service multiplies the slow calls and holds even more sockets."
+        },
+        {
+          "text": "Move the recommendation call into a background job queue.",
+          "correct": false,
+          "why": "It decouples timing, but the page needs the result now, and the queue grows without bound while recommendations are slow."
+        }
+      ],
+      "explain": "Bulkheads isolate resources per dependency (pools, concurrency limits, threads), so one slow dependency can't use up what the others need. Pair each bulkhead with a timeout sized to that dependency and a fallback for anything optional on the page."
+    },
+    {
+      "id": "distributed-systems-v2-q18",
+      "domain": "regions",
+      "stem": "A DNS-hosting provider has 8 resolver nodes. Some customers' zones occasionally contain a 'query of death' that crashes any node serving it. Today the team plans to split customers into 4 fixed shards of 2 nodes. Which assignment limits how many *other* customers lose all their nodes when one customer's poison query arrives?",
+      "options": [
+        {
+          "text": "Four fixed shards of 2 nodes, with each customer placed in exactly one shard.",
+          "correct": false,
+          "why": "It is simple and limits damage to one shard, but every customer in that shard, about 25%, loses both of their nodes together."
+        },
+        {
+          "text": "Every customer on all 8 nodes, to maximise redundancy for every zone.",
+          "correct": false,
+          "why": "It maximises redundancy against ordinary failures, but the poison query takes down all 8 nodes, so every customer is down."
+        },
+        {
+          "text": "Shuffle sharding: give each customer a random pair of the 8 nodes.",
+          "correct": true,
+          "why": "There are 28 possible pairs, so few other customers share both of the poisoned customer's nodes, and the rest keep at least one healthy node."
+        },
+        {
+          "text": "One dedicated node per customer, isolating every zone fully.",
+          "correct": false,
+          "why": "It isolates perfectly, but with thousands of customers it is unaffordable, and each customer then has a single point of failure."
+        }
+      ],
+      "explain": "Shuffle sharding gives each customer a random subset of nodes. Two customers rarely share their whole subset, so a poison input or noisy neighbour fully takes down very few others. The number of combinations, not the number of shards, sets the blast radius."
+    },
+    {
+      "id": "distributed-systems-v2-q19",
+      "domain": "regions",
+      "stem": "A SaaS runs active-passive across two regions with automated failover: if health checks from the passive region fail three times, it promotes itself. Transient packet loss between the regions triggered promotion while the old primary was still healthy, and both regions accepted writes for 4 minutes. What design prevents this?",
+      "options": [
+        {
+          "text": "Lower the DNS TTL to 10 s so that clients reach whichever region was promoted within seconds of the failover.",
+          "correct": false,
+          "why": "Clients move faster, but nothing stops the old primary from accepting writes, so two writers still coexist."
+        },
+        {
+          "text": "Make the health checks more sensitive so a real outage is detected in seconds.",
+          "correct": false,
+          "why": "Faster detection means faster false positives on packet loss, so split brain happens more often."
+        },
+        {
+          "text": "Let both regions accept writes and merge with last-write-wins afterwards.",
+          "correct": false,
+          "why": "It turns the incident into a design, and silently drops whichever conflicting writes lose."
+        },
+        {
+          "text": "Promote only with a lease from a quorum arbiter in a third site; the old primary fences itself.",
+          "correct": true,
+          "why": "A single arbiter decides, and the old primary fences itself, so there is at most one writer even when the inter-region link is flaky."
+        }
+      ],
+      "explain": "Two sites cannot tell 'the other one is dead' from 'the link is bad'. Safe failover needs a tie-breaker outside both (a quorum or witness in a third location) and fencing, so a deposed primary stops writing. For region failover, many teams also keep a human approval step."
+    },
+    {
+      "id": "distributed-systems-v2-q20",
+      "domain": "regions",
+      "stem": "A streaming service runs active-active and must survive losing any one region **without shedding load**. Peak traffic is fixed at 300 units, and autoscaling during a regional event is considered unreliable. Which deployment meets the goal?",
+      "options": [
+        {
+          "text": "Two regions, each provisioned for 210 units (70% busy at peak), with autoscaling to absorb the rest.",
+          "correct": false,
+          "why": "It is cheap, but losing a region leaves 210 of 300 units unless autoscaling works during the event, which the stem rules out."
+        },
+        {
+          "text": "Four regions, each provisioned for 94 units (80% busy at peak).",
+          "correct": false,
+          "why": "It looks generous, but losing one leaves 3 × 94 = 282 units, short of 300."
+        },
+        {
+          "text": "Three regions, each provisioned for 150 units (about 67% busy at peak).",
+          "correct": true,
+          "why": "Losing any one leaves 2 × 150 = 300 units, exactly the peak, with no scaling needed."
+        },
+        {
+          "text": "Two regions at 70% busy, and shed 30% of traffic if one fails.",
+          "correct": false,
+          "why": "It is honest capacity planning, but it sheds load, which the requirement forbids."
+        }
+      ],
+      "explain": "To survive losing one of N regions with no scaling, each region must be provisioned for peak ÷ (N − 1), which means running at most (N − 1)/N busy: 50% for two regions, 67% for three. More, smaller regions waste less idle capacity, but each brings more operational cost."
+    }
+  ]
+}

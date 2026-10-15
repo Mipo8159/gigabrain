@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="teach-topic" content="example-backoff">
+<title>Backoff: wait longer, and not together</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500&family=Atkinson+Hyperlegible+Next:wght@400;600&family=Atkinson+Hyperlegible+Mono:wght@500;600&display=swap">
+<style>
+  /* Paper register (visual-explainer style guide) */
+  :root {
+    color-scheme: light dark;
+    --bg: #f7f7f4; --surface: #ffffff; --border: #e3e3dc; --border-bright: #8e8e8a; --text: #17191c; --text-dim: #575c63;
+    --accent: #2c4cd0; --ok: #1d7443; --warn: #836000; --risk: #b3301d; --info: #1b6a94;
+    --accent-dim: color-mix(in srgb, var(--accent) 14%, transparent);
+    --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+    --font-display: 'Newsreader', Georgia, serif; --font-body: 'Atkinson Hyperlegible Next', 'Helvetica Neue', Helvetica, sans-serif; --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, Menlo, monospace;
+    --t-label: .75rem; --t-small: .875rem; --t-body: 1rem; --t-lead: 1.25rem; --t-h2: 1.625rem; --t-h1: clamp(2.25rem, 5.5vw, 4rem);
+    --s-1: .25rem; --s-2: .5rem; --s-3: .75rem; --s-4: 1rem; --s-5: 1.5rem; --s-6: 2rem; --s-7: 3rem; --s-8: 4.5rem;
+    --r-1: 4px; --r-2: 10px; --ease: cubic-bezier(.16, 1, .3, 1); --fast: 150ms; --med: 300ms; --slow: 500ms;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111316; --surface: #181b1f; --border: #262a30; --border-bright: #62676c; --text: #e8e8e3; --text-dim: #9ba1a9;
+      --accent: #93a6ff; --ok: #6cc492; --warn: #e3b94d; --risk: #f0806b; --info: #6fb8dc;
+      --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%; }
+  }
+  html { font-size: 17px; background: var(--bg); }
+  body { margin: 0; color: var(--text); background: var(--bg); font: 400 var(--t-body)/1.55 var(--font-body); font-kerning: normal; }
+  .wrap { max-width: 64rem; margin: 0 auto; padding: var(--s-7) var(--s-4) var(--s-8); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-6); }
+  @media (min-width: 1000px) { .wrap { grid-template-columns: 11rem minmax(0, 1fr); column-gap: var(--s-6); } nav[data-toc] { position: sticky; top: var(--s-6); align-self: start; grid-row: 1 / span 99; } }
+  main { display: grid; gap: var(--s-8); min-width: 0; }
+  main > section { display: grid; gap: var(--s-5); min-width: 0; scroll-margin-top: var(--s-6); }
+  p { margin: 0; max-width: 65ch; text-wrap: pretty; }
+  h1 { font: 500 var(--t-h1)/1.05 var(--font-display); letter-spacing: -.03em; margin: 0; text-wrap: balance; }
+  h2 { font: 500 var(--t-h2)/1.15 var(--font-display); letter-spacing: -.01em; margin: 0; text-wrap: balance; }
+  .kicker { font: 600 var(--t-label) var(--font-mono); color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+  .lead { font-size: var(--t-lead); color: var(--text-dim); }
+  figure { margin: 0; display: grid; gap: var(--s-3); min-width: 0; }
+  .frame { background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-5); background-image: radial-gradient(var(--border) 1px, transparent 1px); background-size: 16px 16px; min-width: 0; }
+  figcaption { color: var(--text-dim); }
+  figcaption b { font: 600 var(--t-label) var(--font-mono); color: var(--text); margin-right: var(--s-2); }
+  svg { width: 100%; height: auto; display: block; font: 600 15px var(--font-body); }
+  svg text { fill: var(--text); dominant-baseline: central; text-anchor: middle; }
+  svg .dim { fill: var(--text-dim); font: 500 13px var(--font-mono); }
+  .sh { fill: var(--node-top); stroke: var(--border-bright); stroke-width: 1.5; filter: drop-shadow(0 2px 4px var(--lift)); }
+  .key .sh { stroke: var(--accent); stroke-width: 2; }
+  .edge { fill: none; stroke: var(--text-dim); stroke-width: 1.75; marker-end: url(#arr); }
+  .edge.hot { stroke: var(--accent); stroke-width: 2.75; }
+  .edge.fail { stroke: var(--risk); stroke-dasharray: 6 5; }
+  .bar { fill: var(--border-bright); } .bar.hot { fill: var(--accent); } .bar.bad { fill: var(--risk); }
+  button { font: 500 var(--t-small) var(--font-mono); color: var(--text); background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--r-1); padding: var(--s-2) var(--s-3); cursor: pointer; }
+  button:hover, button:focus-visible { border-color: var(--accent); }
+  pre { font: 500 var(--t-small)/1.6 var(--font-mono); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4); overflow-x: auto; margin: 0; }
+  code { font-family: var(--font-mono); font-size: .875em; }
+  .cases { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: var(--s-4); }
+  .case { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4); display: grid; gap: var(--s-3); align-content: start; }
+  .controls { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--s-2) var(--s-3); align-items: center; font: 500 var(--t-small) var(--font-mono); }
+  .controls input { accent-color: var(--accent); min-width: 0; }
+  .remember { margin: 0; padding-left: 1.2em; display: grid; gap: var(--s-2); max-width: 65ch; }
+  a { color: var(--accent); }
+</style>
+<!-- teach-kit:css -->
+</head>
+<body>
+<div data-progress></div>
+<div class="wrap">
+<nav data-toc aria-label="Sections"></nav>
+<main>
+
+<section data-hook>
+  <span class="kicker">Lesson · retries</span>
+  <h1>Retry later, and not all at the same moment</h1>
+  <p class="hook-q">The database restarts for 2 seconds. 1,000 clients retry every 100 ms. What does the database see when it comes back?</p>
+  <figure>
+    <div class="frame">
+      <svg viewBox="0 0 720 200" role="img" aria-label="1,000 clients send retries at the same instant to one recovering database">
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker></defs>
+        <g><rect class="sh" x="20" y="20" width="150" height="160" rx="6"/><text x="95" y="90">1,000</text><text class="dim" x="95" y="118">clients</text></g>
+        <path class="edge hot" d="M170 60H520"/><path class="edge hot" d="M170 100H520"/><path class="edge hot" d="M170 140H520"/>
+        <text class="dim" x="345" y="44">retry · every 100 ms · same instant</text>
+        <g class="key"><rect class="sh" x="520" y="50" width="180" height="100" rx="6"/><text x="610" y="88">Database</text><text class="dim" x="610" y="114">just restarted</text></g>
+      </svg>
+    </div>
+    <figcaption><b>Fig. 1</b>The question: one wave of 1,000 retries hits a database that has only just come back.</figcaption>
+  </figure>
+</section>
+
+<section data-prereq>
+  <h2 data-short="Before you start">Before you start</h2>
+  <ul>
+    <li><b>You need:</b> what a <dfn data-tip="Sending the same request again after it failed or timed out.">retry</dfn> is, and that a request can time out.</li>
+    <li><b>You will be able to:</b> pick a backoff for a client and predict how load spreads after an outage.</li>
+    <li><b>Time:</b> about 15 minutes. Answers are saved in this browser, and the review box says when to come back.</li>
+  </ul>
+  <div data-review></div>
+</section>
+
+<section id="model">
+  <span class="kicker">Mental model</span>
+  <h2 data-short="Mental model">Two rules: each wait doubles, and each client adds random noise</h2>
+  <p><dfn data-tip="Waiting longer before each new retry, usually doubling the wait each time.">Exponential backoff</dfn> doubles the wait after each failure, so a broken server gets fewer and fewer requests. <dfn data-tip="A random amount added to or taken from each wait, so clients drift apart in time.">Jitter</dfn> makes each client wait a slightly different time, so clients that failed together do not retry together.</p>
+  <figure>
+    <div class="frame">
+      <svg viewBox="0 0 720 180" role="img" aria-label="Waits of 100, 200, 400 and 800 ms grow as bars; the cap stops growth at 800 ms">
+        <rect class="bar" x="40" y="130" width="40" height="30"/><text class="dim" x="60" y="115">100</text>
+        <rect class="bar" x="120" y="100" width="40" height="60"/><text class="dim" x="140" y="85">200</text>
+        <rect class="bar" x="200" y="60" width="40" height="100"/><text class="dim" x="220" y="45">400</text>
+        <rect class="bar hot" x="280" y="20" width="40" height="140"/><text class="dim" x="300" y="12">800 ms</text>
+        <rect class="bar hot" x="360" y="20" width="40" height="140"/><text class="dim" x="380" y="12">cap</text>
+        <text class="dim" x="560" y="90">wait = min(cap, base × 2ⁿ)</text>
+      </svg>
+    </div>
+    <figcaption><b>Fig. 2</b>The wait doubles after each failure until it reaches the <dfn data-tip="The largest wait allowed, so a client never sleeps for minutes.">cap</dfn>.</figcaption>
+  </figure>
+</section>
+
+<section id="mechanism">
+  <span class="kicker">Step by step</span>
+  <h2 data-short="Step by step">Three failed attempts, one success</h2>
+  <figure data-stepper data-code="code-retry">
+    <div class="frame">
+      <svg viewBox="0 0 720 160" role="img" aria-label="Timeline of four attempts with waits of 100, 200 and 400 ms">
+        <path class="edge" d="M20 80H700"/>
+        <g data-s="1"><circle cx="40" cy="80" r="10" fill="var(--risk)"/><text class="dim" x="40" y="115">try 1 ✕</text></g>
+        <g data-s="2"><circle cx="140" cy="80" r="10" fill="var(--risk)"/><text class="dim" x="90" y="50">100 ms</text><text class="dim" x="140" y="115">try 2 ✕</text></g>
+        <g data-s="3"><circle cx="340" cy="80" r="10" fill="var(--risk)"/><text class="dim" x="240" y="50">200 ms</text><text class="dim" x="340" y="115">try 3 ✕</text></g>
+        <g data-s="4"><circle cx="680" cy="80" r="10" fill="var(--ok)"/><text class="dim" x="510" y="50">400 ms</text><text class="dim" x="680" y="115">try 4 ●</text></g>
+      </svg>
+    </div>
+    <pre id="code-retry"><span class="line">for (let n = 0; n &lt; 5; n++) {</span><span class="line">  try { return await call(); }</span><span class="line">  catch (e) { if (!retryable(e)) throw e; }</span><span class="line">  await sleep(Math.min(cap, base * 2 ** n));</span><span class="line">}</span></pre>
+    <div class="kit-player">
+      <button data-step="prev">← Back</button><button data-play>Play</button><input type="range"><span data-step-count></span><button data-step="next">Next →</button>
+      <ol class="ve-cap">
+        <li data-lines="2">The first call fails.</li>
+        <li data-lines="3-4">The error can be retried, so the client sleeps 100 ms (n = 0).</li>
+        <li data-lines="4">The second retry fails; the wait doubles to 200 ms, then 400 ms.</li>
+        <li data-lines="2">The fourth try succeeds and returns.</li>
+      </ol>
+    </div>
+    <figcaption><b>Fig. 3</b>Each failure doubles the next wait; the code line that runs lights up.</figcaption>
+  </figure>
+
+  <div data-quiz data-predict id="q-sync">
+    <span class="kicker">Predict</span>
+    <p data-ask>All 1,000 clients use the same backoff without jitter. When do their second retries arrive?</p>
+    <div class="options">
+      <button data-option data-correct>All at the same moment, 100 ms after the first wave.</button>
+      <button data-option data-why="Doubling changes how long each client waits, not whether clients wait the same time. Identical rules give identical times.">Spread over the 100 ms, because backoff spreads them.</button>
+    </div>
+    <div data-feedback><p>Backoff without jitter keeps the clients in step: every wave lands together.</p></div>
+    <figure data-reveal>
+      <div class="frame"><svg viewBox="0 0 720 120" role="img" aria-label="Three waves of requests arrive as tall spikes at the same instants">
+        <rect class="bar bad" x="80" y="10" width="14" height="100"/><rect class="bar bad" x="180" y="10" width="14" height="100"/><rect class="bar bad" x="380" y="10" width="14" height="100"/>
+        <text class="dim" x="560" y="60">1,000 requests per spike</text></svg></div>
+      <figcaption><b>Fig. 4</b>Without jitter, retries arrive as spikes: a <dfn data-tip="Many clients waking at once and hitting the same resource together.">thundering herd</dfn>.</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section id="play">
+  <span class="kicker">Try it</span>
+  <h2 data-short="Try it">Jitter turns spikes into a flat line</h2>
+  <figure data-sim="spread">
+    <div class="frame">
+      <svg viewBox="0 0 720 160" role="img" aria-label="Histogram of when retries arrive; more jitter flattens the spike"><g class="bars"></g><text class="dim" x="360" y="150">time after the outage →</text></svg>
+    </div>
+    <div class="controls">
+      <label for="jit">jitter</label><input id="jit" type="range" min="0" max="100" value="0" data-param="jitter"><span><span data-show="jitter">0</span> %</span>
+    </div>
+    <figcaption><b>Fig. 5</b>Peak load: <b data-out="peak">1,000</b> requests in one slot. Drag jitter to 100 % (<dfn data-tip="Each wait is a random value between 0 and the backoff value.">full jitter</dfn>).</figcaption>
+  </figure>
+</section>
+
+<section id="traps">
+  <span class="kicker">Where it breaks</span>
+  <h2 data-short="Traps">Three ways backoff goes wrong</h2>
+  <figure>
+    <div class="cases">
+      <div class="case"><b>No cap</b><svg viewBox="0 0 200 80" role="img" aria-label="Waits grow without limit"><rect class="bar" x="10" y="64" width="20" height="8"/><rect class="bar" x="50" y="48" width="20" height="24"/><rect class="bar bad" x="90" y="8" width="20" height="64"/></svg><span>A client sleeps for minutes after a short outage.</span></div>
+      <div class="case"><b>Retrying a 400</b><svg viewBox="0 0 200 80" role="img" aria-label="A request that can never succeed is retried"><path class="edge fail" d="M10 40H180"/></svg><span>A bad request fails the same way every time.</span></div>
+      <div class="case"><b>Retries at every layer</b><svg viewBox="0 0 200 80" role="img" aria-label="Three layers each retry three times"><text class="dim" x="100" y="40">3 × 3 × 3 = 27 calls</text></svg><span>Each layer multiplies the load.</span></div>
+    </div>
+    <figcaption><b>Fig. 6</b>The same retry loop, three ways to make an outage worse.</figcaption>
+  </figure>
+  <figure data-stepper>
+    <div class="frame">
+      <svg viewBox="0 0 720 150" role="img" aria-label="Calls multiply as each of three layers retries three times: 1, 3, 9, 27">
+        <g data-s="1"><rect class="sh" x="20" y="45" width="140" height="60" rx="6"/><text x="90" y="75">client · 1</text></g>
+        <g data-s="2"><path class="edge" d="M160 75H200"/><rect class="sh" x="200" y="45" width="140" height="60" rx="6"/><text x="270" y="75">gateway · 3</text></g>
+        <g data-s="3"><path class="edge" d="M340 75H380"/><rect class="sh" x="380" y="45" width="140" height="60" rx="6"/><text x="450" y="75">service · 9</text></g>
+        <g data-s="4" class="key"><path class="edge fail" d="M520 75H560"/><rect class="sh" x="560" y="45" width="140" height="60" rx="6"/><text x="630" y="75">database · 27</text></g>
+      </svg>
+    </div>
+    <div class="kit-player">
+      <button data-step="prev">← Back</button><span data-step-count></span><button data-step="next">Next →</button>
+      <ol class="ve-cap">
+        <li>The client makes one call.</li>
+        <li>The gateway retries it up to 3 times.</li>
+        <li>For each of those, the service retries 3 times: 9 calls.</li>
+        <li>The database gets up to 27 calls for one user action.</li>
+      </ol>
+    </div>
+    <figcaption><b>Fig. 7</b>Retries at every layer multiply; they do not add.</figcaption>
+  </figure>
+  <div data-quiz id="q-400">
+    <span class="kicker">Check</span>
+    <p data-ask>An API returns 400 Bad Request. Should the client retry with backoff?</p>
+    <div class="options">
+      <button data-option data-why="Backoff helps only when the cause can go away. A malformed request stays malformed.">Yes, the server may recover.</button>
+      <button data-option data-correct>No, the same request will fail again.</button>
+    </div>
+    <div data-feedback><p>Retry only errors that can pass: timeouts, 503 and 429. Not 400 or 404.</p></div>
+  </div>
+  <div data-quiz id="q-layers">
+    <span class="kicker">Check</span>
+    <p data-ask>A gateway, a service and a client each retry 3 times. One call fails at the database. How many calls can the database get?</p>
+    <div class="options">
+      <button data-option data-why="The retries are not added together: each layer repeats the whole call below it, so they multiply.">9</button>
+      <button data-option data-correct>27</button>
+    </div>
+    <div data-feedback><p>3 × 3 × 3 = 27. Retry at one layer only, usually the outermost one.</p></div>
+  </div>
+  <div data-quiz id="q-cap">
+    <span class="kicker">Check</span>
+    <p data-ask>Base 100 ms, no cap, attempt 12. Roughly how long is the wait?</p>
+    <div class="options">
+      <button data-option data-why="1.2 s is base × 12, which is linear growth. Doubling grows much faster.">1.2 s</button>
+      <button data-option data-correct>About 7 minutes</button>
+    </div>
+    <div data-feedback><p>100 ms × 2¹² ≈ 410 s. A cap of a few seconds keeps the client useful.</p></div>
+  </div>
+</section>
+
+<section id="practice">
+  <span class="kicker">Your turn</span>
+  <h2 data-short="Your turn">Put the retry loop in order</h2>
+  <div data-order>
+    <p>Arrange the steps of one attempt.</p>
+    <ol>
+      <li data-pos="3">If the error cannot pass, give up</li>
+      <li data-pos="1">Call the server</li>
+      <li data-pos="4">Sleep min(cap, base × 2ⁿ) with jitter</li>
+      <li data-pos="2">On success, return the result</li>
+    </ol>
+    <button data-check>Check order</button>
+    <div data-feedback><p>Call, return on success, give up on errors that cannot pass, otherwise sleep and loop.</p></div>
+  </div>
+  <p>Practice ticket: none for this example. A real lesson links <code>bin/practice start &lt;domain/case&gt;</code>.</p>
+</section>
+
+<section id="recall" data-recall>
+  <span class="kicker">Recall</span>
+  <h2 data-short="Recall">Answer without scrolling up</h2>
+  <div data-review></div>
+  <div data-quiz data-predict id="q-full">
+    <span class="kicker">Predict</span>
+    <p data-ask>You switch 1,000 clients from no jitter to full jitter. What happens to the peak load?</p>
+    <div class="options">
+      <button data-option data-correct>It drops to a small fraction of the spike.</button>
+      <button data-option data-why="Jitter does not change how many retries happen, but it spreads them out, so the peak falls.">It stays the same, because the same number of requests are sent.</button>
+    </div>
+    <div data-feedback><p>The total stays the same; the peak falls because the retries are spread over the window.</p></div>
+    <figure data-reveal><div class="frame"><svg viewBox="0 0 720 80" role="img" aria-label="A flat, even spread of requests"><rect class="bar hot" x="20" y="50" width="680" height="20"/></svg></div><figcaption><b>Fig. 8</b>Full jitter: the same requests, spread flat.</figcaption></figure>
+  </div>
+  <div data-quiz id="q-why">
+    <span class="kicker">Recall</span>
+    <p data-ask>Which problem does jitter solve that doubling alone does not?</p>
+    <div class="options">
+      <button data-option data-why="Doubling already lowers the total rate. Jitter is about timing between clients.">Too many retries in total.</button>
+      <button data-option data-correct>Clients that failed together retrying together.</button>
+    </div>
+    <div data-feedback><p>Doubling slows each client down; jitter breaks the lockstep between clients.</p></div>
+  </div>
+  <div data-quiz id="q-which">
+    <span class="kicker">Recall</span>
+    <p data-ask>Which response is worth retrying with backoff?</p>
+    <div class="options">
+      <button data-option data-why="404 means the resource is not there. Waiting will not make it appear.">404 Not Found</button>
+      <button data-option data-correct>503 Service Unavailable</button>
+    </div>
+    <div data-feedback><p>503 says “try again later”; it is the case backoff was made for.</p></div>
+  </div>
+  <div data-quiz id="q-where">
+    <span class="kicker">Recall</span>
+    <p data-ask>Where should retries live in a three-layer call chain?</p>
+    <div class="options">
+      <button data-option data-why="Retrying at every layer multiplies the calls: 3 × 3 × 3.">At every layer, to be safe.</button>
+      <button data-option data-correct>At one layer, usually the outermost.</button>
+    </div>
+    <div data-feedback><p>One retrying layer keeps the worst case at 3 calls instead of 27.</p></div>
+  </div>
+  <h2 data-short="Remember">Five lines to keep</h2>
+  <ol class="remember"><li>Retry only errors that can pass.</li><li>Double the wait, up to a cap.</li><li>Add jitter, so clients do not move in step.</li><li>Retry at one layer only.</li><li>Come back when the review box says so.</li></ol>
+  <h2 data-short="Glossary">Glossary</h2>
+  <div data-glossary></div>
+</section>
+
+</main>
+</div>
+<script>
+  // Live figure for Fig. 5: 1,000 clients, 20 time slots; jitter spreads the second retry over the window.
+  window.teachSims = window.teachSims || {};
+  window.teachSims.spread = (p, root) => {
+    const slots = 20, n = 1000, w = p.jitter / 100, counts = new Array(slots).fill(0);
+    for (let i = 0; i < n; i++) { const t = (1 - w) * (slots - 1) + w * ((i * 7919) % n) / n * (slots - 1); counts[Math.round(t)]++; }
+    const peak = Math.max(...counts), g = root.querySelector('.bars');
+    g.innerHTML = counts.map((c, i) => `<rect class="bar ${c === peak ? 'hot' : ''}" x="${20 + i * 34}" y="${130 - 120 * c / n}" width="26" height="${120 * c / n}"/>`).join('');
+    return { peak: peak.toLocaleString('en-US') };
+  };
+</script>
+<!-- teach-kit:js -->
+</body>
+</html>

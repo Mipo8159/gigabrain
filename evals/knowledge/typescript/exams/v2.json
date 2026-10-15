@@ -1,0 +1,683 @@
+{
+  "topic": "typescript",
+  "variant": 2,
+  "of": 5,
+  "title": "TypeScript type design at scale — variant 2",
+  "description": "Query and timestamp parsing, queue and DB edges, state-machine APIs, unit and tenant brands, result unions, schema-derived types, event evolution, exact optional keys, satisfies, imports and TS 6/7 upgrades.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "boundaries",
+      "name": "Runtime boundaries and validation",
+      "weight": 0.25
+    },
+    {
+      "id": "modelling",
+      "name": "Modelling domain states and ids",
+      "weight": 0.25
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts between services",
+      "weight": 0.15
+    },
+    {
+      "id": "strictness",
+      "name": "Strictness, any and escape hatches",
+      "weight": 0.15
+    },
+    {
+      "id": "toolchain",
+      "name": "Modules, monorepos and the toolchain",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "typescript-v2-q01",
+      "domain": "boundaries",
+      "stem": "A job-board search API parses query strings with zod v4: `limit: z.coerce.number().int().max(100).default(20)`. A mobile release sends `?limit=` (empty) when the user clears a filter. Since then, 11% of searches return zero results and the app shows \"No jobs found\". What should the schema do?",
+      "options": [
+        {
+          "text": "Switch to `z.number().int()`, which rejects strings instead of coercing them.",
+          "correct": false,
+          "why": "Query-string values are always strings, so every request with a `limit` would now fail validation."
+        },
+        {
+          "text": "Treat `\"\"` as absent before coercing (e.g. preprocess it to `undefined`) so the default applies.",
+          "correct": true,
+          "why": "`Number(\"\")` is `0`, so the empty string must be handled before coercion; then the default of 20 applies and real numbers still parse."
+        },
+        {
+          "text": "Add `.min(1)` after `.int()` so a zero limit fails validation and the client gets a clear 400 error.",
+          "correct": false,
+          "why": "It turns silent empty pages into errors for every user who clears the filter; the client meant \"no limit given\", which should take the default."
+        },
+        {
+          "text": "Keep the schema and add `|| 20` where the service reads `limit`.",
+          "correct": false,
+          "why": "It fixes this read, but the parsed type still claims `limit` is a valid number from 1 to 100, and every other reader inherits the 0."
+        }
+      ],
+      "explain": "zod coercion calls `Number()`/`Boolean()`, so empty strings become 0 and \"false\" becomes true. Decide what \"empty\" means at the boundary (absent, default or error) before coercing, so the parsed type tells the truth.",
+      "refs": [
+        "https://zod.dev/api#coercion"
+      ]
+    },
+    {
+      "id": "typescript-v2-q02",
+      "domain": "boundaries",
+      "stem": "A flight-status aggregator ingests 3,000 updates/s from 40 airline partners and validates `departsAt` with `z.iso.datetime()`. One airline switched from `Z` timestamps to local offsets such as `2026-10-15T08:30:00+02:00`, and all of its updates are now rejected. Domain code needs a `Date`. What should the field schema be?",
+      "options": [
+        {
+          "text": "`z.date()`, so the domain gets a `Date` directly.",
+          "correct": false,
+          "why": "JSON has no Date type; `z.date()` expects a Date instance, so every JSON string is rejected."
+        },
+        {
+          "text": "`z.coerce.date()`, which accepts any string `new Date()` can read.",
+          "correct": false,
+          "why": "It accepts offsets, but `null` coerces to 1970-01-01 and unparseable strings become Invalid Date, so bad data passes silently as a real departure time."
+        },
+        {
+          "text": "`z.iso.datetime({ offset: true }).transform(s => new Date(s))`",
+          "correct": true,
+          "why": "It accepts offsets explicitly, still rejects malformed strings, and converts the wire string into the domain `Date` in one place."
+        },
+        {
+          "text": "`z.string()` at the edge, then `new Date(s)` in each service that needs the time.",
+          "correct": false,
+          "why": "It accepts everything, so malformed timestamps travel into the domain, and the conversion is repeated (and forgotten) in every consumer."
+        }
+      ],
+      "explain": "The wire type of a timestamp is a string; the domain type is a Date. Convert in one schema at the edge, being explicit about which formats you accept (offsets, nulls), and don't let lenient coercion invent dates.",
+      "refs": [
+        "https://zod.dev/api#iso-datetimes"
+      ]
+    },
+    {
+      "id": "typescript-v2-q03",
+      "domain": "boundaries",
+      "stem": "An insurance claims pipeline: an API validates claims with a schema and puts them on an SQS queue; a worker reads them with `JSON.parse(body) as Claim`, since \"the API already validated\". During an incident, ops redrove 12,000 messages from a DLQ that had been filled six weeks earlier by an older API version with a different `Claim` shape. Workers corrupted 3,000 claims. What is the lesson for the worker?",
+      "options": [
+        {
+          "text": "Keep the cast but only allow redrives after checking the message age.",
+          "correct": false,
+          "why": "Age is a weak proxy for shape, and old-shape messages also arrive through retries, manual sends and other producers."
+        },
+        {
+          "text": "Make the API validate more strictly so nothing invalid can ever enter the queue.",
+          "correct": false,
+          "why": "The messages were valid when sent; the problem is that queued data outlives the code that produced it, which producer-side checks can't fix."
+        },
+        {
+          "text": "Version the message and have the API stamp it; the worker can trust the stamp and keep the cast.",
+          "correct": false,
+          "why": "A version field helps routing, but trusting a field in an unvalidated payload is still trusting the payload."
+        },
+        {
+          "text": "The worker is its own trust boundary: parse every message with the current schema (or an upcaster for old versions) and dead-letter failures.",
+          "correct": true,
+          "why": "Each process that reads external data must validate it itself, because queues hold data from other code versions and other senders."
+        }
+      ],
+      "explain": "Validation does not travel with data. Every consumer of a queue, cache or table is a separate boundary and must parse what it reads, since data at rest outlives the code that wrote it. Versioned payloads plus upcasters let old messages stay readable.",
+      "refs": [
+        "https://zod.dev/api",
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown"
+      ]
+    },
+    {
+      "id": "typescript-v2-q04",
+      "domain": "boundaries",
+      "stem": "A warehouse service uses raw SQL with a typed helper: `const rows = await db.query<StockRow>(\"select * from stock where sku = $1\", [sku])`. A migration renamed `qty_on_hand` to `on_hand_qty`. Everything compiled, and the picker app showed every item as out of stock (`undefined` treated as 0). Queries run ~8k/s. Which change catches this at build time?",
+      "options": [
+        {
+          "text": "Parse every row with a zod schema after each query.",
+          "correct": false,
+          "why": "It catches the rename, but only at runtime in production, and parsing every row at 8k queries/s adds CPU to the hottest path."
+        },
+        {
+          "text": "Generate row types from the migrated schema in CI so renamed columns fail the compile.",
+          "correct": true,
+          "why": "The types come from the real schema after migrations, so the drift shows up as a compile error before deploy, at no runtime cost."
+        },
+        {
+          "text": "Replace `db.query<StockRow>` with `db.query(...) as StockRow[]` to make the cast visible in review.",
+          "correct": false,
+          "why": "It is the same unchecked assertion written differently; the type parameter was already a cast."
+        },
+        {
+          "text": "Add a unit test that mocks `db.query` and returns a `StockRow` fixture.",
+          "correct": false,
+          "why": "The mock returns whatever the test says, so it encodes the old column name and keeps passing."
+        }
+      ],
+      "explain": "A generic on a query function (`query<T>`) is a cast, not a check. Make the database schema the source of truth for row types (codegen after migrations, or a query builder typed from it), so schema changes become compile errors; keep runtime parsing for truly untrusted inputs.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions",
+        "https://www.typescriptlang.org/docs/handbook/2/generics.html"
+      ]
+    },
+    {
+      "id": "typescript-v2-q05",
+      "domain": "boundaries",
+      "stem": "An analytics ingester's error handler did `catch (e: any) { reporter.capture(e.message, e.stack) }`. A third-party SDK rejected with a plain string during a 30-minute outage; `e.message` was `undefined`, the reporter threw on it, and the original errors never reached on-call. How should `catch` blocks be written?",
+      "options": [
+        {
+          "text": "Keep `e: any` but add optional chaining, `e?.message ?? \"unknown\"`, so the reporter never throws.",
+          "correct": false,
+          "why": "It avoids the crash, but every thrown string is reported as \"unknown\" and the real message is lost; `any` still hides the next mistake."
+        },
+        {
+          "text": "Keep `e` as `unknown` and narrow with `instanceof Error`, wrapping anything else.",
+          "correct": true,
+          "why": "Anything can be thrown; narrowing forces the non-Error case to be handled and keeps its content."
+        },
+        {
+          "text": "Annotate `catch (e: Error)` so the compiler knows the type.",
+          "correct": false,
+          "why": "TypeScript only allows `any` or `unknown` on catch variables, because it can't know what was thrown."
+        },
+        {
+          "text": "Wrap the reporter call in its own `try/catch` that swallows errors.",
+          "correct": false,
+          "why": "The handler no longer crashes, but the failure is still dropped silently, which was the original problem."
+        }
+      ],
+      "explain": "JavaScript can throw any value, so a catch variable is `unknown` under `strict` (`useUnknownInCatchVariables`). Narrow with `instanceof Error` and convert the rest; an `any` annotation turns the error path, which is rarely tested, into a crash site.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#useUnknownInCatchVariables"
+      ]
+    },
+    {
+      "id": "typescript-v2-q06",
+      "domain": "modelling",
+      "stem": "A courier platform models parcels as a union of states (`Created`, `Packed`, `InTransit`, `Delivered`). Bugs keep appearing where code delivers a parcel that was never packed, because `updateStatus(p: Parcel, s: Status)` accepts any pair. 30 engineers touch the code. Which API design stops illegal transitions at compile time?",
+      "options": [
+        {
+          "text": "A transition table `Record<Status, Status[]>` checked inside `updateStatus` at runtime.",
+          "correct": false,
+          "why": "It catches illegal moves, but only when they run; the signature still accepts any parcel with any status, so the compiler can't help."
+        },
+        {
+          "text": "Separate functions typed per state, e.g. `ship(p: Packed): InTransit` and `deliver(p: InTransit): Delivered`.",
+          "correct": true,
+          "why": "Each function accepts only the state it may move from, so calling `deliver` on a `Created` parcel doesn't compile, and callers must narrow first."
+        },
+        {
+          "text": "One `status` enum and a `canTransition(from, to)` helper that every caller must call first.",
+          "correct": false,
+          "why": "It relies on every caller remembering the helper, and enums don't survive Node type stripping."
+        },
+        {
+          "text": "A `Parcel` class with methods that throw when called in the wrong state.",
+          "correct": false,
+          "why": "Throwing methods catch the error at runtime only; the type of a `Parcel` is the same in every state, so misuse compiles."
+        }
+      ],
+      "explain": "To make illegal transitions unrepresentable, put the allowed source state in the parameter type and the target state in the return type. The compiler then enforces the state machine, and runtime checks remain only for untrusted input.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v2-q07",
+      "domain": "modelling",
+      "stem": "A subscription service stores prices in cents, but some modules use euros (`9.99`). A refactor passed a cents value to a function expecting euros, and 2,100 customers were charged 100x for one hour. Prices flow through ~300 functions and a pricing engine doing 50k calculations/s. Which model fits?",
+      "options": [
+        {
+          "text": "Branded `Cents` and `Euros` number types, created only by conversion functions.",
+          "correct": true,
+          "why": "The brand is type-only, so the hot path pays nothing, and every unit change has to go through a named conversion."
+        },
+        {
+          "text": "Name variables with suffixes (`priceCents`, `priceEuros`) and enforce it with a lint rule.",
+          "correct": false,
+          "why": "Naming is helpful, but `charge(priceCents)` still compiles when `charge` expects euros; the compiler doesn't read names."
+        },
+        {
+          "text": "A `Money` class holding amount and unit, converted with methods.",
+          "correct": false,
+          "why": "Units become explicit, but each value is an object: allocation at 50k calc/s, plus custom serialisation for JSON, cache and DB."
+        },
+        {
+          "text": "Use `bigint` for all money so fractional euros are impossible.",
+          "correct": false,
+          "why": "It avoids floats, but a `bigint` of cents and a `bigint` of euros are still the same type, so the 100x mix-up still compiles."
+        }
+      ],
+      "explain": "Units are a classic case for brands: same runtime representation, different meaning. Brand the numbers, make conversions the only way to switch unit, and keep the runtime value a plain number so performance and serialisation are unchanged.",
+      "refs": [
+        "https://zod.dev/api#branded-types",
+        "https://www.typescriptlang.org/play/#example/nominal-typing"
+      ]
+    },
+    {
+      "id": "typescript-v2-q08",
+      "domain": "modelling",
+      "stem": "An event router narrows on `kind`, but after a refactor the compiler rejects `rest.seat` even inside the `if`. A developer proposes `(rest as any).seat`. What is happening, and what should the code do instead?",
+      "code": "type Ev =\n  | { kind: \"booked\"; seat: string; price: number }\n  | { kind: \"cancelled\"; reason: string };\n\nfunction handle(ev: Ev) {\n  const { kind, ...rest } = ev;\n  if (kind === \"booked\") {\n    reserve(rest.seat); // error: 'seat' does not exist\n  }\n}",
+      "options": [
+        {
+          "text": "TypeScript doesn't narrow unions inside `if` statements, only inside `switch`; rewrite the check as a `switch` on `kind`.",
+          "correct": false,
+          "why": "Both `if` and `switch` narrow discriminated unions; the issue is the destructuring, which a switch on `kind` would keep."
+        },
+        {
+          "text": "Destructuring separates `kind` from `rest`, so `rest` isn't narrowed; check `ev.kind` and read from `ev`.",
+          "correct": true,
+          "why": "Narrowing works on the union value; once `kind` and `rest` are separate variables, checking one says nothing about the other."
+        },
+        {
+          "text": "`rest` is typed `any` after a spread; annotate it as `Ev`.",
+          "correct": false,
+          "why": "`rest` is not `any`; it is a union of the remaining fields, and annotating it as `Ev` would be wrong because it lacks `kind`."
+        },
+        {
+          "text": "Use `(rest as any).seat`, since the runtime value is correct.",
+          "correct": false,
+          "why": "It compiles and works today, but it turns off checking exactly where the union should protect you, and a renamed field later fails silently."
+        }
+      ],
+      "explain": "Narrowing follows a value, not values derived from it. Keep the union intact while checking its tag (`ev.kind`), then destructure inside the narrowed branch; an `as any` to escape a narrowing error usually hides a modelling mistake.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions",
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+      ]
+    },
+    {
+      "id": "typescript-v2-q09",
+      "domain": "modelling",
+      "stem": "A B2B SaaS had a cross-tenant data leak: a repository method `findInvoices(tenantId: string, filter)` was called with the user's id instead of the tenant id. There are 70 repository methods and 25 engineers. Which design makes \"forgot the tenant\" or \"wrong id\" hard to write?",
+      "options": [
+        {
+          "text": "Add a lint rule requiring the first parameter of repository methods to be named `tenantId`.",
+          "correct": false,
+          "why": "It checks the name of the parameter, not what is passed; `findInvoices(user.id, f)` still compiles and lints clean."
+        },
+        {
+          "text": "Add Postgres row-level security as the only control and drop tenant parameters from the code.",
+          "correct": false,
+          "why": "RLS is a strong backstop, but it depends on setting the session's tenant correctly on every pooled connection, and the type system no longer helps at all."
+        },
+        {
+          "text": "Expose repositories only through a scoped object, e.g. `repos.forTenant(ctx.tenant)`, built from the authenticated context with a branded `TenantId`.",
+          "correct": true,
+          "why": "Callers can't omit or swap the tenant: the only way to get a repository is from a verified, branded tenant."
+        },
+        {
+          "text": "Write integration tests that call each repository method with two tenants.",
+          "correct": false,
+          "why": "Useful, but 70 methods times every new one depends on people writing the tests; the bug shape remains easy to write."
+        }
+      ],
+      "explain": "When a parameter must never be wrong, don't make it a parameter that every call passes. Bind it once from a trusted source into a scoped object (a capability), and brand it so raw strings can't stand in. Keep database controls as defence in depth.",
+      "refs": [
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v2-q10",
+      "domain": "modelling",
+      "stem": "A partner SDK returns `{ data?: Quote; error?: ApiError }`. Code across 40 call sites does `if (res.data) use(res.data)` and silently ignores errors, so failed quotes looked like \"no quote\" for months. The team owns a wrapper around the SDK. What should the wrapper return?",
+      "options": [
+        {
+          "text": "The same shape, plus a lint rule that every `res.data` check has an `else` branch.",
+          "correct": false,
+          "why": "Lint can't tell an `else` that handles the error from one that ignores it, and the type still allows both fields or neither."
+        },
+        {
+          "text": "`Quote` directly, throwing on error.",
+          "correct": false,
+          "why": "Throwing is valid, but for an expected business outcome it lets callers forget the error entirely, and unhandled rejections replace silent ignores."
+        },
+        {
+          "text": "`Quote | null`, with `null` on error.",
+          "correct": false,
+          "why": "It is simpler, but the error detail is gone and \"no quote available\" and \"partner down\" look the same, which was the original problem."
+        },
+        {
+          "text": "`{ ok: true; quote: Quote } | { ok: false; error: ApiError }`",
+          "correct": true,
+          "why": "The union forces callers to check `ok` before reaching the quote, and the error branch carries its details."
+        }
+      ],
+      "explain": "Two optional fields that should be mutually exclusive model four states when only two are real. A result union with a discriminant makes the failure path part of the type, so callers must decide what to do with it.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v2-q11",
+      "domain": "contracts",
+      "stem": "A loyalty service consumes `PointsEarned` events from a topic with 30-day retention. The team made `channel` a **required** field in the consumer schema because new producers always send it. A replay after a bug fix re-read 30 days of history and 60% of old events failed validation and went to the DLQ. What change should they have made?",
+      "options": [
+        {
+          "text": "Add `channel` as optional with a default; require it only once no older events remain.",
+          "correct": true,
+          "why": "Consumers must accept every shape that can still be read; old events in retention never had the field."
+        },
+        {
+          "text": "Make the consumer schema `z.looseObject` so unknown and unexpected fields pass through instead of failing.",
+          "correct": false,
+          "why": "That relaxes unknown fields, but the failure is a known field missing from old events; loose objects don't help with that."
+        },
+        {
+          "text": "Rewrite the old events in the topic to include `channel`.",
+          "correct": false,
+          "why": "Kafka records are immutable; rewriting means producing a new topic and migrating every consumer, far more work than a default."
+        },
+        {
+          "text": "Keep it required but skip validation during replays.",
+          "correct": false,
+          "why": "Replays are exactly when the oldest, least-expected shapes arrive; disabling checks then lets bad data in."
+        }
+      ],
+      "explain": "Backward compatibility means new consumers can read old data. Data at rest (topic retention, DLQs, caches) keeps old shapes alive, so new fields enter as optional with defaults, and required-ness comes only when the old data is gone.",
+      "refs": [
+        "https://json-schema.org/understanding-json-schema/",
+        "https://zod.dev/api"
+      ]
+    },
+    {
+      "id": "typescript-v2-q12",
+      "domain": "contracts",
+      "stem": "A CRM service has a hand-written `interface Contact { phone?: string }` and, separately, a zod schema used at the API edge where `phone` was made required. Clients sending no phone get 400s, while internal code and tests (which use the interface) all pass. Five such pairs have drifted this quarter. What should the team change?",
+      "options": [
+        {
+          "text": "Add a test per schema that builds a sample object and checks that it also fits the interface.",
+          "correct": false,
+          "why": "A sample shows that one object fits both; it doesn't prove the two definitions agree on optional or nullable fields."
+        },
+        {
+          "text": "Derive the types from the schemas with `z.input`/`z.output` and delete the interfaces.",
+          "correct": true,
+          "why": "One definition produces both the runtime check and the static type, so they can't disagree."
+        },
+        {
+          "text": "Generate zod schemas from the interfaces in a build step.",
+          "correct": false,
+          "why": "Types can't express formats, ranges or defaults, so generated schemas are weaker, and the build step adds tooling for less safety."
+        },
+        {
+          "text": "Mark the interface fields `readonly` so internal code can't build invalid contacts.",
+          "correct": false,
+          "why": "`readonly` stops mutation, not disagreement between two definitions of the shape."
+        }
+      ],
+      "explain": "Two definitions of one shape will drift. Make the runtime schema (or a spec it is generated from) the single source and derive static types from it; with transforms, use separate input and output types.",
+      "refs": [
+        "https://zod.dev/basics#inferring-types"
+      ]
+    },
+    {
+      "id": "typescript-v2-q13",
+      "domain": "contracts",
+      "stem": "A `ShipmentUpdated` event is consumed by 9 services owned by 5 teams, deployed on their own schedules. The producer team wants rules that let them change the event without coordinating every release. Which practices keep it evolvable? (Choose two.)",
+      "options": [
+        {
+          "text": "Producers add new fields as optional; they never remove, rename or change the type of an existing field without a new version.",
+          "correct": true,
+          "why": "Additive, optional changes are readable by old consumers, and breaking changes go to a new version that runs alongside the old one."
+        },
+        {
+          "text": "Consumers ignore fields they don't know, e.g. parse with a default `z.object` that strips unknown keys.",
+          "correct": true,
+          "why": "Tolerant readers let producers add fields without breaking anyone."
+        },
+        {
+          "text": "Consumers parse with `z.strictObject` so unexpected fields are caught early.",
+          "correct": false,
+          "why": "Strict parsing turns every additive change into a consumer outage, which is the coordination they wanted to avoid."
+        },
+        {
+          "text": "Renaming is allowed as long as the shared TypeScript type is updated in the same PR.",
+          "correct": false,
+          "why": "Consumers run old builds for days; their compiled code still reads the old field name from new events."
+        },
+        {
+          "text": "Reuse an existing field for a new meaning when its type stays the same.",
+          "correct": false,
+          "why": "Old consumers keep interpreting the old meaning without any error, the worst kind of break."
+        }
+      ],
+      "explain": "Schema evolution needs both sides: producers make additive, optional changes (and version breaking ones), and consumers tolerate unknown fields. Shared types help authors but don't coordinate deployed versions.",
+      "refs": [
+        "https://json-schema.org/understanding-json-schema/",
+        "https://zod.dev/api#objects"
+      ]
+    },
+    {
+      "id": "typescript-v2-q14",
+      "domain": "strictness",
+      "stem": "A profile service's PATCH endpoint builds `{ nickname: body.nickname, bio: body.bio }` and passes it to the ORM. When the app sends only `{ bio }`, `nickname: undefined` reaches the ORM, which writes NULL, wiping nicknames for 18k users. The team wants the compiler to forbid `undefined` in optional keys. What should they do?",
+      "options": [
+        {
+          "text": "Enable `strictNullChecks`.",
+          "correct": false,
+          "why": "It is already part of `strict`, and it treats `nickname?: string` as accepting `undefined`, which is the problem."
+        },
+        {
+          "text": "Enable `exactOptionalPropertyTypes` and omit absent keys instead of setting them to `undefined`.",
+          "correct": true,
+          "why": "The flag makes `{ nickname: undefined }` a type error for `nickname?: string`; build updates with a conditional spread, and use `z.string().exactOptional()` so the parsed type matches."
+        },
+        {
+          "text": "Type the update as `Partial<Profile>`.",
+          "correct": false,
+          "why": "`Partial` adds `?`, and without the flag `?` still allows `undefined`, so the same object compiles."
+        },
+        {
+          "text": "Run `JSON.parse(JSON.stringify(update))` before the ORM call so keys holding `undefined` are dropped.",
+          "correct": false,
+          "why": "It hides this case at runtime, but types still allow the mistake and the round trip turns Dates into strings."
+        }
+      ],
+      "explain": "By default `a?: T` means \"missing or undefined\", and many libraries treat those differently (JSON drops one, ORMs write NULL for the other). `exactOptionalPropertyTypes` separates them; build partial objects by omitting keys.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#exactOptionalPropertyTypes",
+        "https://zod.dev/api#optionals"
+      ]
+    },
+    {
+      "id": "typescript-v2-q15",
+      "domain": "strictness",
+      "stem": "A gateway's route table is declared as shown. Someone added `\"payments\"` to `RouteName` but not to the table; it compiled, and checkout calls failed with `undefined.path` for 20 minutes. Later code also needs `routes.orders.timeoutMs` to keep its literal type. What should the declaration use?",
+      "code": "type RouteName = \"health\" | \"orders\" | \"payments\";\ntype Route = { path: string; timeoutMs: number };\n\nexport const routes = {\n  health: { path: \"/health\", timeoutMs: 500 },\n  orders: { path: \"/orders\", timeoutMs: 3000 },\n} as Record<RouteName, Route>;",
+      "options": [
+        {
+          "text": "A type annotation, `const routes: Record<RouteName, Route> = {...}`.",
+          "correct": false,
+          "why": "It catches the missing key, but it widens the values to `Route`, losing the precise literal types later code needs."
+        },
+        {
+          "text": "`as const satisfies Record<RouteName, Route>`",
+          "correct": true,
+          "why": "`satisfies` checks that every key exists with the right shape (the missing `payments` is an error), while `as const` keeps the literal types."
+        },
+        {
+          "text": "Keep the `as` and add `as const` before it.",
+          "correct": false,
+          "why": "An assertion stays an assertion: `as` accepts an object that is missing keys as long as the types overlap, so the gap still compiles."
+        },
+        {
+          "text": "Add a unit test that every `RouteName` has an entry.",
+          "correct": false,
+          "why": "It catches this at test time, but the compiler could have rejected it for free, and the precise types are still lost."
+        }
+      ],
+      "explain": "`as T` tells the compiler to trust you and happily accepts missing keys; an annotation checks but forgets the precise type; `satisfies` checks and keeps it. Use `satisfies` (often with `as const`) for config tables and registries.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-4-9.html#the-satisfies-operator",
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions"
+      ]
+    },
+    {
+      "id": "typescript-v2-q16",
+      "domain": "strictness",
+      "stem": "A reporting job builds `const owners = accounts.map(a => a.owner).filter(Boolean)` where `owner: Owner | null`. The result is still typed `(Owner | null)[]`, so the code has grown 40 `owner!` assertions. Last month one was wrong and the job crashed at 2 a.m. What should the filter be?",
+      "options": [
+        {
+          "text": "`.filter(Boolean) as Owner[]`",
+          "correct": false,
+          "why": "One cast instead of 40, but still an unchecked claim, and it hides the case where the mapping changes and returns something else."
+        },
+        {
+          "text": "`.filter(o => !!o)`",
+          "correct": false,
+          "why": "It reads the same as `Boolean`, and TypeScript doesn't infer a type predicate from truthiness checks, so the type stays `(Owner | null)[]`."
+        },
+        {
+          "text": "`.filter(o => o !== null)`",
+          "correct": true,
+          "why": "Since TS 5.5 the compiler infers the predicate `o is Owner` from this check, so the result is `Owner[]` and the `!`s can go."
+        },
+        {
+          "text": "Turn off `strictNullChecks` for the reporting package.",
+          "correct": false,
+          "why": "It removes the errors by removing null safety for the whole package, which is how the 2 a.m. crash happened in the first place."
+        }
+      ],
+      "explain": "Non-null assertions are unchecked promises; each one is a crash site. Narrow with checks the compiler understands (`x !== null`, or an explicit `(x): x is T` guard), because `filter(Boolean)` does not narrow.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-5.html#inferred-type-predicates"
+      ]
+    },
+    {
+      "id": "typescript-v2-q17",
+      "domain": "toolchain",
+      "stem": "A team runs its Node 24 service directly from `.ts` files (`node src/main.ts`, `module: nodenext`, `noEmit`). A contributor converted imports to `import { x } from \"./util.js\"` because \"that's the TypeScript convention\". `tsc` passes, but the service fails to start with `ERR_MODULE_NOT_FOUND`. What should the project standardise on?",
+      "options": [
+        {
+          "text": "`.ts` specifiers (`./util.ts`) with `allowImportingTsExtensions`, since Node loads the files that exist on disk.",
+          "correct": true,
+          "why": "When Node runs the sources, the specifier must name the real `.ts` file; tsc allows that with this flag under `noEmit`."
+        },
+        {
+          "text": "Extensionless imports with `moduleResolution: \"bundler\"`.",
+          "correct": false,
+          "why": "tsc would accept them, but Node's ESM loader requires full specifiers and doesn't read tsconfig, so startup still fails."
+        },
+        {
+          "text": "Keep `.js` specifiers and add a `paths` mapping from `*.js` to `*.ts`.",
+          "correct": false,
+          "why": "`paths` only affects type checking; Node never sees it, so `./util.js` still doesn't exist at runtime."
+        },
+        {
+          "text": "Keep `.js` and switch to CommonJS, where extensions don't matter.",
+          "correct": false,
+          "why": "CJS `require` resolves extensions, but it won't find a `.js` file that doesn't exist either, and the move gives up ESM for a specifier mismatch."
+        }
+      ],
+      "explain": "Choose one execution model: run `.ts` with Node (write `.ts` specifiers), or compile to JS (write `.js` specifiers, or `.ts` with `rewriteRelativeImportExtensions`). tsc can't know which you chose; mixing them passes the type check and fails at load.",
+      "refs": [
+        "https://nodejs.org/api/typescript.html#module-resolution",
+        "https://www.typescriptlang.org/docs/handbook/modules/reference.html"
+      ]
+    },
+    {
+      "id": "typescript-v2-q18",
+      "domain": "toolchain",
+      "stem": "A monorepo service imports `@app/db` via a tsconfig `paths` alias. Type checking passes, but the built service crashes with `ERR_MODULE_NOT_FOUND: Cannot find package '@app/db'`. The team doesn't use a bundler and wants internal imports that work the same in tsc and Node. What should they use?",
+      "options": [
+        {
+          "text": "Keep `paths` and add a runtime resolver package that patches module loading.",
+          "correct": false,
+          "why": "It works, but adds a loader hook to every entry point and test runner, and the two resolvers can disagree."
+        },
+        {
+          "text": "Use `baseUrl` instead of `paths` so imports resolve from the project root.",
+          "correct": false,
+          "why": "`baseUrl` was another tsc-only setting (removed in TS 7), and Node never read it."
+        },
+        {
+          "text": "Use relative imports everywhere.",
+          "correct": false,
+          "why": "It works at runtime, but deep `../../../` chains break on every file move; it gives up the goal rather than solving it."
+        },
+        {
+          "text": "Subpath imports in `package.json`, e.g. `\"#app/*\": \"./src/*\"`.",
+          "correct": true,
+          "why": "Node implements `imports` natively and TypeScript follows it under `nodenext`, so one definition serves both."
+        }
+      ],
+      "explain": "`paths` and `baseUrl` only change how TypeScript finds types; they never change what Node loads. Use resolution features that the runtime implements (`package.json` `imports`/`exports`, workspace packages) so the checker and runtime agree.",
+      "refs": [
+        "https://nodejs.org/api/packages.html#subpath-imports",
+        "https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/"
+      ]
+    },
+    {
+      "id": "typescript-v2-q19",
+      "domain": "toolchain",
+      "stem": "A team upgrades a service from TypeScript 5.x to 7.0 with its old tsconfig (no `types`, no `rootDir`, sources in `src/`, `outDir: dist`). The Docker image runs `node dist/index.js`. After the upgrade, which two failures should they expect? (Choose two.)",
+      "options": [
+        {
+          "text": "`Cannot find name 'process'` and `'Buffer'`, because `types` now defaults to `[]` and `@types/node` is no longer included automatically.",
+          "correct": true,
+          "why": "6.0 changed the default, so set `\"types\": [\"node\"]` explicitly."
+        },
+        {
+          "text": "Output lands in `dist/src/index.js`, because `rootDir` now defaults to the tsconfig's directory, so `node dist/index.js` fails.",
+          "correct": true,
+          "why": "Set `rootDir: \"src\"` (or fix the entry path) so output layout stays as expected."
+        },
+        {
+          "text": "New inference errors, because the Go compiler checks generics differently from 6.0.",
+          "correct": false,
+          "why": "7.0 checks types the same as 6.0; the upgrade breaks come from defaults that changed in 6.0."
+        },
+        {
+          "text": "Builds fail because `tsc` was renamed to `tsgo` in 7.0.",
+          "correct": false,
+          "why": "7.0 ships as `typescript` with the usual `tsc` binary; `tsgo` was the preview's name."
+        },
+        {
+          "text": "`strict` is now off by default, so the build passes with more hidden errors.",
+          "correct": false,
+          "why": "The opposite: 6.0 turned `strict` on by default, which may add errors to configs that didn't set it."
+        }
+      ],
+      "explain": "TS 6.0 and 7.0 changed defaults (strict on, `types: []`, `rootDir` from the config dir) and removed old options. Set them explicitly when upgrading, and check the built output layout as well as type errors.",
+      "refs": [
+        "https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/",
+        "https://devblogs.microsoft.com/typescript/?p=5246"
+      ]
+    },
+    {
+      "id": "typescript-v2-q20",
+      "domain": "toolchain",
+      "stem": "A 90-package monorepo uses project references and `tsc -b`. Profiling shows that, after one change, packages wait on each other mostly to produce `.d.ts` files, and CI runners with 16 cores sit at 2 cores busy. Which setting targets that bottleneck?",
+      "options": [
+        {
+          "text": "`skipLibCheck: true`, so declaration files are not checked.",
+          "correct": false,
+          "why": "It skips checking `.d.ts` inputs, which is a modest win, but packages still wait for their dependencies' declarations to be generated."
+        },
+        {
+          "text": "Merge all packages into one big project so there are no dependencies.",
+          "correct": false,
+          "why": "It removes the waiting, but every change re-checks the whole repo, and package boundaries stop being enforced."
+        },
+        {
+          "text": "`isolatedDeclarations`, which requires explicit types on exports so each file's `.d.ts` can be generated without type-checking its dependencies.",
+          "correct": true,
+          "why": "Declarations can then be emitted per file and in parallel, so dependents no longer wait for upstream type checks."
+        },
+        {
+          "text": "Turn off `composite` so tsc builds faster.",
+          "correct": false,
+          "why": "`composite` is required for project references; turning it off loses incremental builds altogether."
+        }
+      ],
+      "explain": "In a referenced build, declaration emit is often the critical path. `isolatedDeclarations` trades some annotation effort (explicit export types) for per-file, parallel `.d.ts` generation, and it also makes public APIs explicit.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-5.html#isolated-declarations",
+        "https://www.typescriptlang.org/docs/handbook/project-references.html"
+      ]
+    }
+  ]
+}

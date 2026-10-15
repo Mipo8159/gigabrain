@@ -1,0 +1,674 @@
+{
+  "topic": "typescript",
+  "variant": 4,
+  "of": 5,
+  "title": "TypeScript type design at scale — variant 4",
+  "description": "64-bit ids, Maps and config through JSON, tagged unions at the queue edge, handler registries, explicit absence, prefixed ids, PATCH intents, schema registries and consumer contracts, escape-hatch policy, module format per file and project references.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "boundaries",
+      "name": "Runtime boundaries and validation",
+      "weight": 0.25
+    },
+    {
+      "id": "modelling",
+      "name": "Modelling domain states and ids",
+      "weight": 0.25
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts between services",
+      "weight": 0.15
+    },
+    {
+      "id": "strictness",
+      "name": "Strictness, any and escape hatches",
+      "weight": 0.15
+    },
+    {
+      "id": "toolchain",
+      "name": "Modules, monorepos and the toolchain",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "typescript-v4-q01",
+      "domain": "boundaries",
+      "stem": "A telecom billing service receives call records as JSON from a switch vendor. `recordId` is a 64-bit integer, typed `recordId: number`. Deduplication started merging different calls: ids above 2^53 lose precision in `JSON.parse`, so neighbours collide. About 2M records/day. What should the boundary do?",
+      "options": [
+        {
+          "text": "Have the vendor send `recordId` as a string and keep it a string (or `bigint`) end to end.",
+          "correct": true,
+          "why": "JSON numbers become IEEE doubles in JavaScript, so precision is lost before any code runs; only a string on the wire keeps all 64 bits."
+        },
+        {
+          "text": "Change the type to `recordId: bigint` and keep parsing with `JSON.parse`.",
+          "correct": false,
+          "why": "The type now says `bigint`, but `JSON.parse` still produces a rounded `number`; the annotation changes nothing at runtime."
+        },
+        {
+          "text": "Use `Number.isSafeInteger` to reject unsafe ids and drop those records.",
+          "correct": false,
+          "why": "It detects the problem but drops real billable calls; the ids are legitimately large."
+        },
+        {
+          "text": "Deduplicate on `recordId` plus timestamp so collisions become unlikely across very large switch volumes.",
+          "correct": false,
+          "why": "It lowers the collision rate but keeps storing wrong ids, which then break reconciliation with the vendor."
+        }
+      ],
+      "explain": "JSON has no 64-bit integers in JavaScript: numbers beyond 2^53 are rounded during parsing, before your types are involved. Carry large ids and money as strings on the wire and convert deliberately at the edge.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt",
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify"
+      ]
+    },
+    {
+      "id": "typescript-v4-q02",
+      "domain": "boundaries",
+      "stem": "A rate limiter keeps per-client state as `Map<string, number[]>` and stores it in Redis with `JSON.stringify` between requests. The type says `Map`, and `state.get(key)` compiles. In production every client is treated as new, so the limiter never limits. What is wrong, and what should change?",
+      "options": [
+        {
+          "text": "Redis reorders the keys in a stored JSON object; use a sorted map so lookups stay stable.",
+          "correct": false,
+          "why": "Key order has nothing to do with it; the stored value isn't a Map at all."
+        },
+        {
+          "text": "`JSON.stringify` turns a `Map` into `{}`; serialise entries explicitly and parse them on read.",
+          "correct": true,
+          "why": "A Map has no JSON form, so the state is silently dropped; explicit (de)serialisation keeps the data and validates the shape."
+        },
+        {
+          "text": "The cast on read is too weak; use `JSON.parse(raw) as Map<string, number[]>` with an explicit generic.",
+          "correct": false,
+          "why": "A stronger-looking cast is still a cast; the parsed value is a plain empty object whatever the type says."
+        },
+        {
+          "text": "TTLs on the Redis keys are too short; extend them.",
+          "correct": false,
+          "why": "Expiry would reset some clients, not all; the data is lost on every write."
+        }
+      ],
+      "explain": "JSON keeps only plain objects, arrays, strings, numbers, booleans and null. Map, Set, Date, BigInt and class instances change or vanish, while the static type still claims the original. Define a wire format and convert both ways.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify"
+      ]
+    },
+    {
+      "id": "typescript-v4-q03",
+      "domain": "boundaries",
+      "stem": "An IoT platform ingests telemetry from 25 device event types on one Kafka topic, discriminated by a `type` field. The consumer validates with `z.union([...25 schemas])`. When a device sends a bad `temperature`, the error lists failures for all 25 branches and on-call can't tell what is wrong. What should the schema use?",
+      "options": [
+        {
+          "text": "`z.discriminatedUnion(\"type\", [...])`",
+          "correct": true,
+          "why": "It picks the branch from `type` and reports only that branch's issues, so the error points at the bad field."
+        },
+        {
+          "text": "`z.any()` for the payload, then `switch` on `type` with a cast per branch.",
+          "correct": false,
+          "why": "Errors become readable because nothing is checked; malformed payloads now flow into handlers."
+        },
+        {
+          "text": "Split the topic into 25 topics so each consumer has one schema.",
+          "correct": false,
+          "why": "It works, but it multiplies topics, consumer groups and ordering concerns to fix an error message."
+        },
+        {
+          "text": "Keep `z.union` and log only the first issue in the error.",
+          "correct": false,
+          "why": "The first issue usually belongs to the first branch tried, not the one the message was meant for."
+        }
+      ],
+      "explain": "When data carries a tag, validate it as a tagged union: choose the branch by the tag, then validate that branch. Errors become precise and the parsed result narrows the same way as your internal union.",
+      "refs": [
+        "https://zod.dev/api#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v4-q04",
+      "domain": "boundaries",
+      "stem": "An energy-trading service loads a per-environment `config.json`, edited by ops, at boot with `JSON.parse(raw) as Config`. A deploy shipped without `riskLimits.maxPositionMw`; the service started fine and ran for 9 hours, until the first large order read the missing key at 3 a.m. and the risk check compared against `undefined` (always false). Which change fits?",
+      "options": [
+        {
+          "text": "Validate the whole config with a schema at startup and refuse to boot if it fails.",
+          "correct": true,
+          "why": "A missing or wrong key fails the deploy (health checks never pass) instead of failing open hours later."
+        },
+        {
+          "text": "Add `?? Infinity` defaults where risk limits are read.",
+          "correct": false,
+          "why": "The code no longer crashes, but a missing risk limit now means \"no limit\", which is the dangerous failure."
+        },
+        {
+          "text": "Keep the cast but read config lazily through getters that throw on `undefined`.",
+          "correct": false,
+          "why": "It throws instead of failing open, but still only when that path first runs, hours into trading."
+        },
+        {
+          "text": "Store config in a typed TypeScript module instead of JSON so the compiler checks it.",
+          "correct": false,
+          "why": "It does catch missing keys at compile time, but configs differ per environment and are changed by ops, so they still arrive as data at runtime."
+        }
+      ],
+      "explain": "Fail fast on configuration: parse it completely at startup so a bad deploy never becomes ready. Read lazily and the failure moves to the first time a rarely used path runs, often in the middle of the night.",
+      "refs": [
+        "https://zod.dev/api",
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown"
+      ]
+    },
+    {
+      "id": "typescript-v4-q05",
+      "domain": "boundaries",
+      "stem": "A travel booking service calls an internal inventory service (another team, deployed independently, same Kubernetes cluster) and does `const inv = (await res.json()) as Inventory`. Inventory renamed `available` to `availableQty` in a minor release; bookings saw `undefined` and oversold 900 rooms. What should the booking side change?",
+      "options": [
+        {
+          "text": "Nothing in code; internal services are trusted, so the fix is a process rule against renames.",
+          "correct": false,
+          "why": "Being in the same cluster doesn't mean being deployed together; any independently deployed service is a boundary."
+        },
+        {
+          "text": "Import inventory's TypeScript types from its repository so the shapes stay aligned.",
+          "correct": false,
+          "why": "Types align at compile time only; the booking service in production still talks to whatever inventory version is running."
+        },
+        {
+          "text": "Validate the response against the agreed contract at the client edge and fail closed.",
+          "correct": true,
+          "why": "The mismatch becomes a clear, safe error at the boundary instead of an `undefined` that looks like \"zero rooms\" or \"unlimited\"."
+        },
+        {
+          "text": "Retry the request when `available` is undefined, in case the response was partial.",
+          "correct": false,
+          "why": "Every retry returns the same new shape; retries add load and still oversell."
+        }
+      ],
+      "explain": "Trust boundaries follow deployment, not network location: anything deployed independently can change shape under you. Validate responses from other services against the contract at the client edge, and fail closed where a wrong default is dangerous.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown",
+        "https://zod.dev/api"
+      ]
+    },
+    {
+      "id": "typescript-v4-q06",
+      "domain": "modelling",
+      "stem": "A telecom event bus has 30 event types in a union `BusEvent`, each with its own payload. Handlers are registered in an object map. Twice this year a new event type shipped without a handler, and once a handler expected the wrong payload. Which declaration makes both mistakes compile errors?",
+      "options": [
+        {
+          "text": "`const handlers: Record<string, (e: BusEvent) => void> = {...}`",
+          "correct": false,
+          "why": "It accepts any key and gives every handler the whole union, so missing handlers and wrong payloads both compile."
+        },
+        {
+          "text": "`const handlers = {...} satisfies { [K in BusEvent[\"type\"]]: (e: Extract<BusEvent, { type: K }>) => void }`",
+          "correct": true,
+          "why": "The mapped type requires a key per event type and gives each handler exactly its payload; `satisfies` checks without widening."
+        },
+        {
+          "text": "A `switch` over `e.type` in one big function instead of a map.",
+          "correct": false,
+          "why": "A `never` default could make it exhaustive, but 30 cases in one function is a bottleneck for every team, and it was not the map that was the problem."
+        },
+        {
+          "text": "Register handlers at runtime and throw at startup when a type has no handler.",
+          "correct": false,
+          "why": "It catches missing handlers, but only at startup and not wrong payload types; the compiler can do both earlier."
+        }
+      ],
+      "explain": "Mapped types over a union's tags turn a registry into an exhaustive, per-variant contract: one entry per tag, each with the narrowed payload. Combine them with `satisfies` so the object keeps its precise type.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-4-9.html#the-satisfies-operator",
+        "https://www.typescriptlang.org/docs/handbook/2/mapped-types.html"
+      ]
+    },
+    {
+      "id": "typescript-v4-q07",
+      "domain": "modelling",
+      "stem": "A cold-chain monitoring app reads sensor data as `reading?.value?.celsius ?? 0`. When a truck's sensor went offline, the dashboard showed 0 °C (\"in range\") for 6 hours and a vaccine shipment was spoiled. How should the reading be modelled?",
+      "options": [
+        {
+          "text": "Keep the optional chain but default to `NaN` so offline sensors fail range checks.",
+          "correct": false,
+          "why": "`NaN` fails comparisons, but it also hides in sums and averages and is easy to display as a number; the state is still implicit."
+        },
+        {
+          "text": "Default to the last known value instead of 0.",
+          "correct": false,
+          "why": "A stale value looks healthy too; the truck could be warming while the screen shows the last good reading."
+        },
+        {
+          "text": "A union with `ok` and `offline` states, handled explicitly in the UI and alerts.",
+          "correct": true,
+          "why": "\"No data\" becomes a state that code must handle, so it can't silently turn into a valid-looking temperature."
+        },
+        {
+          "text": "Make `celsius` required in the type so the optional chain is unnecessary.",
+          "correct": false,
+          "why": "The type then lies: offline sensors really don't have a value, so the lie moves to runtime."
+        }
+      ],
+      "explain": "A default on missing data (`?? 0`) turns \"unknown\" into a plausible value. When absence matters, model it as its own state, so the code and the UI have to decide what to show.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v4-q08",
+      "domain": "modelling",
+      "stem": "A payments platform's support staff copy ids between tools all day; last quarter they pasted a refund id into a \"cancel subscription\" form 30 times. Engineers also want the compiler to stop mixing ids. Ids are strings in JSON, logs and the DB. Which id design fits both needs?",
+      "options": [
+        {
+          "text": "Plain UUIDs with branded types per entity in the code.",
+          "correct": false,
+          "why": "Brands stop mix-ups in code, but they exist only at compile time; a pasted UUID in a form looks the same for every entity."
+        },
+        {
+          "text": "Separate database sequences per entity so the numeric or UUID ranges of different entities never overlap.",
+          "correct": false,
+          "why": "Range checks are invisible to humans and fragile; the type system and the forms still can't tell ids apart."
+        },
+        {
+          "text": "Prefixed ids (`ref_…`, `sub_…`) typed as template literals and checked at the edge.",
+          "correct": true,
+          "why": "The prefix is visible to people and checkable at runtime, and the template literal type stops mixing in code."
+        },
+        {
+          "text": "Wrap ids in objects `{ kind: \"refund\"; id: string }` everywhere.",
+          "correct": false,
+          "why": "It distinguishes them, but every log line, URL and column now needs an object, and support still copies the bare `id`."
+        }
+      ],
+      "explain": "Brands are compile-time only. When ids leave code (logs, URLs, people), put the type in the value too: a prefix that humans can see and the edge can check, mirrored by a template literal type in code.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/template-literal-types.html",
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v4-q09",
+      "domain": "modelling",
+      "stem": "A contacts API's PATCH must support three intents per field: leave unchanged, clear it, or set a value. Today `phone?: string` can't express \"clear\", so clients send `\"\"` and the database stores empty strings. `exactOptionalPropertyTypes` is on. How should the request type express the three intents?",
+      "options": [
+        {
+          "text": "`phone?: string`, and treat `\"\"` as \"clear\".",
+          "correct": false,
+          "why": "It works until a field where `\"\"` is a valid value; a sentinel string mixes data and intent."
+        },
+        {
+          "text": "`phone?: string | null`: key absent means unchanged, `null` means clear, a string means set.",
+          "correct": true,
+          "why": "With exact optional types, absent and present-but-null are distinct, so all three intents have their own representation."
+        },
+        {
+          "text": "`phone: string | null | undefined`, with `undefined` meaning unchanged.",
+          "correct": false,
+          "why": "JSON can't carry `undefined`; the key is dropped on the wire, so the type invites a value that doesn't survive serialisation."
+        },
+        {
+          "text": "A separate `clearFields: string[]` list alongside the patch body.",
+          "correct": false,
+          "why": "It works, but field names in strings aren't type-checked, and a field can be both set and cleared at once."
+        }
+      ],
+      "explain": "Absent, null and value are three different states; JSON can carry absent and null, but not undefined. With `exactOptionalPropertyTypes`, `field?: T | null` models all three precisely, and the schema should match it.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#exactOptionalPropertyTypes"
+      ]
+    },
+    {
+      "id": "typescript-v4-q10",
+      "domain": "modelling",
+      "stem": "A scheduling team wants the compiler to enforce \"`endsAt` is after `startsAt`\" and \"at most 50 attendees\". A prototype uses recursive conditional types and tuple lengths; type checking went from 40 s to 3 minutes and errors are unreadable. What should they do?",
+      "options": [
+        {
+          "text": "Keep the type-level encoding and move to TypeScript 7 to absorb the slower checks.",
+          "correct": false,
+          "why": "A faster compiler hides the cost for a while, but the errors stay unreadable and the types stay fragile."
+        },
+        {
+          "text": "Drop the invariants and rely on database constraints.",
+          "correct": false,
+          "why": "DB constraints are a good backstop, but violations then surface as failed writes deep in a request, and code passes invalid values around until then."
+        },
+        {
+          "text": "Check them in a smart constructor that returns a branded `Meeting`; use types for structure, not arithmetic.",
+          "correct": true,
+          "why": "The constructor enforces the value rules at runtime once, the brand records that it happened, and the type system stays fast and readable."
+        },
+        {
+          "text": "Document the invariants in the type's JSDoc.",
+          "correct": false,
+          "why": "Documentation enforces nothing; invalid meetings still compile and run."
+        }
+      ],
+      "explain": "Make illegal states unrepresentable when the rule is structural (which fields exist in which state). Value rules (ordering, ranges, counts) belong in a validating constructor whose output is branded, not in type-level arithmetic.",
+      "refs": [
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v4-q11",
+      "domain": "contracts",
+      "stem": "An `OrderShipped` event is consumed by 11 services, some deploying monthly. Consumers parse with schemas that strip unknown keys. Which producer changes are safe without coordinating consumer releases? (Choose two.)",
+      "options": [
+        {
+          "text": "Adding a new optional field `carrierCode`.",
+          "correct": true,
+          "why": "Old consumers strip it; new consumers can read it."
+        },
+        {
+          "text": "Starting to always send `deliveryEta`, which was optional before.",
+          "correct": true,
+          "why": "Consumers already handle it as optional, so always present is a case they accept."
+        },
+        {
+          "text": "Renaming `trackingNo` to `trackingNumber` in one release.",
+          "correct": false,
+          "why": "Old consumers read `trackingNo` and get nothing; a rename is a remove plus an add."
+        },
+        {
+          "text": "Making the previously required `weightKg` optional.",
+          "correct": false,
+          "why": "Consumers that rely on it being present break on events without it."
+        },
+        {
+          "text": "Adding `\"returned\"` to the `status` values.",
+          "correct": false,
+          "why": "Consumers with exhaustive handling (or a closed enum schema) reject or crash on the new value."
+        }
+      ],
+      "explain": "For readers, producers may add optional fields and make optional fields always present (narrowing the output). Removing, renaming, making required fields optional, or adding enum values are breaking for at least some readers.",
+      "refs": [
+        "https://json-schema.org/understanding-json-schema/"
+      ]
+    },
+    {
+      "id": "typescript-v4-q12",
+      "domain": "contracts",
+      "stem": "An inventory API has 6 consumer services. The provider team wants to remove two response fields they believe nobody uses, but last time a \"nobody uses it\" removal broke a warehouse app. What gives them evidence of which fields are actually used before removing them?",
+      "options": [
+        {
+          "text": "Search all repositories for the field names.",
+          "correct": false,
+          "why": "Worth doing, but it misses dynamic access, generated clients and repos outside the org's search."
+        },
+        {
+          "text": "Ship the removal behind a feature flag and watch error rates.",
+          "correct": false,
+          "why": "Error rates show breakage after it happens, and some consumers fail silently with `undefined`."
+        },
+        {
+          "text": "Consumer-driven contract tests, verified in the provider's CI.",
+          "correct": true,
+          "why": "The provider learns exactly which fields each consumer depends on and gets a failing build before shipping a breaking removal."
+        },
+        {
+          "text": "Generate a TypeScript client and remove the fields from it first.",
+          "correct": false,
+          "why": "Consumers that rebuild will see compile errors, but those on older clients still break at runtime."
+        }
+      ],
+      "explain": "Shared types tell you what the provider offers, not what consumers use. Consumer-driven contracts invert that: consumers state their expectations, and the provider verifies against them on every change.",
+      "refs": [
+        "https://docs.pact.io/"
+      ]
+    },
+    {
+      "id": "typescript-v4-q13",
+      "domain": "contracts",
+      "stem": "A company runs 140 Kafka topics shared across TypeScript and Java services. Contract breaks between teams cause about two incidents a month. Schemas currently live as TypeScript types in a shared npm package that Java teams copy by hand. What should be the source of truth?",
+      "options": [
+        {
+          "text": "The TypeScript package, plus a script that converts the TS types into Java classes for the other teams.",
+          "correct": false,
+          "why": "TypeScript types can't express formats or defaults, and the converter becomes a fragile one-off that only one team understands."
+        },
+        {
+          "text": "Language-neutral schemas in a registry with a compatibility rule, generating TS and Java types.",
+          "correct": true,
+          "why": "Avro, Protobuf or JSON Schema in a registry that rejects incompatible changes when they are registered; both languages derive their types from the same contract."
+        },
+        {
+          "text": "A wiki page per topic describing the fields.",
+          "correct": false,
+          "why": "Documentation is readable but unchecked; drift continues at the same rate."
+        },
+        {
+          "text": "Let each service own its types and add end-to-end tests across all services.",
+          "correct": false,
+          "why": "Cross-service tests are slow and flaky at 140 topics and find breaks late."
+        }
+      ],
+      "explain": "When several languages share a contract, the source of truth must be language-neutral and machine-checked. A schema registry with a compatibility rule stops breaking changes when they are published, and each language generates its own types.",
+      "refs": [
+        "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html"
+      ]
+    },
+    {
+      "id": "typescript-v4-q14",
+      "domain": "strictness",
+      "stem": "A recommendations service has `noUncheckedIndexedAccess` on. A developer wrote `if (items.length > 0) { const top: Item = items[0]; }`, got an error, and added `items[0]!`. Reviews now see dozens of `]!`. One of them crashed production when a filter ran between the check and the read. What should the team do?",
+      "options": [
+        {
+          "text": "Turn off `noUncheckedIndexedAccess`, since length checks make it noisy.",
+          "correct": false,
+          "why": "It removes the noise and the protection; the crash came from exactly the gap the flag reports."
+        },
+        {
+          "text": "Destructure and check: `const [top] = items; if (top === undefined) return;`",
+          "correct": true,
+          "why": "The compiler narrows a variable after a check; a length check on the array doesn't narrow a later index read."
+        },
+        {
+          "text": "Wrap index reads in a helper `first(items)` that returns `items[0] as Item` so the assertion lives in one place.",
+          "correct": false,
+          "why": "It centralises the `!` but keeps the same unchecked claim, now hidden in a helper."
+        },
+        {
+          "text": "Convert arrays to `Map`s so lookups return `undefined` explicitly.",
+          "correct": false,
+          "why": "A large refactor for a pattern that a destructure and a check already handle."
+        }
+      ],
+      "explain": "With `noUncheckedIndexedAccess`, index reads are `T | undefined` even after a length check, because the compiler doesn't link the two. Read into a variable and check it; treat `!` on index reads as a smell.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#noUncheckedIndexedAccess"
+      ]
+    },
+    {
+      "id": "typescript-v4-q15",
+      "domain": "strictness",
+      "stem": "Code review in a billing service finds `const inv = payload as unknown as Invoice` in four production handlers, each added to \"fix a type error quickly\". The team wants a policy that keeps escape hatches from accumulating. Which rule is most useful?",
+      "options": [
+        {
+          "text": "Double assertions are allowed in production only with a code comment.",
+          "correct": false,
+          "why": "A comment explains the claim but doesn't check it; the payload is still unvalidated."
+        },
+        {
+          "text": "Replace `as unknown as T` with `as any` because it is shorter.",
+          "correct": false,
+          "why": "`any` is even wider: it turns off checking for every later use of the value."
+        },
+        {
+          "text": "Allow them, but require a unit test showing the handler works with a realistic sample payload from production.",
+          "correct": false,
+          "why": "A sample payload proves one value fits; production payloads still go unchecked."
+        },
+        {
+          "text": "Ban `as unknown as` outside test fixtures; parse external data and fix internal mismatches properly.",
+          "correct": true,
+          "why": "A double assertion means \"I know better than the compiler\" with no proof; a schema or a type fix provides the proof."
+        }
+      ],
+      "explain": "`as unknown as T` is a full override of the type system. In production code it almost always means unvalidated input or a modelling mistake. Make it a review stop, and fix the cause with parsing or better types.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions",
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown"
+      ]
+    },
+    {
+      "id": "typescript-v4-q16",
+      "domain": "strictness",
+      "stem": "A 7-year-old Node API has `strict: false`. The team has budget for one strictness flag this quarter. Most production incidents in the last year were `TypeError: Cannot read properties of undefined`. Which flag should they turn on first?",
+      "options": [
+        {
+          "text": "`noImplicitAny`",
+          "correct": false,
+          "why": "It finds untyped parameters, which helps, but most of the crashes were values typed as present that were actually missing."
+        },
+        {
+          "text": "`strictPropertyInitialization`",
+          "correct": false,
+          "why": "It reports class fields that aren't set in constructors, a small subset of the undefined-access crashes."
+        },
+        {
+          "text": "`strictNullChecks`",
+          "correct": true,
+          "why": "Without it, `null` and `undefined` fit every type, so the compiler can't see the missing values that caused most incidents."
+        },
+        {
+          "text": "`noImplicitReturns`",
+          "correct": false,
+          "why": "It catches functions that return nothing on some paths, a real but much smaller source of undefined values."
+        }
+      ],
+      "explain": "Pick the strictness flag that matches your incident history. For \"cannot read properties of undefined\", `strictNullChecks` gives the most protection per hour, because it makes absence part of every type.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#strictNullChecks",
+        "https://www.typescriptlang.org/tsconfig/#strict"
+      ]
+    },
+    {
+      "id": "typescript-v4-q17",
+      "domain": "toolchain",
+      "stem": "A monorepo added `\"type\": \"module\"` to the root `package.json` so new services are ESM. The next morning, 14 maintenance scripts written in CommonJS (`require`, `__dirname`) failed with `require is not defined in ES module scope`. The team can't migrate the scripts this sprint. What is the targeted fix?",
+      "options": [
+        {
+          "text": "Rename those scripts to `.cjs` (or put them in a folder with its own `package.json` `\"type\": \"commonjs\"`).",
+          "correct": true,
+          "why": "The extension, or the nearest `package.json`, decides the module format of each file, so the scripts stay CJS while new code is ESM."
+        },
+        {
+          "text": "Remove `\"type\": \"module\"` again and give every new service file the `.mjs` extension.",
+          "correct": false,
+          "why": "It works but reverses the goal, and every new file has to remember the special extension."
+        },
+        {
+          "text": "Set `module: \"commonjs\"` in the root tsconfig.",
+          "correct": false,
+          "why": "tsconfig affects TypeScript output, not how Node interprets plain `.js` scripts."
+        },
+        {
+          "text": "Add `--experimental-require-module` to every script invocation.",
+          "correct": false,
+          "why": "That flag concerns loading ESM from CJS; these scripts are being read as ESM, which no flag changes."
+        }
+      ],
+      "explain": "Node decides ESM vs CJS per file: `.mjs`/`.cjs` (and `.mts`/`.cts`) are explicit, and `.js` follows the nearest `package.json` `type`. TypeScript under `nodenext` follows the same rule, so file layout is your module-format switch.",
+      "refs": [
+        "https://nodejs.org/api/packages.html",
+        "https://www.typescriptlang.org/docs/handbook/modules/reference.html"
+      ]
+    },
+    {
+      "id": "typescript-v4-q18",
+      "domain": "toolchain",
+      "stem": "A service imports `import limits from \"./limits.json\"`. After moving to `module: nodenext` and running on Node 24, tsc reports TS1543 and Node fails to load the file as a module. The data must stay JSON because ops edit it. What is the fix?",
+      "options": [
+        {
+          "text": "`import limits from \"./limits.json\" with { type: \"json\" }`",
+          "correct": true,
+          "why": "ESM requires an import attribute for JSON modules; tsc under nodenext checks for it and Node needs it to load the file."
+        },
+        {
+          "text": "Enable `resolveJsonModule` and keep the plain import.",
+          "correct": false,
+          "why": "It lets tsc type the JSON, but Node's ESM loader still refuses a JSON import without the attribute."
+        },
+        {
+          "text": "Convert `limits.json` to `limits.ts` exporting the object.",
+          "correct": false,
+          "why": "It loads, but ops now edit TypeScript, which breaks the requirement and invites syntax errors in deploys."
+        },
+        {
+          "text": "Read it with `fs.readFileSync` and `JSON.parse(...) as Limits`.",
+          "correct": false,
+          "why": "It loads, but drops type information from the file and adds an unchecked cast; without a schema it is the weakest option."
+        }
+      ],
+      "explain": "In ESM, non-JavaScript modules need import attributes (`with { type: \"json\" }`). Under `nodenext`, TypeScript checks the same rules Node applies, so what tsc accepts and what Node loads stay in sync.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/modules/reference.html",
+        "https://nodejs.org/api/esm.html"
+      ]
+    },
+    {
+      "id": "typescript-v4-q19",
+      "domain": "toolchain",
+      "stem": "A 70-package monorepo's CI runs `tsc -p` for each package, and each one re-checks its dependencies' sources. CI type checking takes 9 minutes even for a one-line change. Which setup cuts the repeated work?",
+      "options": [
+        {
+          "text": "Run all 70 `tsc -p` commands in parallel on a bigger CI runner with more cores and memory.",
+          "correct": false,
+          "why": "Parallelism helps wall time, but every package still re-checks its dependencies, so total work stays the same and grows with the repo."
+        },
+        {
+          "text": "Project references (`composite`, `tsc -b`) with `.tsbuildinfo` cached in CI.",
+          "correct": true,
+          "why": "Each package is checked once against its dependencies' declarations, and up-to-date packages are skipped using the cached build info."
+        },
+        {
+          "text": "Turn on `skipLibCheck` in every package.",
+          "correct": false,
+          "why": "It skips `.d.ts` checking, a modest gain; dependencies' sources are still re-checked."
+        },
+        {
+          "text": "Only type-check packages changed in the PR.",
+          "correct": false,
+          "why": "A change in a shared package can break its dependents, which would then go unchecked."
+        }
+      ],
+      "explain": "Project references let tsc treat each package as a unit with declaration outputs and build info, so `tsc -b` checks only what changed and what depends on it. Cache the build info in CI to keep that benefit across runs.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/project-references.html"
+      ]
+    },
+    {
+      "id": "typescript-v4-q20",
+      "domain": "toolchain",
+      "stem": "A team moved to Node type stripping: tests run with `node --test` on `.ts` files and services run `node src/main.ts`. They removed `tsc` from CI because \"tests pass\". Within a month, three type errors shipped, including a wrong argument order that only failed on a rare branch. What should CI include?",
+      "options": [
+        {
+          "text": "Nothing more; Node already rejects code with type errors when stripping.",
+          "correct": false,
+          "why": "Stripping deletes type syntax without checking it; code with type errors runs as long as the remaining JS is valid."
+        },
+        {
+          "text": "A test coverage gate of 95% so the rare branches are executed.",
+          "correct": false,
+          "why": "Higher coverage helps, but tests only check behaviour on the inputs they use; types check every path."
+        },
+        {
+          "text": "Run services with `--experimental-strip-types` in strict mode.",
+          "correct": false,
+          "why": "There is no type-checking mode in Node's stripping; it never runs the TypeScript checker."
+        },
+        {
+          "text": "`tsc --noEmit` (with `erasableSyntaxOnly`) as a required CI step, alongside the tests.",
+          "correct": true,
+          "why": "Node only removes types; tsc is still the only thing that checks them, and the flag keeps the code runnable by Node."
+        }
+      ],
+      "explain": "Type stripping removes type syntax without checking it. When you run TypeScript directly, keep `tsc --noEmit` as a CI gate; it is now the only place types are checked.",
+      "refs": [
+        "https://nodejs.org/api/typescript.html#type-stripping",
+        "https://www.typescriptlang.org/tsconfig/#erasableSyntaxOnly"
+      ]
+    }
+  ]
+}

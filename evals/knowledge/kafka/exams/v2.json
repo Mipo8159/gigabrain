@@ -1,0 +1,664 @@
+{
+  "topic": "kafka",
+  "variant": 2,
+  "of": 5,
+  "title": "Kafka at scale — variant 2",
+  "description": "IoT, food delivery and retail banking: co-partitioning, replays and rolling deploys, producer idempotence limits, inbox and relay design, MM2 topology and storage sizing.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "partitioning",
+      "name": "Partitioning, keys and ordering",
+      "weight": 0.2
+    },
+    {
+      "id": "groups",
+      "name": "Consumer groups, rebalancing and lag",
+      "weight": 0.2
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery semantics, idempotence and transactions",
+      "weight": 0.2
+    },
+    {
+      "id": "integration",
+      "name": "Outbox, retries, DLQ and schema evolution",
+      "weight": 0.2
+    },
+    {
+      "id": "scale",
+      "name": "Replication, multi-region and capacity",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "kafka-v2-q01",
+      "domain": "partitioning",
+      "stem": "A smart-meter platform ingests debug log lines from 2 million devices into `device-logs`. Nothing downstream needs any ordering; the logs are indexed for search. Today the producer keys by device ID, and a few chatty firmware versions make three partitions twice as busy as the rest. What keying should it use?",
+      "options": [
+        {
+          "text": "Keep the device ID but add partitions until the hot ones even out",
+          "correct": false,
+          "why": "More partitions reshuffle devices but chatty devices still concentrate on whichever partitions they hash to; it treats the symptom."
+        },
+        {
+          "text": "Send with a null key",
+          "correct": true,
+          "why": "With no ordering requirement, a null key lets the producer's sticky partitioner fill batches evenly across all partitions, which also batches better."
+        },
+        {
+          "text": "Key by firmware version so chatty versions can be throttled per partition",
+          "correct": false,
+          "why": "A handful of firmware versions means a handful of keys, so load concentrates on even fewer partitions."
+        },
+        {
+          "text": "Key by a hash of device ID and the current minute so each device rotates partitions",
+          "correct": false,
+          "why": "It spreads load, but it is a custom scheme that buys nothing a null key does not already give, and it confuses anyone who assumes keys mean ordering."
+        }
+      ],
+      "explain": "A key exists to buy ordering or co-location. When neither is needed, a null key gives the best balance and batching; keying by an ID just imports that ID's skew.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#producerconfigs_partitioner.class"
+      ]
+    },
+    {
+      "id": "kafka-v2-q02",
+      "domain": "partitioning",
+      "stem": "A food-delivery stream job joins `orders` and `payments` by order ID, relying on both topics being co-partitioned (same key on the same partition number). Both topics have 24 partitions. The orders producer uses the Java client; the payments team just rewrote theirs in Node on the librdkafka native API with default settings, and since then 90% of joins find no match. Which cause is most likely?",
+      "options": [
+        {
+          "text": "The payments topic needs a different number of partitions than orders",
+          "correct": false,
+          "why": "Co-partitioning needs equal partition counts, which they already have; changing it would break the join further."
+        },
+        {
+          "text": "The Node producer sends keys as strings while Java sends bytes",
+          "correct": false,
+          "why": "Both clients serialise a string key to UTF-8 bytes before hashing, so the type alone does not move keys."
+        },
+        {
+          "text": "librdkafka defaults to a CRC32 partitioner; set `partitioner: 'murmur2_random'`",
+          "correct": true,
+          "why": "librdkafka defaults to `consistent_random` (CRC32), so the same order ID lands on a different partition number than Java's murmur2 puts it on."
+        },
+        {
+          "text": "The join's consumers use the `uniform` assignor instead of `range`",
+          "correct": false,
+          "why": "Assignment affects which member reads which partition, but the 90% miss rate comes from the data itself being on mismatched partition numbers."
+        }
+      ],
+      "explain": "Co-partitioning requires the same partition count and the same partitioner on every producer of every joined topic. Mixed clients silently break it, because librdkafka's default is CRC32-based, not Java's murmur2.",
+      "refs": [
+        "https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md"
+      ]
+    },
+    {
+      "id": "kafka-v2-q03",
+      "domain": "partitioning",
+      "stem": "A market-data team is told that \"all trade events must be processed in exact global order\" for a feed of 200,000 events/s across 8,000 instruments. A single partition tops out far below that rate on their hardware. Every downstream calculation is per instrument. What should the architect propose?",
+      "options": [
+        {
+          "text": "A single partition with very large batches and compression",
+          "correct": false,
+          "why": "It is the only way to get total order, but it caps throughput and consumer parallelism at one partition, which cannot carry 200k/s here."
+        },
+        {
+          "text": "Many partitions, with consumers re-sorting events by producer timestamp",
+          "correct": false,
+          "why": "Producer clocks skew and late arrivals never stop, so a timestamp re-sort is approximate and adds unbounded buffering."
+        },
+        {
+          "text": "Many partitions keyed by instrument, with order guaranteed per instrument",
+          "correct": true,
+          "why": "Every calculation is per instrument, so per-instrument order is the real requirement, and 8,000 keys spread across many partitions."
+        },
+        {
+          "text": "Two clusters, each carrying half the instruments in one partition",
+          "correct": false,
+          "why": "Doubles the ops cost and still leaves each half on a single partition with the same throughput ceiling."
+        }
+      ],
+      "explain": "Kafka orders only within a partition. \"Global order\" requirements usually mean per-entity order; find that entity, key by it, and parallelism comes free.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_concepts_and_terms"
+      ]
+    },
+    {
+      "id": "kafka-v2-q04",
+      "domain": "partitioning",
+      "stem": "A retail bank keeps the latest customer profile in a compacted topic `customer-profile`, keyed by customer ID. A GDPR erasure must remove a customer from the topic and from every service that rebuilds state from it. The producer currently runs every value through `JSON.stringify`. What should the erasure write?",
+      "options": [
+        {
+          "text": "The customer key with a real `null` value, not a serialised one",
+          "correct": true,
+          "why": "A null value is a tombstone: compaction removes earlier values for the key, and consumers that see it delete the row."
+        },
+        {
+          "text": "A record with the customer key and value `JSON.stringify(null)`",
+          "correct": false,
+          "why": "That is the four-character string \"null\", an ordinary value, so compaction keeps it as the latest value forever."
+        },
+        {
+          "text": "A record with value `{\"deleted\": true}` that consumers interpret as a delete",
+          "correct": false,
+          "why": "Consumers can honour it, but to Kafka it is a normal value, so the record and the customer key stay in the log."
+        },
+        {
+          "text": "A record with a null key, which compaction treats as a delete",
+          "correct": false,
+          "why": "Compacted topics require a key; the broker rejects null-key records there."
+        }
+      ],
+      "explain": "On a compacted topic, deletion is a tombstone: same key, null value. Route deletes around any generic serialiser, and make consumers handle `value === null`.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#compaction"
+      ]
+    },
+    {
+      "id": "kafka-v2-q05",
+      "domain": "groups",
+      "stem": "A courier-tracking group of 12 pods shows a 45-second lag spike on a few partitions every time Kubernetes rolls a pod, even though new pods start in 5 seconds. The consumers run on the Confluent JS client with the default 45-second session timeout. What change removes the spike?",
+      "options": [
+        {
+          "text": "Lower `session.timeout.ms` to 5 seconds",
+          "correct": false,
+          "why": "Shortens the wait, but a 5-second session also evicts members on brief GC pauses or network blips, causing extra rebalances."
+        },
+        {
+          "text": "On SIGTERM, await `consumer.disconnect()` so the member leaves",
+          "correct": true,
+          "why": "A clean leave reassigns its partitions immediately; without it the partitions sit unowned until the 45-second session timeout expires."
+        },
+        {
+          "text": "Add more replicas so other pods absorb the partitions faster",
+          "correct": false,
+          "why": "Extra members do not help: nobody can take the partitions until the coordinator knows the old member is gone."
+        },
+        {
+          "text": "Set a `preStop` hook that sleeps 45 seconds before the container stops",
+          "correct": false,
+          "why": "It keeps the old pod alive longer but does not make it leave the group, so the gap moves rather than disappears."
+        }
+      ],
+      "explain": "A consumer that dies without leaving holds its partitions until the session timeout. Graceful shutdown (disconnect on SIGTERM, within the pod's grace period) turns a 45-second hole into an immediate handover.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#consumerconfigs_session.timeout.ms"
+      ]
+    },
+    {
+      "id": "kafka-v2-q06",
+      "domain": "groups",
+      "stem": "A bug corrupted three days of invoice PDFs. The fix is deployed and the `invoice-renderer` group must reprocess `invoices` from the start of the retention window under its existing group ID, because dashboards and alerts key on that group. A developer set `fromBeginning: true` and restarted, but nothing was reprocessed. What should they do?",
+      "options": [
+        {
+          "text": "Restart again with `auto.offset.reset=earliest` instead of `fromBeginning`",
+          "correct": false,
+          "why": "It is the same setting under another name; it only applies when the group has no committed offset."
+        },
+        {
+          "text": "Delete and recreate the topic so the group starts clean",
+          "correct": false,
+          "why": "Destroys the very data that needs reprocessing."
+        },
+        {
+          "text": "Stop the group, reset its offsets to earliest with the admin API, then start it",
+          "correct": true,
+          "why": "The group's committed offsets win over the reset policy; resetting them explicitly (with the group empty) makes it replay under the same ID."
+        },
+        {
+          "text": "Start a second consumer group with a new ID and `fromBeginning: true`",
+          "correct": false,
+          "why": "It would replay, but under a different group ID, which breaks the dashboards and alerts the team said must keep working."
+        }
+      ],
+      "explain": "`fromBeginning` and `auto.offset.reset` apply only when there is no valid committed offset. To replay an existing group, reset its offsets while it is stopped, or seek explicitly.",
+      "refs": [
+        "https://kafka.js.org/docs/consuming"
+      ]
+    },
+    {
+      "id": "kafka-v2-q07",
+      "domain": "groups",
+      "stem": "An email service occasionally sends a promotional email twice. Logs show the duplicates always happen right after a rebalance: the member was mid-way through a batch when its partition was revoked and given to another pod. The team cannot avoid rebalances entirely. Which pair of measures handles this best?",
+      "options": [
+        {
+          "text": "Commit finished offsets on revoke, and dedupe sends by event ID",
+          "correct": true,
+          "why": "Committing on revoke shrinks the replay to what was truly unfinished, and event-ID dedupe makes the remaining overlap harmless."
+        },
+        {
+          "text": "Raise the session timeout and the poll interval so rebalances happen less often",
+          "correct": false,
+          "why": "Rebalances still happen on deploys and scaling, and longer timeouts slow failure detection; duplicates remain."
+        },
+        {
+          "text": "Switch to auto-commit every 100 ms",
+          "correct": false,
+          "why": "Narrows the window but offsets may be committed for unsent emails, trading duplicates for losses, and duplicates still occur."
+        },
+        {
+          "text": "Pin each pod to fixed partitions with manual assignment",
+          "correct": false,
+          "why": "Removes rebalances, but a dead pod's partitions then stop until a human reassigns them; the group loses failover."
+        }
+      ],
+      "explain": "Rebalances will replay in-flight work. Minimise the replay (commit on revoke, small batches) and make the handler idempotent so whatever still replays does no harm.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#consumerconfigs_max.poll.interval.ms"
+      ]
+    },
+    {
+      "id": "kafka-v2-q08",
+      "domain": "groups",
+      "stem": "A platform team wants every consumer group on its new Kafka 4.3 cluster to use the KIP-848 protocol. Seven services still run kafkajs 2.2.4 and three run `@confluentinc/kafka-javascript`. The kafkajs services work fine on the classic protocol. Which plan is realistic?",
+      "options": [
+        {
+          "text": "Set the broker to reject classic groups so kafkajs is forced onto the new protocol",
+          "correct": false,
+          "why": "kafkajs has no implementation of the new protocol, so the seven services simply stop consuming."
+        },
+        {
+          "text": "Upgrade kafkajs to its latest release, which added the new protocol",
+          "correct": false,
+          "why": "kafkajs has not been released since February 2023 and only speaks the classic protocol."
+        },
+        {
+          "text": "Move the Confluent services now; port the kafkajs ones to the Confluent client",
+          "correct": true,
+          "why": "The Confluent client supports `group.protocol: 'consumer'`; kafkajs never will, so a client migration is the only path."
+        },
+        {
+          "text": "Keep all ten services on classic until kafkajs catches up",
+          "correct": false,
+          "why": "Safe for now, but it waits for a release that is not coming and keeps all ten on stop-the-world rebalances."
+        }
+      ],
+      "explain": "Protocol features depend on the client. kafkajs is frozen at 2.2.4 and classic-only; for new protocol features in Node, plan a move to the librdkafka-based Confluent client.",
+      "refs": [
+        "https://github.com/confluentinc/confluent-kafka-javascript/blob/master/MIGRATION.md"
+      ]
+    },
+    {
+      "id": "kafka-v2-q09",
+      "domain": "delivery",
+      "stem": "A restaurant-orders producer on the Confluent JS client runs with defaults. During a broker failover, the kitchen display showed some orders twice and, for a few orders, `OrderUpdated` arrived before `OrderPlaced`. The producer sends one order's events sequentially. Which producer change prevents both symptoms?",
+      "options": [
+        {
+          "text": "Set `acks` to 0 so retries are never needed",
+          "correct": false,
+          "why": "No retries means no retry duplicates, but sends that fail are simply lost."
+        },
+        {
+          "text": "Enable idempotence, keeping in-flight requests at 5 or fewer",
+          "correct": true,
+          "why": "Idempotence gives each partition write a sequence number, so the broker drops retried duplicates and rejects out-of-order batches."
+        },
+        {
+          "text": "Set `retries` to 0 and let the application resend on error",
+          "correct": false,
+          "why": "The application resend is a new record, so it can still duplicate after an ambiguous timeout, and in-flight batches can still reorder."
+        },
+        {
+          "text": "Compress batches with zstd so fewer requests are in flight",
+          "correct": false,
+          "why": "Compression changes batch size, not retry semantics; failed batches can still be retried out of order."
+        }
+      ],
+      "explain": "Producer retries without idempotence can both duplicate and reorder. In Node clients idempotence is off by default; turn it on (in-flight ≤ 5) for any keyed stream that cares about order.",
+      "refs": [
+        "https://github.com/confluentinc/confluent-kafka-javascript/blob/master/MIGRATION.md"
+      ]
+    },
+    {
+      "id": "kafka-v2-q10",
+      "domain": "delivery",
+      "stem": "A rewards service uses an idempotent producer. A pod crashes after `send()` succeeded but before the source row was marked done; on restart it re-reads the row and sends the same `PointsAwarded` event again. The team says idempotence should have dropped it. Why did it not, and what handles it?",
+      "options": [
+        {
+          "text": "Idempotence covers one producer session's retries; dedupe on an event ID downstream",
+          "correct": true,
+          "why": "The restarted producer has a new producer ID and the resend is a new record, so the broker cannot see it as a retry; only an application event ID identifies it."
+        },
+        {
+          "text": "Idempotence was not really on; check `enable.idempotence` in the config",
+          "correct": false,
+          "why": "Plausible, but even with idempotence correctly on, a resend after restart is a new record, so this would not change the outcome."
+        },
+        {
+          "text": "The topic needs `min.insync.replicas=2` for idempotence to apply",
+          "correct": false,
+          "why": "min ISR affects durability of acks, not whether the broker recognises duplicates."
+        },
+        {
+          "text": "Use a transactional producer instead, because the broker then dedupes records across producer restarts",
+          "correct": false,
+          "why": "A transactional ID fences zombie producers, but a resend of a record whose transaction already committed is still a new record."
+        }
+      ],
+      "explain": "Producer idempotence is scoped to one producer session and to its own retries. Duplicates created by the application (resends, restarts, relays) need an event ID and a consumer-side dedupe.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#semantics"
+      ]
+    },
+    {
+      "id": "kafka-v2-q11",
+      "domain": "delivery",
+      "stem": "A fraud-enrichment pipeline uses Kafka transactions for read-process-write. A pod froze in a 40-second GC pause, its partitions moved to a new pod, and when the old pod woke up it committed a transaction too, producing duplicate output. Each pod generates a random `transactionalId` at start-up. What change prevents the zombie write?",
+      "options": [
+        {
+          "text": "Shorten the transaction timeout so long transactions abort sooner",
+          "correct": false,
+          "why": "It limits how long a transaction can stay open, but the zombie can still begin and commit a new short transaction after waking."
+        },
+        {
+          "text": "Have consumers read the output with `read_committed`",
+          "correct": false,
+          "why": "The zombie's transaction did commit, so read_committed readers see it too."
+        },
+        {
+          "text": "Use a stable `transactionalId` per instance so the new producer fences the old",
+          "correct": true,
+          "why": "When a producer initialises with the same transactional ID, the broker bumps the epoch and rejects the older producer's writes and commits."
+        },
+        {
+          "text": "Add an `instanceId` header and have downstream consumers drop stale instances",
+          "correct": false,
+          "why": "It pushes fencing to every consumer and needs them to know which instance is current, which they cannot reliably know."
+        }
+      ],
+      "explain": "Zombie fencing works through the transactional ID's epoch. Random IDs give every instance a fresh identity, so nothing gets fenced; IDs must be stable per logical producer.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#semantics"
+      ]
+    },
+    {
+      "id": "kafka-v2-q12",
+      "domain": "delivery",
+      "stem": "A loan-servicing consumer reads `repayments` and updates balances in Postgres. Leadership wants \"no lost repayment and no double-applied repayment\" without introducing Kafka transactions. Which two practices together achieve that? (Choose two.)",
+      "options": [
+        {
+          "text": "Commit the Kafka offset only after the Postgres transaction commits",
+          "correct": true,
+          "why": "A crash before the commit replays the message, so nothing is lost: at-least-once."
+        },
+        {
+          "text": "Insert the event ID into an inbox table with `ON CONFLICT DO NOTHING` in the same transaction as the balance update",
+          "correct": true,
+          "why": "A replayed event finds its ID already present and skips, so the effect applies once."
+        },
+        {
+          "text": "Enable auto-commit so offsets are saved even if the handler is slow",
+          "correct": false,
+          "why": "Auto-commit can store an offset before the DB write finishes, so a crash then loses the repayment."
+        },
+        {
+          "text": "Dedupe on the message's partition and offset",
+          "correct": false,
+          "why": "A producer or relay resend lands at a new offset, so a duplicate of the same repayment passes the check."
+        },
+        {
+          "text": "Check `SELECT exists` on the inbox, then insert in a later transaction after the update",
+          "correct": false,
+          "why": "Two consumers after a rebalance can both pass the check, and a crash between steps leaves the effect without the dedupe record."
+        }
+      ],
+      "explain": "At-least-once delivery plus an idempotent effect gives effectively-once. The dedupe record and the effect must commit atomically, keyed on a producer-assigned event ID, and the offset commits last.",
+      "refs": [
+        "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+      ]
+    },
+    {
+      "id": "kafka-v2-q13",
+      "domain": "integration",
+      "stem": "A wallet consumer dedupes with an inbox table keyed on `topic-partition-offset`. The upstream team's outbox relay sometimes crashes after the broker ack but before marking the row published, and then publishes the row again. Finance sees occasional double credits. What should change?",
+      "options": [
+        {
+          "text": "Make the relay mark rows published before sending",
+          "correct": false,
+          "why": "Stops the duplicate, but a crash after marking and before sending loses the event entirely."
+        },
+        {
+          "text": "Key the inbox on a producer-assigned event ID",
+          "correct": true,
+          "why": "The republished copy gets a new offset but the same event ID, so the inbox recognises it."
+        },
+        {
+          "text": "Enable producer idempotence on the relay",
+          "correct": false,
+          "why": "The republish happens after a restart as a new send, so producer idempotence cannot recognise it."
+        },
+        {
+          "text": "Use a compacted topic so the duplicate overwrites the first copy",
+          "correct": false,
+          "why": "Compaction is lazy and never touches the active segment; consumers still read both copies."
+        }
+      ],
+      "explain": "Outbox relays are at-least-once by design, so duplicates appear at new offsets. Dedupe on an identity that travels with the event, never on where it happened to land.",
+      "refs": [
+        "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+      ]
+    },
+    {
+      "id": "kafka-v2-q14",
+      "domain": "integration",
+      "stem": "To raise outbox throughput, a team scaled its relay from 1 to 4 instances, each running `SELECT … WHERE published_at IS NULL ORDER BY id LIMIT 100 FOR UPDATE SKIP LOCKED`. Throughput rose, but consumers now see `OrderShipped` before `OrderPacked` for some orders. Which design restores per-order order and keeps the throughput?",
+      "options": [
+        {
+          "text": "Go back to one relay instance and increase its batch size",
+          "correct": false,
+          "why": "Restores order, but gives up the parallelism the team needed; a bigger batch only partly compensates."
+        },
+        {
+          "text": "Have consumers buffer and sort each poll batch by outbox ID before applying the events",
+          "correct": false,
+          "why": "Two events of one order can arrive in different polls or on different relays' timing, so a per-batch sort cannot fix them."
+        },
+        {
+          "text": "Shard relays by aggregate ID hash, one relay per shard, reading in ID order",
+          "correct": true,
+          "why": "Each order's rows are handled by one relay in sequence, while different shards publish in parallel."
+        },
+        {
+          "text": "Use SERIALIZABLE isolation in each relay's transaction",
+          "correct": false,
+          "why": "Serialisation conflicts would abort relays, but SKIP LOCKED still lets two relays take consecutive rows of one order and send them in parallel."
+        }
+      ],
+      "explain": "Parallel workers break order unless work is partitioned by the ordering key. Shard the relay by aggregate ID (or use CDC, which reads in commit order), mirroring how Kafka partitions by key.",
+      "refs": [
+        "https://event-driven.io/en/ordering_in_postgres_outbox/"
+      ]
+    },
+    {
+      "id": "kafka-v2-q15",
+      "domain": "integration",
+      "stem": "A catalogue service produces `product-updated`, read by 25 consumer teams that deploy on their own schedules, some only monthly. The catalogue team must ship new optional fields weekly without waiting for consumers. Which registry compatibility mode fits?",
+      "options": [
+        {
+          "text": "FORWARD, so old consumer schemas can read data from the new producer schema",
+          "correct": true,
+          "why": "FORWARD guarantees existing readers handle the new writer's data, which is exactly what a producer-first rollout needs."
+        },
+        {
+          "text": "BACKWARD, the registry default",
+          "correct": false,
+          "why": "BACKWARD protects new readers reading old data, which implies consumers upgrade first, the opposite of this rollout."
+        },
+        {
+          "text": "NONE, with a contract test in the producer's CI pipeline",
+          "correct": false,
+          "why": "A contract test helps, but the registry would no longer block a breaking schema, and 25 teams depend on that safety net."
+        },
+        {
+          "text": "BACKWARD_TRANSITIVE so all historical versions are checked",
+          "correct": false,
+          "why": "Transitive checks more versions, but it is still the consumers-first direction."
+        }
+      ],
+      "explain": "Choose the compatibility mode from who must deploy first: FORWARD lets producers lead, BACKWARD lets consumers lead, FULL allows either. Add TRANSITIVE when readers may see much older data.",
+      "refs": [
+        "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html"
+      ]
+    },
+    {
+      "id": "kafka-v2-q16",
+      "domain": "integration",
+      "stem": "An order consumer routes unparseable messages to `orders.dlq`. After a security change, the consumer lost write permission on the DLQ topic, so every DLQ produce now fails with an authorisation error. Malformed messages are rare but present. What should the consumer do when the DLQ write fails?",
+      "options": [
+        {
+          "text": "Log the bad message's content and commit past it",
+          "correct": false,
+          "why": "Keeps the partition moving, but the only copy of the message now lives in log retention, which defeats the DLQ's purpose."
+        },
+        {
+          "text": "Write it to a second fallback DLQ topic, fire-and-forget",
+          "correct": false,
+          "why": "Without awaiting the ack, a failure there loses the message too, and the fallback likely has the same permission problem."
+        },
+        {
+          "text": "Drop the message, since malformed input is the producer's problem",
+          "correct": false,
+          "why": "It hides an upstream bug and loses data the producer team needs to diagnose."
+        },
+        {
+          "text": "Leave the offset where it is, pause and alert",
+          "correct": true,
+          "why": "The partition stalls loudly, but no message is lost; once permission is fixed, the DLQ write succeeds and the offset advances."
+        }
+      ],
+      "explain": "The DLQ write is part of the commit path: advance the offset only after the DLQ acknowledges. If it fails, stalling loudly is better than losing data quietly.",
+      "refs": [
+        "https://www.confluent.io/blog/error-handling-patterns-in-kafka/"
+      ]
+    },
+    {
+      "id": "kafka-v2-q17",
+      "domain": "scale",
+      "stem": "A logistics company replicates `shipments` from `eu-central` to `eu-west` with MirrorMaker 2 and default settings. In `eu-west` the DR consumers are configured to subscribe to `shipments` and receive nothing during a failover test, although MM2 shows healthy replication. Why do they see nothing?",
+      "options": [
+        {
+          "text": "MM2 replicates only compacted topics by default",
+          "correct": false,
+          "why": "MM2 replicates the topics that match its filters regardless of cleanup policy."
+        },
+        {
+          "text": "The default policy prefixes the source alias: the data is in `eu-central.shipments`",
+          "correct": true,
+          "why": "MM2's default policy renames remote topics with the source cluster alias, so consumers must subscribe to the prefixed name (or a pattern)."
+        },
+        {
+          "text": "DR consumers need `isolation.level=read_committed` before they can see any mirrored records",
+          "correct": false,
+          "why": "Isolation level affects transactional records, not whether a consumer finds a topic."
+        },
+        {
+          "text": "MM2 writes only after the consumer group exists in the target cluster",
+          "correct": false,
+          "why": "Replication of records does not depend on consumer groups existing in the target."
+        }
+      ],
+      "explain": "MirrorMaker 2's default replication policy prefixes remote topics with the source cluster alias, which makes origin visible and prevents loops. DR consumers and runbooks must use the prefixed name or a pattern.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#georeplication"
+      ]
+    },
+    {
+      "id": "kafka-v2-q18",
+      "domain": "scale",
+      "stem": "A delivery platform runs active-active in `us-east` and `eu-west`: each region's services write `orders` locally, and MirrorMaker 2 replicates both ways. Each region needs a global view of all orders. An engineer proposes the identity replication policy so both clusters simply have one `orders` topic. Which assessment and design should the team adopt?",
+      "options": [
+        {
+          "text": "Identity naming hides provenance and lets records loop; keep prefixed topics and read both",
+          "correct": true,
+          "why": "Default prefixing lets MM2 tell local from remote and stops cycles; a global view is `orders` plus `us-east.orders` (or a pattern)."
+        },
+        {
+          "text": "No problem: MM2 deduplicates records that come back to their origin",
+          "correct": false,
+          "why": "The loop protection relies on the topic prefix; with identity naming MM2 cannot tell a mirrored record from a local one."
+        },
+        {
+          "text": "Drop MirrorMaker 2 and run one stretched cluster across both regions, so there is a single `orders` topic",
+          "correct": false,
+          "why": "Gives one topic, but every acks=all write waits on the transatlantic round trip, and a region split can stall the cluster."
+        },
+        {
+          "text": "Give each region its own key prefix so records do not collide",
+          "correct": false,
+          "why": "Keys do not control replication routing; records still cycle between clusters under identity naming."
+        }
+      ],
+      "explain": "In active-active MM2, keep the prefixed (default) replication policy: it marks provenance and prevents replication cycles. Build the global view by reading the local topic plus the remote-prefixed ones.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#georeplication"
+      ]
+    },
+    {
+      "id": "kafka-v2-q19",
+      "domain": "scale",
+      "stem": "A bank is moving to Kafka 4.3 (KRaft, no ZooKeeper) across three availability zones. The controller quorum must keep working if any one AZ is lost, with as few controller nodes as possible. How should the controllers be placed?",
+      "options": [
+        {
+          "text": "Two controllers in the primary AZ and one in each other AZ",
+          "correct": false,
+          "why": "Four voters need three for a majority; losing the primary AZ takes two, leaving two, so the quorum is lost."
+        },
+        {
+          "text": "Three controllers, one per AZ",
+          "correct": true,
+          "why": "Three voters need two for a majority; any single AZ loss leaves two, so the quorum keeps working with the minimum node count."
+        },
+        {
+          "text": "One controller, with automated restore from snapshot elsewhere",
+          "correct": false,
+          "why": "Cheapest, but the metadata quorum is down until the restore finishes; no new leaders or topics in the meantime."
+        },
+        {
+          "text": "Five controllers, two in each of two AZs and one in the third",
+          "correct": false,
+          "why": "It survives one AZ loss, but uses two more nodes than needed for this requirement."
+        }
+      ],
+      "explain": "KRaft is a majority quorum: 2f+1 voters tolerate f failures. Spread voters so no single failure domain holds a majority's worth of the loss; three across three AZs survives one AZ.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#kraft"
+      ]
+    },
+    {
+      "id": "kafka-v2-q20",
+      "domain": "scale",
+      "stem": "A telemetry topic receives a steady 50 MB/s from producers (after compression), with replication factor 3 and 7 days of retention. Ignoring index and filesystem overhead, roughly how much broker disk does the topic need across the cluster?",
+      "options": [
+        {
+          "text": "About 30 TB",
+          "correct": false,
+          "why": "That is one copy: 50 MB/s × 86,400 s × 7 ≈ 30 TB. It forgets the replication factor."
+        },
+        {
+          "text": "About 4.3 TB",
+          "correct": false,
+          "why": "That is a single day of one copy; it misses both the 7 days and the three replicas."
+        },
+        {
+          "text": "About 90 TB",
+          "correct": true,
+          "why": "50 MB/s × 86,400 s ≈ 4.32 TB per day, × 7 days ≈ 30 TB, × 3 replicas ≈ 90 TB."
+        },
+        {
+          "text": "About 210 TB",
+          "correct": false,
+          "why": "It multiplies by 7 twice; the result overprovisions by more than double."
+        }
+      ],
+      "explain": "Disk = ingress rate × retention × replication factor, plus headroom (commonly 30–50%) for skew, rebalancing and growth. Size from the compressed bytes that actually reach the broker.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#topicconfigs_retention.ms"
+      ]
+    }
+  ]
+}

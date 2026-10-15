@@ -8,7 +8,7 @@
 | mcp | `sweeft/newEra/mcp` | lab | MCP server as a teaching exercise | `gigabrain/memory/newEra` |
 | mogulkhan | `sweeft/newEra/mogulkhan` | lab | hexagonal NestJS template | `gigabrain/memory/newEra` |
 | auctionize | `sweeft/newEra/auctionize` | legacy | superseded by auxiliary | `gigabrain/memory/newEra` |
-| clasico | `sweeft/clasico` | **client** | paid work: `core` (NestJS/Nx: wenroll, advertisements), `admin` (React), `push` (Python FCM job). Onboarded 2026-10-02: local CLAUDE.md per repo + guard hook | **local only**, shared by all 3 repos: `~/.claude/projects/-home-mip-Desktop-workdir-sweeft-clasico/memory` |
+| clasico | `sweeft/clasico` | **client** | paid work: `core` (NestJS/Nx: domain modules, advertisements), `admin` (React), `push` (Python FCM job). Onboarded 2026-10-02: local CLAUDE.md per repo + guard hook | **local only**, shared by all 3 repos: `~/.claude/projects/-home-mip-Desktop-workdir-sweeft-clasico/memory` |
 | lutecia | `sweeft/lutecia` | **client** | remote-only: live Bitrix server over SSH as root, no local code. Onboarded 2026-10-02: CLAUDE.md + guard hook (secrets deny, ssh ask) | **local only**: `~/.claude/projects/-home-mip-Desktop-workdir-sweeft-lutecia/memory` |
 | trial-day-review | `projects/trial-day-review` | client | Testlio trial-day take-home review: score submission vs README tasks and SUBMISSION.md claims | local (`~/.claude/projects/…trial-day-review/memory`) |
 

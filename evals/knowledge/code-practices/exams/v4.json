@@ -1,0 +1,672 @@
+{
+  "topic": "code-practices",
+  "variant": 4,
+  "of": 5,
+  "title": "Code practices at scale — variant 4",
+  "description": "Discount allocation, timestamp types, Infinity in JSON, promo deadlines, idempotency retention, open enums, fire-and-forget promises, metadata SSRF, server-side authz, tail sampling, consumer lag, schema compatibility and concurrent index builds.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "edges",
+      "name": "Edges: validation, money and time",
+      "weight": 0.2
+    },
+    {
+      "id": "api",
+      "name": "API design, idempotency and error surfacing",
+      "weight": 0.2
+    },
+    {
+      "id": "security",
+      "name": "Security defaults: authz, injection, SSRF, secrets",
+      "weight": 0.2
+    },
+    {
+      "id": "observability",
+      "name": "Observability: logs, metrics, traces, SLOs",
+      "weight": 0.15
+    },
+    {
+      "id": "testing",
+      "name": "Testing strategy and reviewing AI-written code",
+      "weight": 0.15
+    },
+    {
+      "id": "deploys",
+      "name": "Safe deploys: flags, migrations, canaries, rollbacks",
+      "weight": 0.1
+    }
+  ],
+  "questions": [
+    {
+      "id": "code-practices-v4-q01",
+      "domain": "edges",
+      "stem": "An e-commerce platform spreads an order-level coupon across the order's lines in proportion to price, because refunds and tax are computed per line. Each line's share is rounded separately, so a €10.00 coupon is sometimes recorded as €9.99 or €10.01, and partial refunds then disagree with the payment provider. Which allocation is right?",
+      "options": [
+        {
+          "text": "Put the whole coupon on the most expensive line so there is only one rounded number to store.",
+          "correct": false,
+          "why": "The total is exact, but refunding that one line now returns the entire coupon's value, and per-line tax is wrong."
+        },
+        {
+          "text": "Compute each line's share with four decimal places and round only when the refund is issued.",
+          "correct": false,
+          "why": "Precision does not make the parts add up in whole cents; the mismatch just moves to refund time."
+        },
+        {
+          "text": "In integer cents, floor each proportional share and hand leftover cents to the largest remainders (stable ties).",
+          "correct": true,
+          "why": "The shares always sum to exactly the coupon, each line's share is as close to proportional as whole cents allow, and the result is repeatable."
+        },
+        {
+          "text": "Keep per-line rounding and post the difference to a 'rounding' ledger account so the books balance at month end.",
+          "correct": false,
+          "why": "The books balance, but the per-line values that refunds use are still wrong, so customer-facing refunds stay off."
+        }
+      ],
+      "explain": "Any time money is divided (splits, proportional discounts, tax spreads), allocate in integer minor units and distribute the remainder deterministically so that `sum(parts) === total`. Largest-remainder keeps proportional fairness.",
+      "refs": [
+        "https://martinfowler.com/eaaCatalog/money.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q02",
+      "domain": "edges",
+      "stem": "An events table uses Postgres `timestamp` (without time zone). The original EU region's connection pool sets `TimeZone=UTC`. A new US region's pool was configured with `TimeZone=America/New_York`, and since its launch, US-written events appear 4 to 5 hours off in every cross-region report. What is the right design?",
+      "options": [
+        {
+          "text": "Keep `timestamp` and add a comment and a wiki page stating that all values are UTC.",
+          "correct": false,
+          "why": "A convention is exactly what the new region violated; the type cannot enforce it."
+        },
+        {
+          "text": "Store each event's local wall-clock time plus a zone-name column so it can be converted back later.",
+          "correct": false,
+          "why": "For past instants that is redundant and ambiguous: the repeated hour when clocks fall back has two meanings."
+        },
+        {
+          "text": "Use `timestamptz`, write instants, and convert to a zone only when presenting data.",
+          "correct": true,
+          "why": "`timestamptz` stores an absolute instant regardless of session settings, so writers in any region agree."
+        },
+        {
+          "text": "Make the US region's pool use `TimeZone=UTC` too, and leave the column type as it is for now.",
+          "correct": false,
+          "why": "It fixes this pool, but the next client, script or console session that sets a different zone repeats the bug."
+        }
+      ],
+      "explain": "Store instants as instants: in Postgres that is `timestamptz`, which normalises to UTC whatever the session zone. Timestamps without zone are only right for local wall-clock values, such as a future appointment in a known zone. Rows already written with the New York zone need a one-off conversion, for example `ALTER TABLE … ALTER COLUMN … TYPE timestamptz USING col AT TIME ZONE 'America/New_York'`.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/datatype-datetime.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q03",
+      "domain": "edges",
+      "stem": "An order API validates lines as shown. A client sent `\"qty\": 1e309` (which `JSON.parse` turns into `Infinity`) and another sent `\"unitPriceMinor\": 0.5`. The first order's total became `Infinity` and broke the nightly ledger export; the second created a half-cent price. What is the fix?",
+      "code": "function validateLine(l: any) {\n  if (typeof l.qty !== 'number' || l.qty <= 0)\n    throw new ValidationError('qty');\n  if (typeof l.unitPriceMinor !== 'number' || l.unitPriceMinor < 0)\n    throw new ValidationError('unitPriceMinor');\n}",
+      "options": [
+        {
+          "text": "Add `Number.isFinite` to both checks so `Infinity` and `NaN` are rejected along with non-numbers.",
+          "correct": false,
+          "why": "It stops the Infinity case, but `0.5` is finite and still creates a fractional minor-unit price."
+        },
+        {
+          "text": "Round both values with `Math.round` before saving so the stored values are always whole numbers.",
+          "correct": false,
+          "why": "It silently changes what the client asked for, and `Math.round(Infinity)` is still `Infinity`."
+        },
+        {
+          "text": "Require `Number.isSafeInteger` for both and enforce business ranges, rejecting anything else with 400.",
+          "correct": true,
+          "why": "Integers in a sane range are what both fields mean, so anything else is a client error surfaced at the boundary."
+        },
+        {
+          "text": "Store totals in a Postgres `numeric` column, which can hold arbitrarily large values without overflowing.",
+          "correct": false,
+          "why": "The input is still nonsense; a larger column only lets an absurd value travel further into ledgers and reports."
+        }
+      ],
+      "explain": "`typeof x === 'number'` accepts `NaN`, `Infinity` and fractions. Validate the domain meaning (an integer quantity, an integer count of minor units, within ranges) and reject everything else at the boundary.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q04",
+      "domain": "edges",
+      "stem": "Marketing announced a coupon 'valid until 31 December, New York time'. The code checks `now < new Date('2026-12-31')`. On the evening of 30 December, US customers started getting 'coupon expired'. What should the expiry be?",
+      "options": [
+        {
+          "text": "`new Date('2026-12-31T23:59:59')`, so the coupon stays valid right up to the very last second of the final day.",
+          "correct": false,
+          "why": "Without an offset this is parsed in the server's local zone, so the deadline depends on where the code runs."
+        },
+        {
+          "text": "The instant `2027-01-01T00:00` in `America/New_York`, converted to UTC once, stored and compared with `<`.",
+          "correct": true,
+          "why": "The promise names a zone, so the deadline is a precise instant; storing that instant makes every check agree."
+        },
+        {
+          "text": "Add a 24-hour grace period to the current check so nobody in any zone loses the coupon early.",
+          "correct": false,
+          "why": "It moves the error rather than removing it: customers in Asia get most of an extra day and finance sees inconsistent cutoffs."
+        },
+        {
+          "text": "Compare `now.toISOString().slice(0, 10) <= '2026-12-31'`.",
+          "correct": false,
+          "why": "That is the UTC date, which rolls over at 19:00 New York time, the same early cutoff as before."
+        }
+      ],
+      "explain": "Deadlines are instants. Turn 'end of day X in zone Z' into one exact instant (start of the next day in Z), store it, and compare against it; date-only strings in JS are UTC midnight, which is rarely what a promise means.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/Date"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q05",
+      "domain": "api",
+      "stem": "A payouts API stores idempotency keys in Redis with a 10-minute TTL, on a cluster whose eviction policy is `allkeys-lru`. Partner batch systems retry failed payouts the next morning with the same key. Finance found a handful of double payouts last quarter. What is the right fix?",
+      "options": [
+        {
+          "text": "Raise the TTL to 24 hours and keep the keys in the same Redis cluster with `allkeys-lru` eviction.",
+          "correct": false,
+          "why": "Under memory pressure LRU eviction can still drop a key before its TTL, so a late retry can still pay twice."
+        },
+        {
+          "text": "Keep keys at least as long as the documented retry window, in durable storage with a unique constraint.",
+          "correct": true,
+          "why": "A key that cannot expire or be evicted before the last legitimate retry is the only way the guarantee holds."
+        },
+        {
+          "text": "Document for partners that a retry is only safe within 10 minutes of the original request and ask them to adjust their jobs.",
+          "correct": false,
+          "why": "Batch systems will keep retrying the next day anyway; a contract you cannot enforce still produces double payouts."
+        },
+        {
+          "text": "Dedupe payouts on amount plus destination account within a 24-hour window.",
+          "correct": false,
+          "why": "Legitimate repeated payouts of the same amount to the same account get blocked."
+        }
+      ],
+      "explain": "Idempotency only works if the record outlives every retry the client may send. Size retention to the retry window and keep keys where they cannot be evicted: a durable table with a unique key, not a cache.",
+      "refs": [
+        "https://docs.stripe.com/api/idempotent_requests"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q06",
+      "domain": "api",
+      "stem": "The order `status` field gains a new value, `partially_shipped`. Android app versions generated from the OpenAPI document decode enums strictly and crash on unknown values; 20% of users run those versions and will for months. What should the API contract and rollout be?",
+      "options": [
+        {
+          "text": "Never add enum values again; add a new boolean field for each new state from now on.",
+          "correct": false,
+          "why": "It avoids this crash but grows a pile of flags that clients must combine, and the model stops describing one status."
+        },
+        {
+          "text": "Bump the API's major version for every new enum value.",
+          "correct": false,
+          "why": "A full version per enum value is heavy for providers and clients, and old clients still need the old version supported."
+        },
+        {
+          "text": "Declare enums open (clients must handle unknown values) and send new values only to client versions that can handle them.",
+          "correct": true,
+          "why": "Future values stop being breaking changes, and today's strict clients are protected until they age out."
+        },
+        {
+          "text": "Report `partially_shipped` orders as `shipped` to all clients, including new ones.",
+          "correct": false,
+          "why": "Old apps stop crashing but new apps lose the information the feature was built for."
+        }
+      ],
+      "explain": "Adding an enum value is a breaking change for strict clients. Document enums as open from day one, require clients to tolerate unknown values, and gate new values by client capability while old versions are in the field.",
+      "refs": [
+        "https://cloud.google.com/apis/design/compatibility"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q07",
+      "domain": "api",
+      "stem": "When the email provider returned 503s for five minutes, the signup pods crash-looped and signups dropped to zero. The welcome email was deliberately not awaited so signups would not depend on the provider. What is the cause and the right fix?",
+      "code": "app.post('/signup', async (req, res) => {\n  const user = await users.create(req.body);\n  void mailer.sendWelcome(user.email); // don't block signup on email\n  res.status(201).json(user);\n});",
+      "options": [
+        {
+          "text": "Add `process.on('unhandledRejection', () => {})` at startup so stray rejections can no longer crash the process.",
+          "correct": false,
+          "why": "It stops the crash by hiding every unhandled rejection in the process, including real bugs elsewhere."
+        },
+        {
+          "text": "`await` the email before responding so that any provider error is caught in the route's own error handling.",
+          "correct": false,
+          "why": "No crash, but signups now fail or stall whenever the provider is down, which the design tried to avoid."
+        },
+        {
+          "text": "Wrap the whole route body in `try/catch` and return 500 on error.",
+          "correct": false,
+          "why": "The email promise is not awaited, so its rejection happens outside the try and is still unhandled."
+        },
+        {
+          "text": "The unhandled rejection kills Node; enqueue the email durably (outbox or queue with retries) instead.",
+          "correct": true,
+          "why": "Signup no longer depends on the provider, emails survive outages through retries, and no promise is left unhandled."
+        }
+      ],
+      "explain": "In Node an unhandled promise rejection crashes the process by default. Fire-and-forget work needs an owner: a durable queue or outbox with retries, or at minimum a `.catch` that records the failure.",
+      "refs": [
+        "https://nodejs.org/api/cli.html#--unhandled-rejectionsmode"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q08",
+      "domain": "api",
+      "stem": "Mobile and partner clients decide what to do on errors with checks like `if (msg.includes('insufficient funds'))`. A copy change made while localising error messages broke automatic retries for three partners and a key mobile flow. What should the API provide?",
+      "options": [
+        {
+          "text": "Freeze the English message strings permanently and document them as part of the API contract.",
+          "correct": false,
+          "why": "It stops this break, but no message can ever be improved or localised again."
+        },
+        {
+          "text": "A stable machine-readable code (RFC 9457 `type`, or `code`) in the contract, with `detail` free to change.",
+          "correct": true,
+          "why": "Clients branch on a code that never changes, while human-readable text can be translated and improved."
+        },
+        {
+          "text": "A distinct HTTP status code for each error case so that clients can branch on the status alone.",
+          "correct": false,
+          "why": "There are far fewer status codes than error cases, so different conditions end up sharing one status."
+        },
+        {
+          "text": "Localised messages chosen by the `Accept-Language` header, with every message in every language documented in the reference.",
+          "correct": false,
+          "why": "Clients would still parse prose, now in many languages, so every copy edit remains a breaking change."
+        }
+      ],
+      "explain": "Error responses need a stable, machine-readable identifier separate from the human message. Problem Details (RFC 9457) gives a `type` URI for this, leaving `title` and `detail` free to change.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc9457.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q09",
+      "domain": "security",
+      "stem": "A PDF service on EC2 renders customer HTML templates in headless Chromium. Templates may contain `<img src>` and CSS URLs. A crafted template rendered the instance's IAM credentials into a PDF. Which two changes limit this class of attack? (Choose two.)",
+      "options": [
+        {
+          "text": "Require IMDSv2 on the instances and cut the instance role down to what the renderer needs.",
+          "correct": true,
+          "why": "IMDSv2 needs a token obtained with a PUT and a custom header, which an image or stylesheet fetch cannot send, and a minimal role limits any leak."
+        },
+        {
+          "text": "Send the renderer's outbound traffic through an egress proxy or network policy that blocks private and link-local ranges.",
+          "correct": true,
+          "why": "Even if the browser is tricked into fetching an internal URL, the network refuses to deliver it."
+        },
+        {
+          "text": "Strip `<script>` tags from templates before rendering.",
+          "correct": false,
+          "why": "No script is needed: `<img>`, `<iframe>` and CSS `url()` all make the browser fetch internal URLs."
+        },
+        {
+          "text": "Validate template URLs with a regex that only allows `http` and `https`.",
+          "correct": false,
+          "why": "The metadata endpoint is plain `http`; the scheme check passes it straight through."
+        },
+        {
+          "text": "Render each template in a new Chromium tab rather than reusing one.",
+          "correct": false,
+          "why": "Every tab has the same network access, so isolation between tabs does nothing here."
+        }
+      ],
+      "explain": "When untrusted content drives a server-side fetcher (a browser, an image proxy), assume SSRF and apply defence in depth: harden the metadata service, restrict egress at the network level, and give the workload a minimal role.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q10",
+      "domain": "security",
+      "stem": "The admin 'Refund' button is hidden in the React app for anyone without the `finance` role. `POST /refunds` checks only that the caller is authenticated, then enqueues a job that a worker executes. A support-tier user issued refunds by calling the API from devtools. What is the fix?",
+      "options": [
+        {
+          "text": "Rename the route to something non-obvious and remove it from the public API documentation.",
+          "correct": false,
+          "why": "The route is visible in the browser's network tab; obscurity is not a permission check."
+        },
+        {
+          "text": "Also guard the React route that renders the refund screen, so support-tier users can no longer even navigate to it.",
+          "correct": false,
+          "why": "Anything in the client can be bypassed; the API itself still accepts the request."
+        },
+        {
+          "text": "Check the `finance` permission on the server for the route, and again in the worker for the job's actor.",
+          "correct": true,
+          "why": "Authorization happens where the action is executed, so neither a direct API call nor a forged job can skip it."
+        },
+        {
+          "text": "Log every refund with the user who made it so finance can audit them each week.",
+          "correct": false,
+          "why": "Auditing detects misuse after the money has left; it does not prevent it."
+        }
+      ],
+      "explain": "The UI is a convenience, never a control. Every action is authorized on the server, deny by default, and asynchronous workers re-check permissions for the actor recorded on the job.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q11",
+      "domain": "security",
+      "stem": "To debug a partner integration, a developer added `logger.info({ headers: req.headers, body: req.body })` to a global middleware. It ran in production for two weeks, and logs ship to a third-party vendor. Requests carry bearer tokens, session cookies, and passwords on the login route. What now?",
+      "options": [
+        {
+          "text": "Remove the log line; the vendor's 30-day retention will clear the rest automatically.",
+          "correct": false,
+          "why": "The tokens and sessions in those logs are valid today, and they stay readable at the vendor for another month."
+        },
+        {
+          "text": "Keep the line but mask the `Authorization` header from now on.",
+          "correct": false,
+          "why": "Cookies and the login body's passwords are still logged, and everything already shipped stays exposed."
+        },
+        {
+          "text": "Remove it, revoke exposed sessions and tokens, purge at the vendor, and default the logger to redacting secrets.",
+          "correct": true,
+          "why": "Revocation neutralises what leaked, purging limits further exposure, and default redaction prevents the next debug line from repeating it."
+        },
+        {
+          "text": "Ask the vendor to enable encryption at rest for the affected log indexes, and leave the logging itself exactly as it is.",
+          "correct": false,
+          "why": "Anyone who can read logs still sees plaintext; encryption at rest protects disks, not readers."
+        }
+      ],
+      "explain": "Treat secrets that reached logs as leaked: rotate or revoke first, then purge. Prevent repeats with a logger that redacts sensitive headers and fields by default, so a quick debug line cannot capture them.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q12",
+      "domain": "security",
+      "stem": "A Node API connects to Postgres as the role that owns the schema and also runs migrations. A SQL injection in a reporting endpoint let an attacker drop two tables and alter a third. The injection is fixed. What limits the blast radius of the next one?",
+      "options": [
+        {
+          "text": "Rely on parameterized queries everywhere from now on; that alone makes another injection like this one impossible.",
+          "correct": false,
+          "why": "Parameterization is necessary, but this incident shows bugs slip through; it does nothing to limit damage when one does."
+        },
+        {
+          "text": "Revoke `DROP` and `ALTER` from the owner role so it can only read and write data.",
+          "correct": false,
+          "why": "In Postgres the owner of an object can always drop and alter it; those rights cannot be revoked from the owner."
+        },
+        {
+          "text": "Point every query at a read-only replica.",
+          "correct": false,
+          "why": "The API needs to write; a read-only connection would break the product."
+        },
+        {
+          "text": "App role with only DML on its tables; a separate role in the deploy pipeline runs migrations.",
+          "correct": true,
+          "why": "An injected statement runs with the app's privileges, which no longer include changing or dropping schema."
+        }
+      ],
+      "explain": "Least privilege bounds the damage of the bug you have not found yet. Separate runtime and migration identities: the app gets only the data access it needs, and schema ownership stays with the deploy pipeline.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/ddl-priv.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q13",
+      "domain": "observability",
+      "stem": "A checkout platform handles 30k rps. Traces are head-sampled at 1%, and errors affect about 0.05% of requests. When a merchant reports a failed checkout, there is almost never a trace for it. The budget cannot cover 100% of traces. What should change?",
+      "options": [
+        {
+          "text": "Raise head sampling to 10%, which the budget can just about cover.",
+          "correct": false,
+          "why": "Ten times the cost, and still nine out of ten failed checkouts have no trace."
+        },
+        {
+          "text": "Tail-based sampling in the collector: keep traces with errors or high latency, plus a small share of the rest.",
+          "correct": true,
+          "why": "The decision is made after the outcome is known, so the interesting traces are kept and the boring majority dropped."
+        },
+        {
+          "text": "Sample by merchant id so that each merchant always gets either all or none of its traces, and rotate merchants weekly.",
+          "correct": false,
+          "why": "Coverage now depends on which merchant complains; most merchants still have no failed traces."
+        },
+        {
+          "text": "Turn tracing off and rely on structured logs, which are cheaper to keep at full volume.",
+          "correct": false,
+          "why": "Logs are useful, but you lose cross-service timing and causality, which is what a trace adds during an incident."
+        }
+      ],
+      "explain": "Head sampling decides before anything interesting has happened. Tail sampling in a collector keeps all error and slow traces and a baseline of normal ones, giving the most debugging value per stored trace.",
+      "refs": [
+        "https://opentelemetry.io/docs/concepts/sampling/"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q14",
+      "domain": "observability",
+      "stem": "Logs look like `console.log('order ' + id + ' failed for ' + user + ': ' + err)`. During an incident on-call needs 'all failed orders for merchant X in eu-west in the last hour' across 200 pods, and cannot get it. What should change?",
+      "options": [
+        {
+          "text": "Use `kubectl logs` with grep across the pods during incidents.",
+          "correct": false,
+          "why": "Pod logs disappear on restart, 200 pods is slow to scan, and free text still has to be parsed by hand."
+        },
+        {
+          "text": "Add more log lines with more detail around each order failure.",
+          "correct": false,
+          "why": "More unstructured text is just as hard to filter by merchant or region."
+        },
+        {
+          "text": "Turn these failures into a metric labelled with merchant id and order id.",
+          "correct": false,
+          "why": "Unbounded labels explode metric cardinality; metrics are for aggregates, not per-order lookups."
+        },
+        {
+          "text": "One logger emitting JSON with consistent fields (`event`, `orderId`, `merchantId`, `region`, `requestId`, error type).",
+          "correct": true,
+          "why": "The log platform can index and filter on fields, so the incident query is a simple filter instead of regex archaeology."
+        }
+      ],
+      "explain": "Logs are data for machines first. Emit structured events with consistent field names through one logger, so incidents can be answered by queries and logs can be joined to traces by request id.",
+      "refs": [
+        "https://opentelemetry.io/docs/specs/otel/logs/data-model/"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q15",
+      "domain": "observability",
+      "stem": "A Kafka consumer processes refund requests, and refunds must complete within an hour. One malformed message made it retry the same record in a loop. No errors were logged (the retry path was silent), CPU stayed low, and refunds were delayed six hours. Which signal should have paged?",
+      "options": [
+        {
+          "text": "The rate of error-level log lines emitted by the consumer pods.",
+          "correct": false,
+          "why": "The retry loop logged nothing, so this stayed at zero the whole time."
+        },
+        {
+          "text": "CPU and memory of the consumer pods.",
+          "correct": false,
+          "why": "A consumer stuck on one record is nearly idle, so resource metrics look healthy."
+        },
+        {
+          "text": "Consumer lag, or the age of the oldest unprocessed message, against a threshold tied to the one-hour SLA.",
+          "correct": true,
+          "why": "Lag measures the user outcome (refunds waiting) directly, so it fires however the consumer gets stuck."
+        },
+        {
+          "text": "The rate of refund messages produced to the topic by the upstream services.",
+          "correct": false,
+          "why": "Production was normal; the problem was on the consuming side."
+        }
+      ],
+      "explain": "For asynchronous pipelines, alert on freshness: lag or age of the oldest item versus the promise you made. Pair it with a bounded retry and a dead-letter topic so one poison message cannot stall a partition.",
+      "refs": [
+        "https://sre.google/workbook/monitoring/"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q16",
+      "domain": "testing",
+      "stem": "A producer team changed `amount` in a Kafka event from a number to a string. Three consumer teams broke at 2 a.m. The topic's schemas are already in a schema registry, but the subject's compatibility mode is `NONE`. What prevents a repeat?",
+      "options": [
+        {
+          "text": "Ask every consumer team to wrap event parsing in try/catch and skip events that fail.",
+          "correct": false,
+          "why": "Consumers stop crashing but silently drop real events, which is worse for money data."
+        },
+        {
+          "text": "Create a new versioned topic for every schema change so that each consumer team can migrate in its own time.",
+          "correct": false,
+          "why": "It avoids the break at the cost of topic sprawl, dual writes and coordinated migrations for every change."
+        },
+        {
+          "text": "Add an integration test in the shared staging environment that runs before each release.",
+          "correct": false,
+          "why": "It catches the problem late, depends on staging having current consumers, and does not stop a direct producer deploy."
+        },
+        {
+          "text": "Set the subject to `BACKWARD` (or `FULL`) compatibility and check it in the producer's CI before deploy.",
+          "correct": true,
+          "why": "Incompatible schema changes are rejected mechanically before any event is produced, at the producer's own merge."
+        }
+      ],
+      "explain": "Event schemas are contracts. Let the schema registry enforce compatibility rules and check them in the producer's pipeline, so breaking changes are refused before they reach consumers.",
+      "refs": [
+        "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q17",
+      "domain": "testing",
+      "stem": "You fixed a double-charge bug in `POST /payments` by claiming the `Idempotency-Key` atomically before calling the processor. Before merge you want one test that would have caught the original bug and proves this fix. Which test?",
+      "options": [
+        {
+          "text": "Send the same request twice, one after the other with the same key, and assert that the processor was charged only once in total.",
+          "correct": false,
+          "why": "The original bug was a race between concurrent requests; a sequential test passed against the broken code too."
+        },
+        {
+          "text": "Fire two identical requests with `Promise.all` against a processor fake that resolves on a later tick; assert one charge.",
+          "correct": true,
+          "why": "Both requests are in flight together, which recreates the race; one charge plus a 409 or identical replay proves the claim works."
+        },
+        {
+          "text": "Load-test staging at 1,000 rps with repeated keys and check the charges table for duplicates.",
+          "correct": false,
+          "why": "Nondeterministic and slow: the race may or may not occur in a given run, so a pass proves little."
+        },
+        {
+          "text": "Assert that `redis.set` was called with the `NX` option.",
+          "correct": false,
+          "why": "It checks how the code is written, not whether duplicates are prevented, and breaks if storage changes."
+        }
+      ],
+      "explain": "A test for a race must create the race deterministically: concurrent calls plus a fake that yields so both are in flight. Assert observable outcomes (how many charges, what each caller got), not implementation calls.",
+      "refs": [
+        "https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q18",
+      "domain": "testing",
+      "stem": "An agent was asked to add one field to an order DTO. The diff also 'modernises' 14 unrelated lines, including `if (order.customerId == req.user.id)` becoming `===`. `customerId` comes from the database as a number; `req.user.id` comes from the JWT as a string. All tests pass. What is the review decision?",
+      "options": [
+        {
+          "text": "Approve it: strict equality is best practice and the full test suite is green.",
+          "correct": false,
+          "why": "Number never `===` string, so the ownership check now always fails; the green suite shows it was never tested."
+        },
+        {
+          "text": "Approve it and add the `eqeqeq` lint rule so that the whole codebase follows the same style.",
+          "correct": false,
+          "why": "It spreads the same behaviour change across other number-versus-string comparisons, at scale."
+        },
+        {
+          "text": "Ban the agent from touching any file that contains authorization checks.",
+          "correct": false,
+          "why": "Overbroad and unenforceable; the real issue is unrequested changes and missing tests."
+        },
+        {
+          "text": "Have the unrelated edits split out; the `===` change breaks the ownership check and needs its own test.",
+          "correct": true,
+          "why": "Keeping the diff to its task makes review possible, and the comparison change is a behaviour change, not a cleanup."
+        }
+      ],
+      "explain": "Unrequested 'cleanups' in AI diffs are where behaviour changes hide. Keep diffs to the task, and treat any change to comparisons, defaults or ordering on security or money paths as a behaviour change that needs a test.",
+      "refs": [
+        "https://google.github.io/eng-practices/review/developer/small-cls.html"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q19",
+      "domain": "deploys",
+      "stem": "A new query needs an index on a 900M-row `events` table that takes 8k inserts per second on Postgres 17. The migration tool wraps every migration in a transaction. What is the safe approach?",
+      "options": [
+        {
+          "text": "A plain `CREATE INDEX` during the lowest-traffic hour of the night.",
+          "correct": false,
+          "why": "A normal index build blocks writes for its whole duration, which on 900M rows is far longer than any quiet hour."
+        },
+        {
+          "text": "`CREATE INDEX CONCURRENTLY` outside a transaction; if it fails, drop the INVALID index and retry.",
+          "correct": true,
+          "why": "Concurrent builds allow writes throughout; they cannot run in a transaction block and leave an invalid index behind on failure."
+        },
+        {
+          "text": "Build the index on a streaming replica first, then promote that replica to be the new primary once it is done.",
+          "correct": false,
+          "why": "Physical replicas cannot have their own indexes, and promotion is a failover, which is far riskier than the index itself."
+        },
+        {
+          "text": "Make it a partial index so the build covers fewer rows and finishes sooner.",
+          "correct": false,
+          "why": "A smaller build still blocks writes while it runs unless it is also concurrent, and it may not serve the query."
+        }
+      ],
+      "explain": "On hot tables, schema changes must not take long write-blocking locks. In Postgres use `CREATE INDEX CONCURRENTLY`, run it outside a transaction, and check for invalid indexes after a failure.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/sql-createindex.html#SQL-CREATEINDEX-CONCURRENTLY"
+      ]
+    },
+    {
+      "id": "code-practices-v4-q20",
+      "domain": "deploys",
+      "stem": "A new checkout flow is rolled out to 10% using `Math.random() < 0.1` on every request. Users bounce between the old and new flows mid-checkout, carts break, and the experiment's conversion numbers are noise. What should the rollout do?",
+      "options": [
+        {
+          "text": "Route 10% of pods to the new flow and let the load balancer spread users across them.",
+          "correct": false,
+          "why": "Requests from one user still land on different pods, so they still bounce between flows."
+        },
+        {
+          "text": "Bucket by a hash of user id plus flag key, so each user stays in one variant as the percentage grows.",
+          "correct": true,
+          "why": "Assignment is deterministic and sticky, users get a consistent experience, and the metrics compare stable groups."
+        },
+        {
+          "text": "Roll the new flow out region by region, starting with the smallest market and expanding to the next one each week.",
+          "correct": false,
+          "why": "Users stay consistent, but regions differ in behaviour, so the comparison is confounded and a region's whole traffic is exposed at once."
+        },
+        {
+          "text": "Lower the rollout to 1% so fewer users are affected while it is investigated.",
+          "correct": false,
+          "why": "Fewer users are hurt, but each one in the 1% still flips between flows on every request."
+        }
+      ],
+      "explain": "Percentage rollouts must be sticky: hash a stable identifier with the flag key into buckets so a user's assignment never changes while the percentage only grows. Random per-request assignment breaks sessions and experiments.",
+      "refs": [
+        "https://martinfowler.com/articles/feature-toggles.html"
+      ]
+    }
+  ]
+}

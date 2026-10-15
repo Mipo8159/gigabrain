@@ -1,0 +1,671 @@
+{
+  "topic": "redis-caching",
+  "variant": 3,
+  "of": 5,
+  "title": "Redis and caching at scale — variant 3",
+  "description": "Travel, logistics and gaming scenarios: caching inside transactions, Redis outages, cold caches, retry storms, fork memory, WAIT and cluster failover.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "patterns",
+      "name": "Cache patterns, invalidation and stale reads",
+      "weight": 0.25
+    },
+    {
+      "id": "load",
+      "name": "Stampedes, hot keys and TTL design",
+      "weight": 0.2
+    },
+    {
+      "id": "memory",
+      "name": "Memory, eviction and big keys",
+      "weight": 0.15
+    },
+    {
+      "id": "topology",
+      "name": "Cluster, replication, persistence and multi-region",
+      "weight": 0.2
+    },
+    {
+      "id": "coordination",
+      "name": "Locks, rate limits and messaging",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "redis-caching-v3-q01",
+      "domain": "patterns",
+      "stem": "A shipment service updates a parcel's status inside a Postgres transaction and, in the same function, writes the new status to Redis (write-through) before `COMMIT`. When the transaction hits a serialization failure and rolls back, the tracking page shows a status that never happened for the next 10 minutes. Which change fixes it?",
+      "options": [
+        {
+          "text": "Invalidate the cache key only after the commit succeeds, for example in an after-commit hook",
+          "correct": true,
+          "why": "The cache is touched only once the data is durable, so a rollback leaves nothing behind and the next read loads committed data."
+        },
+        {
+          "text": "Wrap the Redis write in `MULTI` so it rolls back together with Postgres",
+          "correct": false,
+          "why": "MULTI is Redis-only and has no rollback; it cannot join a Postgres transaction."
+        },
+        {
+          "text": "Lower the TTL on status keys from 10 minutes to 30 seconds so a phantom status disappears quickly",
+          "correct": false,
+          "why": "Shortens how long the phantom status is shown, but every rollback still publishes a status that never existed."
+        },
+        {
+          "text": "Retry the transaction until it commits so the cache is always right eventually",
+          "correct": false,
+          "why": "Retries can fail too, and a retry may write a different status; the cache still briefly shows the rolled-back one."
+        }
+      ],
+      "explain": "The cache must never get ahead of the system of record. Touch it after commit (an after-commit hook, or an outbox event for other services), and prefer deleting over writing so the next read loads what was actually committed.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/using-commands/transactions/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q02",
+      "domain": "patterns",
+      "stem": "A travel app is changing the JSON shape of its cached `itinerary:{id}` values (a field becomes an array). During the 20-minute rolling deploy, old and new pods share the cache, and both start throwing parse errors on each other's entries. The next schema change is in two weeks. How should the team deploy it?",
+      "options": [
+        {
+          "text": "Run `FLUSHALL` right before the deploy so no old-shape values remain",
+          "correct": false,
+          "why": "Old pods are still running and refill old-shape values seconds after the flush, and the flush sends full load to the database."
+        },
+        {
+          "text": "Put a schema version in the key prefix, such as `itinerary:v4:{id}`",
+          "correct": true,
+          "why": "Old and new pods never read each other's values; the old prefix expires by TTL after the rollout, at the cost of a temporary double fill."
+        },
+        {
+          "text": "Make both versions catch parse errors and treat them as cache misses that reload from the database",
+          "correct": false,
+          "why": "Better than crashing, but each version keeps overwriting the other's entries, so the hit rate collapses for the whole rollout."
+        },
+        {
+          "text": "Deploy with blue/green instead of rolling so versions never overlap",
+          "correct": false,
+          "why": "Removes overlap for one switch, but a rollback brings the old version back to new-shape values, and it adds a full second environment for a key-naming problem."
+        }
+      ],
+      "explain": "The cache is shared state across versions of your code. Version the key namespace whenever the value format changes, so mixed fleets and rollbacks each read their own shape. Old keys simply expire.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/patterns/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q03",
+      "domain": "patterns",
+      "stem": "A delivery marketplace caches `top-restaurants:{city}` (an expensive ranking query) and deletes it whenever any restaurant in that city changes. Restaurants change about 2,000 times per second across 30 cities, and the key's hit rate is 3%. The product owner says rankings up to a minute old are fine. Which change fits?",
+      "options": [
+        {
+          "text": "Stop invalidating on writes; use a 30–60 s TTL with one rebuilder",
+          "correct": true,
+          "why": "Writes no longer destroy the entry, so it serves for its whole TTL; the staleness stays inside the one-minute budget."
+        },
+        {
+          "text": "Update the cached ranking in place on every restaurant write",
+          "correct": false,
+          "why": "Every write now recomputes or patches the ranking, which is the expensive work the cache was meant to avoid, and concurrent patches can land out of order."
+        },
+        {
+          "text": "Move the ranking key to a bigger Redis node with more memory and CPU headroom",
+          "correct": false,
+          "why": "The node is not the bottleneck; the entry is deleted faster than it can be reused."
+        },
+        {
+          "text": "Invalidate only when the restaurant's rank actually changes",
+          "correct": false,
+          "why": "Knowing whether the rank changed requires running the ranking, the expensive query the cache exists to avoid."
+        }
+      ],
+      "explain": "Event-driven invalidation is wrong for aggregates that depend on many fast-changing rows: the entry dies before it is reused. When the product tolerates bounded staleness, a TTL with a single rebuilder is cheaper and more predictable.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/expire/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q04",
+      "domain": "patterns",
+      "stem": "A game backend reads player profiles cache-aside from Redis. Last month Redis became unreachable for 6 minutes; every request waited on a 2-second Redis timeout and then hit Postgres, which reached its connection limit and took the whole game down. Which two changes keep a Redis outage from becoming a full outage? (Choose two.)",
+      "options": [
+        {
+          "text": "A short Redis timeout plus a circuit breaker that skips Redis while it is failing",
+          "correct": true,
+          "why": "Requests stop paying a 2 s wait per call, so threads and connections are not tied up during the outage."
+        },
+        {
+          "text": "Cap concurrent Postgres loads behind the cache (a bulkhead) and shed or degrade the rest",
+          "correct": true,
+          "why": "Postgres was sized for the cache's miss rate, not for all reads; limiting loads protects it, and the excess gets a degraded answer."
+        },
+        {
+          "text": "Retry each Redis call three times before falling back to Postgres",
+          "correct": false,
+          "why": "During an outage this triples the waiting per request and keeps connections busy longer, which is what caused the collapse."
+        },
+        {
+          "text": "Block requests until Redis returns so Postgres is never overloaded",
+          "correct": false,
+          "why": "Protects Postgres by making the whole game unavailable for the length of the Redis outage."
+        },
+        {
+          "text": "Increase the Postgres connection pool so it can absorb the full read load",
+          "correct": false,
+          "why": "More connections usually lowers Postgres throughput past a point; it is sized for misses, not for 100% of reads."
+        }
+      ],
+      "explain": "A cache in front of a database is load-bearing: its hit rate is part of the database's capacity plan. Design the outage path: fail fast on the cache (timeouts, circuit breaker), and limit how much load can fall through to the database.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/nodejs/produsage/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q05",
+      "domain": "patterns",
+      "stem": "A hotel search caches whole result pages keyed by the full query (city, dates, guests, filters, sort). There are 2 million distinct queries a day and the hit rate is 4%. Profiling shows 90% of the cost is fetching live price and availability for each of the ~50 hotels on a page. How should caching change?",
+      "options": [
+        {
+          "text": "Raise the result-page TTL from 5 minutes to 2 hours",
+          "correct": false,
+          "why": "Long-tail queries are rarely repeated even within hours, so the hit rate barely moves, and prices go badly stale."
+        },
+        {
+          "text": "Normalize the query string (sort filters, lowercase) to merge duplicates",
+          "correct": false,
+          "why": "Worth doing, but it merges only cosmetic duplicates; real distinct combinations of dates and filters still dominate."
+        },
+        {
+          "text": "Cache per-hotel price and availability, and assemble pages from it",
+          "correct": true,
+          "why": "Many different queries share the same hotels and dates, so the expensive part is reused across queries even when the pages differ."
+        },
+        {
+          "text": "Precompute and cache every city and date combination each night",
+          "correct": false,
+          "why": "The combination space is huge and prices change during the day, so most precomputed pages are wasted or stale."
+        }
+      ],
+      "explain": "Cache at the level where reuse is high and cost is concentrated. Composite responses with high-cardinality keys have poor hit rates; their building blocks are shared by many requests.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/patterns/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q06",
+      "domain": "load",
+      "stem": "An ops team plans to replace a 40 GB cache node with a new, empty one at 18:00, peak hour. The cache absorbs 97% of reads; Postgres can handle roughly 3x its normal miss load. Which plan avoids an outage?",
+      "options": [
+        {
+          "text": "Cut over at 18:00 and let cache-aside refill the new node naturally",
+          "correct": false,
+          "why": "A 97% hit rate falling to near 0 sends roughly 30x the normal miss load to Postgres, well past its 3x headroom."
+        },
+        {
+          "text": "Add per-process single-flight to the app before cutting over",
+          "correct": false,
+          "why": "Collapses duplicate loads of the same key, but a cold cache misses on millions of distinct keys, so Postgres still sees far more than 3x."
+        },
+        {
+          "text": "Make the new node a replica of the old one, then promote it",
+          "correct": true,
+          "why": "Replication copies the whole dataset first, so the new node starts warm and the cutover is a failover, not a cold start."
+        },
+        {
+          "text": "Run the switch at 18:00 but set `maxmemory` lower on the new node to fill faster",
+          "correct": false,
+          "why": "Maxmemory limits size, not fill speed; a smaller cache only lowers the eventual hit rate."
+        }
+      ],
+      "explain": "A cold cache is a stampede over every key at once. Before replacing a cache node, warm it: replicate from the old node and promote, or replay hot keys, and do it off-peak when you can. Check how much miss load the database can really take.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/replication/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q07",
+      "domain": "load",
+      "stem": "Every service calls Redis with a 50 ms timeout and **three immediate retries**. Yesterday a big-key deletion slowed Redis to 80 ms per command for a few seconds; command volume jumped 4x, latency kept rising, and Redis stayed saturated for 12 minutes after the deletion finished. Which change prevents this?",
+      "options": [
+        {
+          "text": "Raise the timeout to 500 ms and keep the three immediate retries",
+          "correct": false,
+          "why": "Fewer timeouts in mild slowdowns, but in a real stall each request now holds a connection for up to 2 seconds, and retries still multiply load."
+        },
+        {
+          "text": "Add more Redis replicas to absorb retries",
+          "correct": false,
+          "why": "Replicas help reads only if clients send reads there, and retries multiply whatever load arrives; the feedback loop remains."
+        },
+        {
+          "text": "Remove the timeout so calls never fail",
+          "correct": false,
+          "why": "Requests then pile up without bound during a stall, exhausting memory and connections in every service."
+        },
+        {
+          "text": "One retry at most, with jittered backoff under a retry budget",
+          "correct": true,
+          "why": "Load during a slowdown stays close to normal, so Redis can recover once the cause is gone."
+        }
+      ],
+      "explain": "Immediate retries turn a brief slowdown into sustained overload (a retry storm): every timeout adds more work exactly when the server is slowest. Cap retries, back off with jitter, and fall back instead of hammering.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/nodejs/produsage/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q08",
+      "domain": "load",
+      "stem": "A game's `event:config` key is read 300k times per second by 400 server pods. It changes a few times a day, but when it changes, **every pod must see the new value within one second**. The shard holding it is overloaded. Which approach fits best?",
+      "options": [
+        {
+          "text": "A per-pod in-memory copy with a 5-second TTL",
+          "correct": false,
+          "why": "Removes the load but lets pods serve the old config for up to 5 seconds, breaking the one-second rule."
+        },
+        {
+          "text": "Client-side caching with `CLIENT TRACKING`, flushed on reconnect",
+          "correct": true,
+          "why": "Pods read locally, and Redis pushes an invalidation as soon as the key changes, so updates arrive well inside one second without polling."
+        },
+        {
+          "text": "Poll the key from each pod every 100 ms and serve the polled copy to requests",
+          "correct": false,
+          "why": "Cuts load to 4k reads per second and meets the deadline, but keeps a polling loop running forever for a key that changes a few times a day."
+        },
+        {
+          "text": "Store the config in an environment variable and redeploy on change",
+          "correct": false,
+          "why": "No Redis load at all, but a redeploy of 400 pods takes minutes, not one second."
+        }
+      ],
+      "explain": "Client-side caching keeps a hot, rarely-changing key in each process and relies on Redis to push invalidations. That gives local-memory read cost with near-real-time freshness. Always assume invalidations were missed after a reconnect and flush.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/client-side-caching/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q09",
+      "domain": "load",
+      "stem": "An airline caches seat availability per flight for 5 minutes so search pages are fast. Customers increasingly reach the payment step for seats that were sold minutes earlier, and some bookings are confirmed twice. Search traffic is 50x booking traffic. Which TTL and read design fits?",
+      "options": [
+        {
+          "text": "Drop the TTL to 5 seconds for every availability read, browse and booking alike",
+          "correct": false,
+          "why": "Raises database load for the 50x search traffic, and a 5-second window still allows double confirmation."
+        },
+        {
+          "text": "Remove the availability cache completely",
+          "correct": false,
+          "why": "Correct, but it puts all search traffic on the inventory database to fix a problem that only the booking path has."
+        },
+        {
+          "text": "Invalidate the flight's key on every booking",
+          "correct": false,
+          "why": "Shrinks the stale window for browsing, but two concurrent bookings can still read the same cached seat and both confirm."
+        },
+        {
+          "text": "Cache for search only; booking reserves in the database atomically",
+          "correct": true,
+          "why": "Browsing tolerates staleness, but the booking decision uses the authoritative row, so a sold seat cannot be confirmed twice."
+        }
+      ],
+      "explain": "Choose TTLs by the harm a stale value causes on each path. A cache may inform a display, but a decision that commits money or inventory must read and lock the system of record.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/expire/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q10",
+      "domain": "memory",
+      "stem": "A Redis node on a 32 GB host has `maxmemory 30gb` and RDB snapshots enabled. Under a write-heavy batch import, the next `BGSAVE` coincides with the Linux OOM killer terminating redis-server. Memory reported by Redis never exceeded 30 GB. Which change prevents this?",
+      "options": [
+        {
+          "text": "Use `allkeys-lru` so Redis evicts before reaching the limit",
+          "correct": false,
+          "why": "Eviction keeps the dataset at maxmemory, but the extra memory comes from the forked child, which eviction cannot control."
+        },
+        {
+          "text": "Lower `maxmemory` to leave headroom for fork copy-on-write",
+          "correct": true,
+          "why": "During a snapshot every page the parent writes is copied; in the worst case a rewrite needs close to 2x the dataset, so the host needs room for it."
+        },
+        {
+          "text": "Increase `maxmemory` to 32 GB so Redis can use the whole host",
+          "correct": false,
+          "why": "Leaves even less room for the fork's copied pages, buffers and the OS."
+        },
+        {
+          "text": "Switch from RDB to AOF so no fork happens",
+          "correct": false,
+          "why": "AOF rewrites also fork, so the same copy-on-write spike happens during rewrite."
+        }
+      ],
+      "explain": "Redis memory is not just `used_memory`: forks for RDB or AOF rewrite copy pages the parent writes during the snapshot, plus there are client and replication buffers. Size maxmemory with headroom for that, or turn persistence off on nodes that don't need it.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q11",
+      "domain": "memory",
+      "stem": "A game leaderboard is one sorted set with 50 million players. A new 'export standings' endpoint runs `ZRANGE leaderboard 0 -1 WITHSCORES` on demand. Each call stalls Redis for seconds, and every game server times out. Players only ever view the top 100 or their own neighbourhood. Which change fits?",
+      "options": [
+        {
+          "text": "Bound every read (`ZRANGE … LIMIT`, rank plus a small range); page exports off a replica",
+          "correct": true,
+          "why": "Reads stay small and fast for players, while full exports walk the set in bounded pages away from the primary."
+        },
+        {
+          "text": "Move the leaderboard to a bigger node",
+          "correct": false,
+          "why": "Returning 50 million entries is still one long command on one thread; a bigger node barely shortens it."
+        },
+        {
+          "text": "Use `UNLINK` instead of `DEL` when rebuilding it",
+          "correct": false,
+          "why": "Fixes deleting big keys, not reading all of one in a single command."
+        },
+        {
+          "text": "Cache the full export JSON in another Redis key",
+          "correct": false,
+          "why": "Creates a second, even bigger key, and the first call per period still runs the full ZRANGE."
+        }
+      ],
+      "explain": "Redis runs one command at a time, so any command whose work grows with key size (full ranges, SMEMBERS, HGETALL on huge keys) stalls everyone. Bound every read on big structures, and move bulk exports to replicas or snapshots, in pages.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/zrange/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q12",
+      "domain": "memory",
+      "stem": "A news site records 'already seen' flags as `seen:{date}:{user}:{article}` with `EX 86400`: about 400 million keys a day. Memory use is several times the size of the flags themselves, and the node is near its limit. Flags never need individual expiry; a day's flags all expire together. Which redesign fits?",
+      "options": [
+        {
+          "text": "Shorten keys to `s:{d}:{u}:{a}` and keep one key per flag",
+          "correct": false,
+          "why": "Saves some bytes, but per-key overhead (the key entry, the expiry entry) dominates, so most of the waste remains."
+        },
+        {
+          "text": "Switch to `allkeys-lfu` so the least-read flags are evicted",
+          "correct": false,
+          "why": "Evicting flags silently forgets what users saw, so they see repeated articles."
+        },
+        {
+          "text": "Store one set per user per day, `seen:{date}:{user}`, with members as article IDs and one TTL",
+          "correct": true,
+          "why": "Hundreds of millions of keys become a few million small sets, and small sets use compact encodings, so memory drops sharply."
+        },
+        {
+          "text": "Move the flags to a Redis Cluster with three times the shards",
+          "correct": false,
+          "why": "Spreads the memory but pays for the same overhead on more hardware."
+        }
+      ],
+      "explain": "Every top-level key has fixed overhead (dictionary entry, expiry entry, object header). For many tiny values that share a lifetime, group them into small hashes or sets with one TTL on the container; small collections also get compact encodings.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/memory-optimization/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q13",
+      "domain": "topology",
+      "stem": "A payments team stores idempotency keys in Redis (one primary, two replicas, Sentinel). After each `SET`, they call `WAIT 1 1000` and treat a reply of 1 as 'safe from failover'. Which statement about this design is accurate?",
+      "options": [
+        {
+          "text": "It is safe: once WAIT returns 1, a failover cannot lose the key, since a replica has it",
+          "correct": false,
+          "why": "WAIT confirms one replica got it, but Sentinel may promote the other replica, which might not have it."
+        },
+        {
+          "text": "It is unsafe because WAIT blocks the whole server for up to 1 second",
+          "correct": false,
+          "why": "WAIT blocks only the calling client, not the server."
+        },
+        {
+          "text": "It narrows the loss window; failover can still drop the key",
+          "correct": true,
+          "why": "The Redis docs say WAIT does not make Redis strongly consistent; acknowledged writes can still be lost in some failover cases."
+        },
+        {
+          "text": "It is equivalent to `appendfsync always` on every replica",
+          "correct": false,
+          "why": "WAIT counts replicas that received the write in memory; it says nothing about their disks."
+        }
+      ],
+      "explain": "WAIT narrows the window in which an acknowledged write exists only on the primary, but it does not turn Redis into a consensus system. Where loss is unacceptable (payments idempotency), back the key with a durable store and use Redis as a fast first check.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/wait/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q14",
+      "domain": "topology",
+      "stem": "To cut latency, a team turned persistence off on a Redis primary that has two replicas. Its systemd unit has `Restart=always`. The primary crashed and systemd restarted it within two seconds, before Sentinel decided it was down. Minutes later, both replicas were empty. Which change prevents a repeat?",
+      "options": [
+        {
+          "text": "Lower Sentinel's `down-after-milliseconds` so failover always wins the race",
+          "correct": false,
+          "why": "Narrows the race, but a fast enough restart still beats it; the empty primary is still allowed to sync its emptiness."
+        },
+        {
+          "text": "Turn on AOF on the replicas only",
+          "correct": false,
+          "why": "Replicas resync from the primary and replace their data with its empty dataset, whatever is on their own disks."
+        },
+        {
+          "text": "Raise `repl-backlog-size` so replicas keep their data",
+          "correct": false,
+          "why": "The backlog enables partial resync; an empty restarted primary has a new replication ID and forces a full resync anyway."
+        },
+        {
+          "text": "Disable automatic restart for a primary with persistence off, or enable persistence on it",
+          "correct": true,
+          "why": "The Redis docs warn that an auto-restarted empty primary will be replicated, wiping its replicas; either stop the restart or give it data to restart with."
+        }
+      ],
+      "explain": "Replicas copy whatever the primary has, including nothing. With persistence off, a primary must not come back automatically as primary; let failover promote a replica instead. Read the replication safety note before turning persistence off.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/replication/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q15",
+      "domain": "topology",
+      "stem": "A logistics app on a 9-primary Redis Cluster uses `PUBLISH` to tell drivers' gateway pods about route changes: 30k messages per second, each relevant to one region's gateways. Cluster bus traffic has grown until it now delays failure detection. Which change fits?",
+      "options": [
+        {
+          "text": "Move to sharded pub/sub (`SSUBSCRIBE`/`SPUBLISH`) with channels per region",
+          "correct": true,
+          "why": "Sharded channels map to a slot, so messages go only to the shard that owns the channel, not to every node over the bus."
+        },
+        {
+          "text": "Increase `cluster-node-timeout` so slow bus traffic doesn't trigger failovers",
+          "correct": false,
+          "why": "Hides the symptom and makes real failures take longer to detect; the broadcast traffic remains."
+        },
+        {
+          "text": "Replace pub/sub with a Stream per gateway pod",
+          "correct": false,
+          "why": "Gives durability, but thousands of per-pod streams need trimming and cleanup for messages that are fine to drop."
+        },
+        {
+          "text": "Add four more primaries to share the load",
+          "correct": false,
+          "why": "Classic PUBLISH reaches every node, so adding nodes adds more bus traffic, not less."
+        }
+      ],
+      "explain": "In Redis Cluster, classic pub/sub messages are broadcast to every node over the cluster bus, so traffic grows with node count. Sharded pub/sub (Redis 7+) routes a channel to its slot's shard. Choose sharded channels for high-volume fan-out in a cluster.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/pubsub/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q16",
+      "domain": "topology",
+      "stem": "After a primary failover in a 6-primary Redis Cluster, most services recovered in seconds, but one service kept failing with `MOVED` errors for two minutes until it was restarted. It uses an in-house wrapper that loads the slot map once at boot. Which change fits?",
+      "options": [
+        {
+          "text": "Add retries with backoff on every command",
+          "correct": false,
+          "why": "Retries keep hitting the wrong node with the same stale slot map, so they fail again."
+        },
+        {
+          "text": "Use a cluster client that follows redirects and refreshes slots",
+          "correct": true,
+          "why": "MOVED tells the client the slot's new owner; a cluster client updates its map and retries there, so failovers and resharding become a brief blip."
+        },
+        {
+          "text": "Pin the service to the old primary's replica by address",
+          "correct": false,
+          "why": "After failover the roles change again on the next event; hard-coded addresses break every time topology moves."
+        },
+        {
+          "text": "Use hash tags on all of the service's keys so they always stay together on one node",
+          "correct": false,
+          "why": "Slots still move during failover or resharding, and concentrating keys creates a hot node."
+        }
+      ],
+      "explain": "Redis Cluster topology changes during failovers and resharding, and the server tells clients so with MOVED and ASK redirects. Use a client that handles them and refreshes the slot map; never cache topology for the life of the process.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q17",
+      "domain": "coordination",
+      "stem": "A nightly reconciliation job takes 5–40 minutes. It holds a Redis lock with a fixed 60-minute TTL so it never expires mid-run. Last week the pod was killed 3 minutes in, and no other pod could run the job for the next 57 minutes, missing a deadline. Which lock design fits?",
+      "options": [
+        {
+          "text": "Keep the 60-minute TTL and have the next run delete the lock if it looks stale",
+          "correct": false,
+          "why": "Deciding 'stale' from outside races with a live holder and risks two jobs at once."
+        },
+        {
+          "text": "Use a 2-hour TTL to be safe",
+          "correct": false,
+          "why": "Makes the crash case worse: a dead holder blocks the job for two hours."
+        },
+        {
+          "text": "A 30 s TTL renewed by a watchdog; stop work if renewal fails",
+          "correct": true,
+          "why": "A live holder keeps the lock as long as it needs, while a crashed one releases it within 30 seconds."
+        },
+        {
+          "text": "Drop the TTL and release the lock in a `finally` block",
+          "correct": false,
+          "why": "A killed pod never runs `finally`, so the lock is held forever."
+        }
+      ],
+      "explain": "Lock TTLs trade two failures: too short and the work outlives the lock, too long and a crash blocks everyone. A short lease that the holder renews while alive, checking it still owns it, avoids both. Renewal failure must stop the work.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q18",
+      "domain": "coordination",
+      "stem": "An API sold to enterprise customers has a contract limit of 6,000 requests per minute per customer, enforced across three regions (us, eu, ap). A central Redis in us-east adds 80–150 ms to every eu and ap request. Overshooting by a few percent for a minute is acceptable; adding 100 ms is not. Which design fits?",
+      "options": [
+        {
+          "text": "Keep the central limiter but call it asynchronously after responding",
+          "correct": false,
+          "why": "Removes the latency, but the limit is checked after the fact, so a burst can run far over before any rejection."
+        },
+        {
+          "text": "Give each region an independent 6,000-per-minute limit",
+          "correct": false,
+          "why": "Low latency, but a customer spread across regions gets up to 18,000, far beyond 'a few percent'."
+        },
+        {
+          "text": "Regional limiters with quota shares, rebalanced from traffic",
+          "correct": true,
+          "why": "Each check is local and fast, and the shares track where traffic comes from, so the total stays near 6,000 with small overshoot."
+        },
+        {
+          "text": "Replicate one limiter key across all three regions with active-active replication",
+          "correct": false,
+          "why": "Merged counters converge only after replication delay, so all regions can overshoot together; it is also costly infrastructure for a rate limit."
+        }
+      ],
+      "explain": "Global rate limits trade accuracy for latency. When a small overshoot is acceptable, split the quota across regions and rebalance it from observed traffic; a single central counter is exact but adds a WAN round trip to every request.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/incr/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q19",
+      "domain": "coordination",
+      "stem": "A label-printing service consumes a Redis Stream. Its reclaimer calls `XAUTOCLAIM labels printers reclaimer 60000 0-0 COUNT 100` once a minute. After a printer-API outage, 250 entries are pending; only some ever get reclaimed, and three malformed entries fail on every attempt and keep coming back. Which two changes fix the reclaimer? (Choose two.)",
+      "options": [
+        {
+          "text": "Loop XAUTOCLAIM, passing back the returned cursor, until it returns `0-0`",
+          "correct": true,
+          "why": "XAUTOCLAIM is cursor-based; one call with COUNT 100 scans only part of the pending list."
+        },
+        {
+          "text": "Move entries whose delivery count exceeds N to a dead-letter stream and `XACK` them",
+          "correct": true,
+          "why": "Each claim raises the delivery count; past a limit, a poison message is parked for humans instead of retried forever."
+        },
+        {
+          "text": "Raise COUNT to 10,000 so one call gets everything",
+          "correct": false,
+          "why": "Gets 250 today, but a bigger backlog needs the loop anyway, and huge batches make one call long."
+        },
+        {
+          "text": "Lower min-idle-time to 0 so entries are claimed immediately",
+          "correct": false,
+          "why": "Steals entries that healthy consumers are still processing, causing duplicates."
+        },
+        {
+          "text": "`XDEL` failing entries so they stop blocking the group",
+          "correct": false,
+          "why": "Deletes the data without recording the failure; the entries are lost rather than investigated."
+        }
+      ],
+      "explain": "Stream reclaiming is a loop over a cursor, and every reclaim increments the delivery count. A robust consumer group has three parts: ACK after success, reclaim idle entries in a full loop, and dead-letter entries that keep failing.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/xautoclaim/",
+        "https://redis.io/docs/latest/commands/xpending/"
+      ]
+    },
+    {
+      "id": "redis-caching-v3-q20",
+      "domain": "coordination",
+      "stem": "Concert tickets are held in Redis as `stock:{event}` counters. This reservation code runs on 80 pods during a big on-sale, and the event oversold by 312 tickets. Which change fixes it?",
+      "code": "const pipe = redis.pipeline();\npipe.get(`stock:${event}`);\nconst [[, left]] = await pipe.exec();\nif (Number(left) >= qty) {\n  await redis.decrby(`stock:${event}`, qty);\n  return reserve(user, event, qty);\n}\nreturn soldOut();",
+      "options": [
+        {
+          "text": "Put the GET and DECRBY in the same pipeline so they run together",
+          "correct": false,
+          "why": "A pipeline only batches network round trips; the decision still happens in the app between reading and writing."
+        },
+        {
+          "text": "Take a per-event distributed lock around the check and decrement",
+          "correct": false,
+          "why": "Correct, but it serializes every buyer of the event through one lock with round trips, which is slow at on-sale volume."
+        },
+        {
+          "text": "Check and decrement in one Lua script that returns success",
+          "correct": true,
+          "why": "The script runs atomically on the server, so no other reservation can slip in between the check and the decrement."
+        },
+        {
+          "text": "Read stock from a replica to reduce load on the primary",
+          "correct": false,
+          "why": "Replica reads are older, so even more requests see stock that is already gone."
+        }
+      ],
+      "explain": "Read-decide-write from the client is a race whenever many clients act on one key. Move the decision to the server: a Lua script (or a single command such as DECRBY with a compensating INCRBY when it goes negative) so check and act are one atomic step.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/programmability/eval-intro/"
+      ]
+    }
+  ]
+}

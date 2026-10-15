@@ -9,8 +9,6 @@
         }
       ],
       "skills": [
-        "backend-patterns",
-        "api-design",
         "verification-loop"
       ],
       "checklists": [
@@ -51,7 +49,6 @@
         }
       ],
       "skills": [
-        "nestjs-patterns",
         "hexagonal-architecture",
         "contract-first"
       ],
@@ -121,7 +118,6 @@
       ],
       "skills": [
         "fastapi-patterns",
-        "api-design",
         "contract-first"
       ],
       "checklists": [
@@ -186,10 +182,7 @@
           "contains": "jackc/pgx"
         }
       ],
-      "skills": [
-        "postgres-patterns",
-        "database-migrations"
-      ],
+      "skills": [],
       "checklists": [
         "database"
       ],
@@ -238,9 +231,7 @@
           "contains": "go-redis"
         }
       ],
-      "skills": [
-        "redis-patterns"
-      ],
+      "skills": [],
       "checklists": [
         "database"
       ],
@@ -512,7 +503,6 @@
       "architecture-decision-records",
       "council",
       "loop-design-check",
-      "error-handling",
       "inherit-legacy-style"
     ],
     "checklists": [

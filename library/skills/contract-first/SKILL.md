@@ -15,7 +15,7 @@ Coordinate frontend/backend or service-to-service work through one authoritative
 machine-checkable contract. Consumers state what they need, providers implement
 that shape, and both sides verify against the same artifact before integration.
 
-This skill governs how teams change a boundary. It complements `api-design`,
+This skill governs how teams change a boundary. It complements `knowledge:api-design`,
 which governs what a good API looks like, and `ai-regression-testing`, which
 guards fixed bugs from returning.
 
@@ -284,4 +284,4 @@ does not coordinate parallel work or prevent drift.
 
 ## Related Skills
 
-- Skills: `api-design`, `backend-patterns`
+- Skills: `knowledge:api-design`, `knowledge:backend-patterns`

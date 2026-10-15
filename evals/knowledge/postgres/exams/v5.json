@@ -1,0 +1,670 @@
+{
+  "topic": "postgres",
+  "variant": 5,
+  "of": 5,
+  "title": "Postgres at scale — variant 5",
+  "description": "SaaS limits, HR and telecom: per-tenant invariants, optimistic locking, NULLs in unique keys, leases under pooling, partition attach and default partitions, skip scan and sargable filters, pool deadlocks and NAT timeouts, remote_apply and stale connections after failover.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "concurrency",
+      "name": "MVCC, isolation, locking and upserts",
+      "weight": 0.25
+    },
+    {
+      "id": "migrations",
+      "name": "Schema changes on big tables without downtime",
+      "weight": 0.15
+    },
+    {
+      "id": "indexing",
+      "name": "Indexing and query shape at scale",
+      "weight": 0.15
+    },
+    {
+      "id": "pooling",
+      "name": "Connections and pooling",
+      "weight": 0.15
+    },
+    {
+      "id": "replication",
+      "name": "Replication, replicas and failover",
+      "weight": 0.15
+    },
+    {
+      "id": "maintenance",
+      "name": "Vacuum, bloat, wraparound and partitioning",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "postgres-v5-q01",
+      "domain": "concurrency",
+      "stem": "A design-tool SaaS limits free workspaces to 5 projects. The create-project transaction runs `SELECT count(*) FROM projects WHERE workspace_id = $1`, and inserts if the count is below 5. A Reddit post shows how to get 40 projects by firing parallel requests. Paid workspaces create up to 50 projects a minute. Which change enforces the limit?",
+      "options": [
+        {
+          "text": "In the same transaction, first lock the workspace row with `SELECT … FROM workspaces WHERE id = $1 FOR UPDATE`, then count and insert.",
+          "correct": true,
+          "why": "Creates for one workspace now queue on its row lock, so each count sees the previous insert; other workspaces are unaffected, and 50 a minute is light."
+        },
+        {
+          "text": "Run the transaction at `REPEATABLE READ` so the count cannot change between the read and the insert.",
+          "correct": false,
+          "why": "Each transaction counts in its own snapshot and inserts a different row, which is write skew; snapshot isolation lets all of them commit."
+        },
+        {
+          "text": "Add a trigger on projects that counts the workspace's projects and raises an error if there are already 5 or more of them.",
+          "correct": false,
+          "why": "Under READ COMMITTED, concurrent triggers do not see each other's uncommitted inserts, so the same race happens inside the trigger."
+        },
+        {
+          "text": "Add a unique constraint on `(workspace_id, slot)` with a CHECK that `slot` is between 1 and 5, and have the app pick a free slot number.",
+          "correct": false,
+          "why": "It does cap the count, but plan changes now need schema changes, paid workspaces need different limits, and picking a free slot is its own race to retry."
+        }
+      ],
+      "explain": "Invariants over a set of rows ('at most N per parent') cannot be protected by locking rows that do not exist yet. Lock the parent row so writers for that parent serialise, or use SERIALIZABLE with retries; snapshot isolation alone allows write skew.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-ROWS"
+      ]
+    },
+    {
+      "id": "postgres-v5-q02",
+      "domain": "concurrency",
+      "stem": "In an HR system, managers open an employee record, edit it for several minutes, and save. Two managers editing the same record silently overwrite each other's changes. Holding a database transaction open while someone edits is not acceptable, since the API runs through PgBouncer in transaction mode. Which design prevents lost edits?",
+      "options": [
+        {
+          "text": "On open, run `SELECT … FOR UPDATE` and keep the lock until the manager saves.",
+          "correct": false,
+          "why": "It needs a transaction open for minutes, which pins a server connection and holds back vacuum, and under transaction pooling the lock cannot outlive the request."
+        },
+        {
+          "text": "Add a `version` column; save with `UPDATE … SET …, version = version + 1 WHERE id = $1 AND version = $2`, and show a conflict when rowCount is 0.",
+          "correct": true,
+          "why": "Optimistic locking detects that someone saved in between without holding anything open, and the second manager gets a conflict instead of a silent overwrite."
+        },
+        {
+          "text": "Use `SERIALIZABLE` for the save transaction.",
+          "correct": false,
+          "why": "The read happened minutes earlier in a different transaction, so the save transaction has nothing to compare against and the overwrite still commits."
+        },
+        {
+          "text": "Take a session-level `pg_advisory_lock(employee_id)` when the record is opened and release it on save or cancel.",
+          "correct": false,
+          "why": "Session advisory locks do not work through transaction-mode PgBouncer, and a closed browser tab leaves the lock held."
+        }
+      ],
+      "explain": "For edits that span user think-time, use optimistic concurrency: carry a version (or updated_at) from the read and make the write conditional on it. Pessimistic locks belong inside short transactions, never across user interaction.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/transaction-iso.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q03",
+      "domain": "concurrency",
+      "stem": "A CRM syncs contacts from customers' external systems with `INSERT … ON CONFLICT (org_id, external_id) DO UPDATE`, backed by `UNIQUE (org_id, external_id)`. Contacts created by hand have `external_id = NULL`, and a sync job that upserts 'unlinked' placeholders keeps creating duplicate `(org_id, NULL)` rows instead of updating one. The cluster runs Postgres 17. Which change makes the upsert hit the existing row?",
+      "options": [
+        {
+          "text": "Make the constraint `UNIQUE NULLS NOT DISTINCT (org_id, external_id)`.",
+          "correct": true,
+          "why": "Postgres 15+ can treat NULLs as equal in a unique constraint, so a second `(org_id, NULL)` conflicts and the DO UPDATE path runs."
+        },
+        {
+          "text": "Use `ON CONFLICT (org_id, COALESCE(external_id, ''))` in the upsert.",
+          "correct": false,
+          "why": "The conflict target must match an existing unique index; there is none on that expression, so the statement errors."
+        },
+        {
+          "text": "Add a partial unique index on `(org_id) WHERE external_id IS NULL`, and keep the same `ON CONFLICT (org_id, external_id)` clause for the placeholder upserts.",
+          "correct": false,
+          "why": "The index would stop duplicates, but the conflict target does not match it, so placeholder inserts fail with unique violations instead of updating."
+        },
+        {
+          "text": "Run the sync at `SERIALIZABLE` so duplicate placeholders conflict.",
+          "correct": false,
+          "why": "Two NULL keys are not equal under a default unique constraint, so there is nothing to conflict on at any isolation level."
+        }
+      ],
+      "explain": "By default a unique constraint treats NULLs as distinct, so rows with NULL in a key column never conflict. Use NULLS NOT DISTINCT (PG15+), make the column NOT NULL with a sentinel, or use a partial unique index and repeat its predicate in ON CONFLICT.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-createtable.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q04",
+      "domain": "concurrency",
+      "stem": "A payroll service runs on 12 pods, and only one pod may run the nightly payroll calculation (about 40 minutes). It used `pg_try_advisory_lock(42)` for leader election, but since the move to PgBouncer in transaction mode two pods sometimes run payroll at the same time. Which design fits?",
+      "options": [
+        {
+          "text": "Use `pg_try_advisory_xact_lock(42)` and keep that transaction open for the whole 40-minute run.",
+          "correct": false,
+          "why": "It works through PgBouncer, but a 40-minute open transaction pins a server connection and holds back vacuum on the busiest night of the month."
+        },
+        {
+          "text": "A lease row: `UPDATE leases SET holder = $1, expires_at = now() + interval '2 minutes' WHERE name = 'payroll' AND (expires_at < now() OR holder = $1)`, renewed every 30 s; rowCount 1 means this pod leads.",
+          "correct": true,
+          "why": "Each claim and renewal is a short atomic statement that works through transaction pooling, and a crashed leader's lease expires so another pod can take over."
+        },
+        {
+          "text": "Keep the session advisory lock but connect that one call directly to Postgres, bypassing PgBouncer.",
+          "correct": false,
+          "why": "It restores the old behaviour, but if the leader's connection breaks silently the lock is released while the old leader may still be running."
+        },
+        {
+          "text": "Pick the leader as the pod with the lowest hostname, computed independently by each pod at start-up from the Kubernetes API.",
+          "correct": false,
+          "why": "Pods see the pod list at different moments during rollouts and restarts, so two can believe they are lowest at once."
+        }
+      ],
+      "explain": "Session-scoped coordination (advisory locks, LISTEN) breaks under transaction pooling. For long-running leadership, use a lease row updated with short atomic statements, with an expiry and renewals, and make the work itself idempotent in case leases overlap.",
+      "refs": [
+        "https://www.pgbouncer.org/features.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q05",
+      "domain": "concurrency",
+      "stem": "Two nightly jobs at a telecom, billing and loyalty, each update 5,000 `subscribers` rows per transaction in whatever order their input files list them. They deadlock several times a night, and online traffic must keep updating subscribers while they run. Which two changes reduce the deadlocks without blocking online traffic? (Choose two.)",
+      "options": [
+        {
+          "text": "Sort each batch by subscriber id before updating, so every job takes row locks in the same order.",
+          "correct": true,
+          "why": "Consistent lock order prevents cycles between the jobs."
+        },
+        {
+          "text": "Use smaller batches (for example 200 rows per transaction) and commit each one.",
+          "correct": true,
+          "why": "Each transaction holds fewer locks for less time, so the chance of overlapping with online updates or the other job falls sharply."
+        },
+        {
+          "text": "Take `LOCK TABLE subscribers IN EXCLUSIVE MODE` at the start of each job transaction.",
+          "correct": false,
+          "why": "It prevents deadlocks between the jobs by blocking all other writers, including online traffic, for each batch."
+        },
+        {
+          "text": "Raise `deadlock_timeout` to 10 s.",
+          "correct": false,
+          "why": "It only delays detection, so deadlocked transactions sit blocked longer before one is aborted."
+        },
+        {
+          "text": "Run both jobs at `SERIALIZABLE`.",
+          "correct": false,
+          "why": "Row-lock deadlocks still happen at SERIALIZABLE, and serialization failures are added on top."
+        }
+      ],
+      "explain": "Deadlocks need a cycle of waits. Remove cycles with a consistent lock order, and shrink the exposure with short transactions that hold few locks. Table locks remove deadlocks only by removing concurrency.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-DEADLOCKS"
+      ]
+    },
+    {
+      "id": "postgres-v5-q06",
+      "domain": "migrations",
+      "stem": "A telecom loads each month's call records (about 900M rows) into a standalone table `cdr_2026_11`, then attaches it to the partitioned `cdrs` table. The last `ALTER TABLE cdrs ATTACH PARTITION … FOR VALUES FROM ('2026-10-01') TO ('2026-11-01')` scanned the new table for 25 minutes. Which step removes that scan?",
+      "options": [
+        {
+          "text": "Build all of the partitioned table's indexes on the standalone table first.",
+          "correct": false,
+          "why": "Matching indexes avoid index builds during attach, but the scan that checks every row fits the partition bounds still runs."
+        },
+        {
+          "text": "First add and validate a CHECK constraint on the standalone table that matches the partition bounds.",
+          "correct": true,
+          "why": "Postgres sees a valid constraint that implies the partition constraint and does not need to scan the table during attach."
+        },
+        {
+          "text": "Detach the default partition while attaching so that the new partition does not need to be checked against rows already in the default.",
+          "correct": false,
+          "why": "That avoids scanning the default partition, not the new table, which is where the 25 minutes went."
+        },
+        {
+          "text": "Run the ATTACH with `lock_timeout = '2s'`.",
+          "correct": false,
+          "why": "It protects against waiting for locks, not against the validation scan once the lock is held."
+        }
+      ],
+      "explain": "ATTACH PARTITION must prove every row fits the bounds. Do the proof ahead of time with a validated CHECK constraint (which can run while the table is offline), then attach with only brief locks. Pre-build indexes for the same reason.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-MAINTENANCE"
+      ]
+    },
+    {
+      "id": "postgres-v5-q07",
+      "domain": "migrations",
+      "stem": "A news site's primary-key index on `article_views` has bloated to 4 times its natural size after a purge, slowing lookups. The table takes 8k inserts/s around the clock and must not stop accepting writes. The cluster is on Postgres 17. Which command should they run?",
+      "options": [
+        {
+          "text": "`REINDEX INDEX article_views_pkey`",
+          "correct": false,
+          "why": "Plain REINDEX blocks writes to the table for the whole rebuild."
+        },
+        {
+          "text": "`VACUUM FULL article_views`",
+          "correct": false,
+          "why": "It rebuilds the table and its indexes under ACCESS EXCLUSIVE, blocking reads and writes."
+        },
+        {
+          "text": "`REINDEX INDEX CONCURRENTLY article_views_pkey`",
+          "correct": true,
+          "why": "It builds a new copy of the index alongside the old one without blocking writes, then swaps them with brief locks."
+        },
+        {
+          "text": "`CLUSTER article_views USING article_views_pkey`",
+          "correct": false,
+          "why": "It rewrites the table in index order under an exclusive lock, much heavier than rebuilding one index."
+        }
+      ],
+      "explain": "Rebuild bloated indexes online with REINDEX CONCURRENTLY (PG12+). Like CREATE INDEX CONCURRENTLY, it cannot run inside a transaction block and can leave an invalid index on failure, which you then drop and retry.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-reindex.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q08",
+      "domain": "migrations",
+      "stem": "A migration adds columns to `invoices` and then `invoice_lines` inside one transaction, each statement under `lock_timeout = '3s'` with a whole-migration retry. In production it kept timing out on `invoice_lines` while holding the `invoices` lock, and each attempt caused a 3-second stall of invoice traffic. Which change reduces the impact?",
+      "options": [
+        {
+          "text": "Raise `lock_timeout` to 30 s so the second ALTER has time to get its lock.",
+          "correct": false,
+          "why": "The first lock is then held for up to 30 s per attempt, so invoice traffic stalls ten times longer."
+        },
+        {
+          "text": "Run each ALTER in its own transaction, each with lock_timeout and retry.",
+          "correct": true,
+          "why": "The two changes do not need to be atomic; each statement now holds at most one exclusive lock, briefly, and never waits for a second lock while holding the first."
+        },
+        {
+          "text": "Take both locks first with `LOCK TABLE invoices, invoice_lines IN ACCESS EXCLUSIVE MODE`, then run both ALTERs.",
+          "correct": false,
+          "why": "LOCK TABLE takes the locks one after another, so it still holds invoices while waiting on invoice_lines."
+        },
+        {
+          "text": "Kill every session that touches either table before running the migration.",
+          "correct": false,
+          "why": "It aborts legitimate user transactions, and new sessions can arrive between the kill and the ALTER."
+        }
+      ],
+      "explain": "Holding one heavy lock while waiting for another multiplies the stall and invites deadlocks. Keep DDL transactions to one table where atomicity is not needed, and keep each exclusive lock short and guarded by lock_timeout.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-TABLES"
+      ]
+    },
+    {
+      "id": "postgres-v5-q09",
+      "domain": "indexing",
+      "stem": "A retailer's `stock` table (300M rows) has an index on `(region, sku)`; there are 4 regions. A new feature queries `WHERE sku = $1` across all regions, and a developer opens a PR adding an index on `(sku)` (another 12 GB, plus write cost). The cluster was upgraded to Postgres 18 last month. What should the reviewer ask for before approving?",
+      "options": [
+        {
+          "text": "Nothing; an index whose first column is missing from the WHERE clause is never usable, so the new index is required.",
+          "correct": false,
+          "why": "That was true before PG18; with skip scan, a B-tree can be used when the leading column has few distinct values."
+        },
+        {
+          "text": "An `EXPLAIN (ANALYZE)` on 18: skip scan may serve it from `(region, sku)`, making the new index unnecessary.",
+          "correct": true,
+          "why": "With only 4 distinct regions, skip scan turns the lookup into 4 cheap index descents; the plan shows whether the extra index earns its write cost."
+        },
+        {
+          "text": "Make the new index a hash index on `sku`, since it is smaller than a B-tree and only equality lookups are needed for this feature.",
+          "correct": false,
+          "why": "It still adds an index and write cost that skip scan may make unnecessary; check the plan first."
+        },
+        {
+          "text": "Reorder the existing index to `(sku, region)` with a concurrent rebuild.",
+          "correct": false,
+          "why": "It may help this query but can hurt existing queries that filter by region first, and it is still a rebuild of a large index that skip scan may make unnecessary."
+        }
+      ],
+      "explain": "Version upgrades change index advice: PG18's B-tree skip scan can use a multicolumn index without the leading column when that column has few distinct values. Verify with EXPLAIN before adding an index, because every index costs writes forever.",
+      "refs": [
+        "https://www.postgresql.org/docs/18/release-18.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q10",
+      "domain": "indexing",
+      "stem": "A call-center dashboard queries `WHERE created_at::date = $1` on a 1.2B-row `calls` table, where `created_at` is `timestamptz` with a B-tree index. Every query scans the table. A developer's attempt to create an index on `(created_at::date)` failed with 'functions in index expression must be marked IMMUTABLE'. Which change fixes the query?",
+      "options": [
+        {
+          "text": "Rewrite the filter as a range: `created_at >= $1 AND created_at < $1 + interval '1 day'`, with the day's bounds computed in the call center's time zone.",
+          "correct": true,
+          "why": "The column is compared directly, so the existing index serves the range, and computing the bounds in an explicit zone avoids depending on the session's TimeZone."
+        },
+        {
+          "text": "Wrap the cast in a custom SQL function marked IMMUTABLE and index that function's result instead of the cast itself.",
+          "correct": false,
+          "why": "The cast depends on the session TimeZone, so the function is not actually immutable; the index can return wrong rows when sessions use different zones."
+        },
+        {
+          "text": "Change the column type to `timestamp` (without time zone) so the cast becomes immutable.",
+          "correct": false,
+          "why": "It rewrites a 1.2B-row table and drops the instant semantics that timestamptz gives, to fix a query that a range rewrite fixes."
+        },
+        {
+          "text": "Add a BRIN index on `created_at`.",
+          "correct": false,
+          "why": "It would still not be used, because the filter wraps the column in a cast."
+        }
+      ],
+      "explain": "Keep indexed columns bare in WHERE clauses: rewrite functions of a column as ranges on the column itself. Casting timestamptz to date depends on the session time zone, which is why Postgres rejects it in an index, and why day boundaries should be computed explicitly.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/indexes-expressional.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q11",
+      "domain": "indexing",
+      "stem": "A document-management SaaS has 600M `documents`, of which 98% are archived (`is_archived = true`). The main screen queries `WHERE org_id = $1 AND NOT is_archived ORDER BY updated_at DESC LIMIT 50`. An index on `(org_id, updated_at)` makes large orgs step over tens of thousands of archived rows per page. Which index should they add?",
+      "options": [
+        {
+          "text": "`(is_archived)` as a separate index, so the planner can combine it with the existing one.",
+          "correct": false,
+          "why": "A boolean index has terrible selectivity for the archived side, and combining indexes with a bitmap loses the ordering needed for LIMIT."
+        },
+        {
+          "text": "`(org_id, is_archived, updated_at DESC)` covering all rows.",
+          "correct": false,
+          "why": "It works, but indexes 600M rows to serve a query that only ever reads the 2% that are active, costing about 50 times the space and write work."
+        },
+        {
+          "text": "`(org_id, updated_at DESC) WHERE NOT is_archived`",
+          "correct": true,
+          "why": "A partial index containing only active documents, in the right order for the page, so each page reads 50 entries; with the predicate as a literal in the query, every plan can use it."
+        },
+        {
+          "text": "A BRIN index on `updated_at` across the whole table, since it is tiny and recently updated rows tend to sit together on disk.",
+          "correct": false,
+          "why": "BRIN cannot filter by org or return rows in order, and updated rows do not stay in physical order."
+        }
+      ],
+      "explain": "When a query always targets a small, fixed subset of rows, a partial index on that subset (with the right column order for the sort) is smaller and faster than indexing everything. Write the predicate as a literal in the query so plans can use it.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/indexes-partial.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q12",
+      "domain": "pooling",
+      "stem": "A sports-betting platform put PgBouncer in **session** mode in front of Postgres to deal with 3,000 client connections from 150 pods, each with a long-lived pool of 20. The database still shows close to 3,000 backends, most of them idle. Which change actually reduces backends?",
+      "options": [
+        {
+          "text": "Lower PgBouncer's `server_idle_timeout` so idle server connections close sooner.",
+          "correct": false,
+          "why": "In session mode a server connection stays assigned while its client is connected, and the pods' pools keep their clients connected, so nothing becomes idle on the server side."
+        },
+        {
+          "text": "Raise PgBouncer's `max_client_conn` so that the bouncer itself can accept and queue more of the pods' client connections.",
+          "correct": false,
+          "why": "It lets more clients connect to PgBouncer, but in session mode each still needs its own server connection."
+        },
+        {
+          "text": "Switch to transaction mode, after removing session state from the app (SET, session advisory locks, LISTEN).",
+          "correct": true,
+          "why": "Server connections are then shared between transactions, so 3,000 mostly idle clients map onto a small server pool."
+        },
+        {
+          "text": "Add a second PgBouncer in session mode and split pods between them.",
+          "correct": false,
+          "why": "Two session-mode poolers still give every connected client its own backend."
+        }
+      ],
+      "explain": "Session pooling only helps when clients connect and disconnect often; long-lived app pools hold their server connections the whole time. Multiplexing many mostly idle connections needs transaction mode, which in turn requires the app to keep state per transaction.",
+      "refs": [
+        "https://www.pgbouncer.org/features.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q13",
+      "domain": "pooling",
+      "stem": "A shipping API uses a node-postgres pool of `max: 10` per pod. Under a load spike, all requests on a pod hang until `connectionTimeoutMillis` fires, while the database shows 10 idle-in-transaction sessions from that pod. The relevant code is below. Which change fixes it?",
+      "code": "async function createShipment(input) {\n  const client = await pool.connect();\n  try {\n    await client.query('BEGIN');\n    const s = await client.query('INSERT INTO shipments … RETURNING id', […]);\n    await audit('shipment.created', s.rows[0].id); // uses pool.query inside\n    await client.query('COMMIT');\n  } catch (e) {\n    await client.query('ROLLBACK'); throw e;\n  } finally {\n    client.release();\n  }\n}",
+      "options": [
+        {
+          "text": "Raise the pool to `max: 20` so the audit call always finds a free connection.",
+          "correct": false,
+          "why": "It moves the threshold: 20 concurrent requests that each hold one connection and wait for a second deadlock the pool the same way."
+        },
+        {
+          "text": "Pass the checked-out `client` into `audit` so it runs on the same connection, inside the same transaction.",
+          "correct": true,
+          "why": "Each request then needs exactly one connection, so the pool cannot deadlock, and the audit row commits or rolls back with the shipment."
+        },
+        {
+          "text": "Lower `connectionTimeoutMillis` so stuck requests fail faster.",
+          "correct": false,
+          "why": "It turns the hang into errors sooner but leaves the deadlock: requests still hold one connection while waiting for another."
+        },
+        {
+          "text": "Make the audit call fire-and-forget (without `await`) so the transaction can commit without waiting for the audit insert.",
+          "correct": false,
+          "why": "The audit insert still needs a second connection, so under load it queues or fails, and audit rows are no longer atomic with the shipment."
+        }
+      ],
+      "explain": "Never acquire a second pooled connection while holding one: with N concurrent requests and a pool of N, everyone holds one and waits for another. Pass the transaction's client down to helpers, which also keeps their writes atomic.",
+      "refs": [
+        "https://node-postgres.com/features/pooling"
+      ]
+    },
+    {
+      "id": "postgres-v5-q14",
+      "domain": "pooling",
+      "stem": "A food-delivery API on ECS in private subnets reaches an external managed Postgres through a NAT gateway. A few times an hour, queries fail with `Connection terminated unexpectedly`, always on connections that had been idle in the pool for several minutes. The database shows no errors. Which change fixes it?",
+      "options": [
+        {
+          "text": "Set the pool's `idleTimeoutMillis` below the NAT gateway's 350 s idle timeout (for example 60 s) and enable TCP keepalive on connections.",
+          "correct": true,
+          "why": "The NAT drops idle flows after 350 s without telling either end; closing idle connections earlier, or keeping them active, stops the app from using a dead socket."
+        },
+        {
+          "text": "Set `idle_session_timeout = '30min'` on the database so idle sessions are closed cleanly by the server.",
+          "correct": false,
+          "why": "The server would close idle sessions after 30 minutes, but the NAT forgets them after 350 seconds, so the pool still hands out dead sockets in between."
+        },
+        {
+          "text": "Retry every failed query once on a new connection, at the data-access layer, so that a dead socket is replaced transparently and the caller never notices.",
+          "correct": false,
+          "why": "It hides the symptom, but retrying a non-idempotent write that may or may not have been sent is unsafe, and the cause stays."
+        },
+        {
+          "text": "Raise the pool's `max` so connections are reused more often.",
+          "correct": false,
+          "why": "More connections means each one sits idle longer between uses, so more of them hit the timeout."
+        }
+      ],
+      "explain": "Middleboxes (NAT gateways, load balancers, firewalls) silently drop idle TCP flows. Keep pool idle timeouts below the shortest idle timeout on the path, and enable keepalives, so the pool never hands out a connection the network has already forgotten.",
+      "refs": [
+        "https://docs.aws.amazon.com/vpc/latest/userguide/nat-gateway-troubleshooting.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q15",
+      "domain": "replication",
+      "stem": "A hospital system has one synchronous standby (in `synchronous_standby_names`) that also serves reads. One workflow, a nurse saving medication and immediately printing the chart from the standby, must see its own write; other writes should not pay extra latency. Which setting fits?",
+      "options": [
+        {
+          "text": "`synchronous_commit = remote_apply` cluster-wide.",
+          "correct": false,
+          "why": "It makes the standby show the write at commit, but every transaction in the hospital pays the extra wait for replay, which the requirement rules out."
+        },
+        {
+          "text": "`synchronous_commit = on` for the medication transaction, since the standby is already synchronous.",
+          "correct": false,
+          "why": "`on` waits for the standby to flush the WAL to disk, not to replay it, so a read right after can still miss the change."
+        },
+        {
+          "text": "`SET LOCAL synchronous_commit = remote_apply` in the medication transaction only.",
+          "correct": true,
+          "why": "That commit returns only after the standby has applied it, so the chart print sees it, while all other transactions keep their usual commit level."
+        },
+        {
+          "text": "Have the print step sleep for 500 ms before reading from the standby, which is several times longer than the usual replay delay.",
+          "correct": false,
+          "why": "Replay delay varies with load, so it sometimes still fails, and every print gets slower."
+        }
+      ],
+      "explain": "synchronous_commit can be set per transaction, so pay for stronger guarantees only where needed. 'on' with a synchronous standby gives durability (flushed), while remote_apply gives visibility (replayed) for read-your-writes on that standby.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/runtime-config-wal.html#GUC-SYNCHRONOUS-COMMIT"
+      ]
+    },
+    {
+      "id": "postgres-v5-q16",
+      "domain": "replication",
+      "stem": "A telemetry ingestion platform's primary runs at 90% CPU, almost all of it from INSERTs and UPDATEs at 120k rows/s; reads are about 10% of load. The team proposes adding four read replicas before the holiday peak. Which response is right?",
+      "options": [
+        {
+          "text": "Approve; four replicas spread the load and cut primary CPU by about 80%.",
+          "correct": false,
+          "why": "Replicas only take reads; every write still happens on the primary, and the primary also does a bit more work feeding WAL to more replicas."
+        },
+        {
+          "text": "Approve, and use synchronous replication so replicas share the write work.",
+          "correct": false,
+          "why": "Synchronous replication adds commit latency; standbys replay WAL, but the primary still executes every write."
+        },
+        {
+          "text": "Make each write cheaper on the primary (batching, fewer indexes, HOT updates) and plan sharding.",
+          "correct": true,
+          "why": "The bottleneck is writes, which only the primary can do; making each write cheaper or splitting the write set are the levers that work."
+        },
+        {
+          "text": "Add replicas and also move the reads to them, so that the primary's freed CPU can be used for more write throughput.",
+          "correct": false,
+          "why": "It frees at most the 10% of load that reads use, far short of the headroom a holiday write peak needs."
+        }
+      ],
+      "explain": "Read replicas scale reads only. When the primary is write-bound, reduce the cost per write (batching, fewer indexes, HOT updates, partitioning) or split writes across primaries (sharding). Identify which resource and workload are saturated before adding nodes.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/high-availability.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q17",
+      "domain": "replication",
+      "stem": "After a managed failover, a ticketing API's error rate stayed at 30% for 20 minutes with `cannot execute INSERT in a read-only transaction` (SQLSTATE 25006). The new primary was healthy. Pods that had been restarted were fine. Which change fixes this?",
+      "options": [
+        {
+          "text": "When a query fails with 25006, discard that connection (and recycle the pool), re-resolve the endpoint (short DNS TTL, no long-lived DNS caching), and reconnect.",
+          "correct": true,
+          "why": "The old pools still held connections to the demoted node; detecting read-only errors and reconnecting through fresh DNS moves them to the new primary."
+        },
+        {
+          "text": "Run `SET default_transaction_read_only = off` on every new connection.",
+          "correct": false,
+          "why": "The node really is read-only; a session setting cannot make a standby accept writes."
+        },
+        {
+          "text": "Retry the failed INSERT up to 5 times on the same connection with backoff.",
+          "correct": false,
+          "why": "The connection still points at the read-only node, so every retry fails the same way."
+        },
+        {
+          "text": "Increase the number of standbys so that a failover finishes faster next time, giving the old connections less time to send writes to a read-only node.",
+          "correct": false,
+          "why": "The promotion was already done; the 20 minutes came from clients still connected to the wrong node, which more standbys do not change."
+        }
+      ],
+      "explain": "Failover is complete only when clients reach the new primary. Pools keep old connections and runtimes can cache DNS, so treat read-only and connection errors as signals to drop connections and re-resolve, and keep DNS TTLs short.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/errcodes-appendix.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q18",
+      "domain": "maintenance",
+      "stem": "A brokerage's Postgres shows rising bloat and an `age(datfrozenxid)` climbing steadily. No session in pg_stat_activity is older than a minute, there are no replication slots, and no standby uses feedback. The app uses an XA transaction manager that crashed last week. Where is the holder, and how should the team clear it?",
+      "options": [
+        {
+          "text": "In `pg_stat_statements`: reset its statistics so the old entries stop holding back vacuum.",
+          "correct": false,
+          "why": "Query statistics hold no snapshots or locks; resetting them changes nothing for vacuum."
+        },
+        {
+          "text": "In `pg_locks`: run `pg_terminate_backend` on the backends that hold the oldest locks.",
+          "correct": false,
+          "why": "Prepared transactions have no backend to terminate; their locks and xmin survive session ends and restarts."
+        },
+        {
+          "text": "In autovacuum: raise `autovacuum_freeze_max_age` so that the anti-wraparound vacuum stops running on the busiest tables during trading hours.",
+          "correct": false,
+          "why": "It postpones freezing while the real holder stays, making the eventual problem larger."
+        },
+        {
+          "text": "In `pg_prepared_xacts`: resolve each orphan with `COMMIT PREPARED` or `ROLLBACK PREPARED` per the manager's log.",
+          "correct": true,
+          "why": "Prepared (2PC) transactions survive crashes and restarts, holding locks and the xmin horizon until someone resolves them."
+        }
+      ],
+      "explain": "Prepared transactions are invisible in pg_stat_activity but hold locks and the xmin horizon indefinitely. If you use 2PC, monitor pg_prepared_xacts; if you do not, keep max_prepared_transactions at 0 so none can be created.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-prepare-transaction.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q19",
+      "domain": "maintenance",
+      "stem": "A logistics firm partitions `events` by month and has a DEFAULT partition as a safety net. The job that creates next month's partition failed silently, and three weeks of December rows (400M) landed in the default. Now `CREATE TABLE events_2026_12 PARTITION OF events FOR VALUES FROM ('2026-12-01') TO ('2027-01-01')` fails. Which recovery and prevention plan is right?",
+      "options": [
+        {
+          "text": "Drop the default partition and create the December partition; the rows will be re-routed automatically.",
+          "correct": false,
+          "why": "Dropping the default deletes its 400M rows; nothing re-routes them."
+        },
+        {
+          "text": "Detach the default, create the December partition, move December rows into it in batches, reattach the default; then create partitions months ahead and alert on any row in the default.",
+          "correct": true,
+          "why": "Creating a partition fails while the default holds rows for its range; moving them out first fixes that, and pre-creation plus an alert stops it recurring."
+        },
+        {
+          "text": "Create the December partition with `FOR VALUES FROM ('2026-12-22')` to avoid the range of rows already in the default.",
+          "correct": false,
+          "why": "It succeeds, but three weeks of December stay in the default forever, breaking pruning and month-based retention."
+        },
+        {
+          "text": "Turn off the constraint check with `session_replication_role = replica` and create the partition anyway.",
+          "correct": false,
+          "why": "That setting affects triggers and replication behaviour; it does not bypass partition-bound checks."
+        }
+      ],
+      "explain": "A default partition hides a broken partition-maintenance job until it is expensive to fix: rows there block creating the matching partition. Pre-create partitions well ahead (pg_partman or a scheduled job), and alert on any rows in the default.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-createtable.html"
+      ]
+    },
+    {
+      "id": "postgres-v5-q20",
+      "domain": "maintenance",
+      "stem": "A collaborative-docs product stores each document as one `jsonb` value averaging 800 KB, and updates a small `cursor_positions` key in it about 20 times a second per active document. Disk I/O, WAL volume and table bloat have grown far faster than user count. Which schema change helps most?",
+      "options": [
+        {
+          "text": "Use `jsonb_set` instead of replacing the whole document from the app, so only the changed key is written.",
+          "correct": false,
+          "why": "Tempting, but MVCC writes a new version of the whole value either way; jsonb_set only saves network bytes, not storage writes."
+        },
+        {
+          "text": "Compress the column with `ALTER COLUMN … SET COMPRESSION lz4`.",
+          "correct": false,
+          "why": "It makes each new version smaller, but every 20/s update still rewrites the entire document."
+        },
+        {
+          "text": "Move fast-changing fields like cursor positions into a separate narrow table (or keep them in memory), leaving the large document for real edits.",
+          "correct": true,
+          "why": "Small hot updates then write small rows, often as HOT updates, while the 800 KB value is rewritten only when the content changes."
+        },
+        {
+          "text": "Lower `fillfactor` on the documents table so that each update can be written on the same page as the old row version.",
+          "correct": false,
+          "why": "An 800 KB value is TOASTed into separate chunks, so page free space does not avoid rewriting it."
+        }
+      ],
+      "explain": "Postgres never updates part of a value in place: each update writes a new row version with a new copy of any changed TOASTed value. Separate hot, small fields from large, rarely changed ones so the write cost matches the change.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/storage-toast.html"
+      ]
+    }
+  ]
+}

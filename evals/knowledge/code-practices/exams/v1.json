@@ -1,0 +1,676 @@
+{
+  "topic": "code-practices",
+  "variant": 1,
+  "of": 5,
+  "title": "Code practices at scale — variant 1",
+  "description": "Bill splitting, lenient query parsing, store-zone reports, mass assignment, idempotency races, SSRF, ORDER BY injection, request context, burn-rate alerts, refactors that change behaviour and expand/contract renames.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "edges",
+      "name": "Edges: validation, money and time",
+      "weight": 0.2
+    },
+    {
+      "id": "api",
+      "name": "API design, idempotency and error surfacing",
+      "weight": 0.2
+    },
+    {
+      "id": "security",
+      "name": "Security defaults: authz, injection, SSRF, secrets",
+      "weight": 0.2
+    },
+    {
+      "id": "observability",
+      "name": "Observability: logs, metrics, traces, SLOs",
+      "weight": 0.15
+    },
+    {
+      "id": "testing",
+      "name": "Testing strategy and reviewing AI-written code",
+      "weight": 0.15
+    },
+    {
+      "id": "deploys",
+      "name": "Safe deploys: flags, migrations, canaries, rollbacks",
+      "weight": 0.1
+    }
+  ],
+  "questions": [
+    {
+      "id": "code-practices-v1-q01",
+      "domain": "edges",
+      "stem": "A group-expense app with 2M monthly users splits a bill evenly. Totals are stored as integer cents and each of the `n` people gets `Math.round(total / n)`. Finance reports that ledgers drift by a few cents a day and some settle-up balances never reach zero. Which change fixes it at the design level?",
+      "options": [
+        {
+          "text": "Give each person `floor(total / n)` and hand the leftover cents, one each, to the first `total % n` people in a stable order.",
+          "correct": true,
+          "why": "Every share is a whole cent and the parts sum to exactly the total by construction, and the stable order makes the result reproducible."
+        },
+        {
+          "text": "Move the amounts to `numeric(12,4)` in Postgres so the rounding error shrinks to a hundredth of a cent and stops being visible in the ledger.",
+          "correct": false,
+          "why": "Tempting because more precision feels safer, but 100/3 still has no exact representation and settle-ups happen in whole cents, so the parts still do not sum to the total."
+        },
+        {
+          "text": "Use banker's rounding (half-to-even) on each share so the errors cancel out across many bills.",
+          "correct": false,
+          "why": "It only averages out statistically; any single bill such as 100 cents split 3 ways still yields 33+33+33 = 99, so individual balances stay wrong."
+        },
+        {
+          "text": "Keep shares as floats in dollars and round only when displaying them, so no cents are lost in storage.",
+          "correct": false,
+          "why": "Binary floats cannot represent most decimal amounts, and display-time rounding reintroduces exactly the drift the ledger is complaining about."
+        }
+      ],
+      "explain": "Money is an integer count of minor units, and any split must account for every unit: floor the shares, then distribute the remainder deterministically (first r parts, or largest remainder). Test the invariant `sum(parts) === total`, not individual rounded values.",
+      "refs": [
+        "https://martinfowler.com/eaaCatalog/money.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q02",
+      "domain": "edges",
+      "stem": "A public catalog API serves 4k rps to partner integrations. `GET /products` reads `const limit = Number(req.query.limit) || 20` and then clamps to 100. Partners report confusing results: `limit=0` returns 20 rows, `limit=abc` returns 20, and a typo `limit=10O` silently returns 20 for weeks. What should the boundary do?",
+      "options": [
+        {
+          "text": "Keep `|| 20` but add `Math.max(1, …)` so negative values become 1 and the clamp covers both ends of the range.",
+          "correct": false,
+          "why": "It makes the range safe but still turns garbage and typos into a silent default, so partner bugs never surface and `0` keeps meaning 20."
+        },
+        {
+          "text": "Switch to `parseInt(req.query.limit, 10)` with an explicit radix, then clamp to 1–100.",
+          "correct": false,
+          "why": "`parseInt` accepts prefixes, so `10abc` becomes 10 and `1e3` becomes 1; the input is still accepted rather than validated."
+        },
+        {
+          "text": "Default only when the parameter is absent; accept digits only in 1–100 and reject anything else with 400.",
+          "correct": true,
+          "why": "Missing and invalid are different cases: absent gets the documented default, malformed input gets a clear 400 the partner can see and fix."
+        },
+        {
+          "text": "Pass the raw value to `LIMIT $1` and translate the database's cast error into a 400 response for the client.",
+          "correct": false,
+          "why": "It costs a database round trip per bad request, couples the API contract to driver error text, and some values (like `2.5`) are coerced instead of rejected."
+        }
+      ],
+      "explain": "Validate at the boundary: say exactly what you accept and reject the rest with a 400. Lenient parsing (`Number(x) || d`, `parseInt`) hides client bugs and makes the contract fuzzy; treat 'missing' and 'invalid' as two different cases.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q03",
+      "domain": "edges",
+      "stem": "A retail chain with stores in Los Angeles, New York and Sydney generates a nightly sales report that groups orders by `order.createdAt.toISOString().slice(0, 10)`. Servers run in UTC. LA managers complain that evening sales show up on the next day, and Sydney's morning sales land on the previous day. Which design fixes it?",
+      "options": [
+        {
+          "text": "Set `TZ=America/Los_Angeles` on the report workers, since most of the complaints come from LA.",
+          "correct": false,
+          "why": "It fixes LA by moving the error to New York and Sydney, and the report now depends on host configuration."
+        },
+        {
+          "text": "Store a fixed UTC offset per store (LA = -8) and subtract it before slicing the date.",
+          "correct": false,
+          "why": "Fixed offsets ignore DST: LA is UTC-7 for most of the year, so an hour of sales lands on the wrong day half the time."
+        },
+        {
+          "text": "Keep instants in UTC and derive each order's date in the store's IANA zone via `Intl.DateTimeFormat`.",
+          "correct": true,
+          "why": "The instant is stored unambiguously; 'which day' is a calendar question that belongs to the store's zone, including DST changes."
+        },
+        {
+          "text": "Write `createdAt` as a `timestamp without time zone` in each store's local time so the date part is already the local day.",
+          "correct": false,
+          "why": "It throws away the instant: cross-store comparisons break and the repeated hour on the fall-back day becomes ambiguous."
+        }
+      ],
+      "explain": "Store time as an instant (UTC); compute days, hours and 'today' in the zone that owns the business meaning. `toISOString().slice(0,10)` is a UTC day, which is almost never the day a person or store means.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/DateTimeFormat"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q04",
+      "domain": "edges",
+      "stem": "You are reviewing an AI-written profile update for a SaaS product with 40k organisations. The controller wires `PATCH /me` to `updateProfile(req.user.id, req.body)`. Which problem is the most serious, and what is the fix?",
+      "code": "async updateProfile(userId: string, patch: Partial<User>) {\n  const user = await repo.findById(userId);\n  return repo.save({ ...user, ...patch });\n}",
+      "options": [
+        {
+          "text": "Concurrent PATCHes can overwrite each other; add a version column and optimistic locking.",
+          "correct": false,
+          "why": "Lost updates are real but low impact on a profile; the snippet lets any user grant themselves privileges, which is far worse."
+        },
+        {
+          "text": "`Partial<User>` is too wide; narrow the parameter type to `Pick<User, 'displayName' | 'bio'>`.",
+          "correct": false,
+          "why": "Types are erased at runtime, so `req.body` still carries `role` and `orgId` into the spread; a type is not validation."
+        },
+        {
+          "text": "Any client can set `role`, `orgId` or `emailVerified`; map the body through an explicit allowlist DTO and reject unknown keys.",
+          "correct": true,
+          "why": "The spread copies every client key into the saved row; an allowlist of writable fields per endpoint closes privilege escalation and tenant hopping."
+        },
+        {
+          "text": "Read-modify-write costs two round trips; build a single `UPDATE … SET` from the keys of the patch instead.",
+          "correct": false,
+          "why": "It keeps the mass-assignment hole and adds a new one: client-chosen keys become column names in SQL."
+        }
+      ],
+      "explain": "Never copy a request body into a model wholesale. Each write endpoint gets an explicit list of fields the caller may change, enforced at runtime; generic `update(id, patch)` helpers are where AI-written code most often reopens this hole.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q05",
+      "domain": "api",
+      "stem": "A mobile wallet charges cards through a PSP call that takes about 3 s at peak. The app times out after 2 s and retries with the same `Idempotency-Key`. Support sees a steady trickle of double charges. Which change removes them?",
+      "code": "app.post('/payments', async (req, res) => {\n  const key = req.header('Idempotency-Key');\n  const hit = await redis.get(`idem:${key}`);\n  if (hit) return res.status(200).json(JSON.parse(hit));\n  const result = await psp.charge(req.body);\n  await redis.set(`idem:${key}`, JSON.stringify(result), 'EX', 86400);\n  res.status(201).json(result);\n});",
+      "options": [
+        {
+          "text": "Raise the app's timeout to 10 s so the retry only fires after the first charge has completed and its result is safely stored in Redis.",
+          "correct": false,
+          "why": "It narrows the window but any slow PSP call or dropped response still lets two requests miss the cache together; the race is in the server."
+        },
+        {
+          "text": "Claim the key atomically first (`SET … NX` with an in-progress marker), answer 409 to a concurrent duplicate, then store the result.",
+          "correct": true,
+          "why": "Only one request can win the claim, so the charge runs once; the duplicate learns it is in flight and can retry later for the stored replay."
+        },
+        {
+          "text": "Put the `get` and the `set` inside one Redis `MULTI`/`EXEC` block so they run as a transaction.",
+          "correct": false,
+          "why": "The `await psp.charge` sits between them and cannot run inside a Redis transaction, so check-then-act is still split across an await."
+        },
+        {
+          "text": "Shorten the key's TTL to 60 s so a stuck key cannot block the customer from paying again.",
+          "correct": false,
+          "why": "TTL has nothing to do with two concurrent misses; it only shortens how long completed results can be replayed."
+        }
+      ],
+      "explain": "Check-then-set across an `await` is a race. Idempotency needs an atomic claim (insert-if-absent, `SET NX`, unique constraint) before the side effect, plus a defined answer for 'still in flight' (409) and 'done' (replay the stored response).",
+      "refs": [
+        "https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/",
+        "https://docs.stripe.com/api/idempotent_requests"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q06",
+      "domain": "api",
+      "stem": "A product-detail service sits behind a CDN that caches 404s for 10 minutes. During a 40-second Postgres failover, thousands of product pages showed 'not found' for the next 10 minutes, and the 5xx alert never fired. The handler is `try { const p = await repo.find(id); if (!p) throw new NotFound(); return p } catch { return reply.code(404).send() }`. What is the right fix?",
+      "options": [
+        {
+          "text": "Lower the CDN's negative-cache TTL for 404s to 10 seconds.",
+          "correct": false,
+          "why": "It shrinks the blast radius but the service still lies about the failure, so alerts stay blind and clients still treat products as gone."
+        },
+        {
+          "text": "Retry the repository call three times inside the catch before returning the 404.",
+          "correct": false,
+          "why": "Retries cannot outlast a 40 s failover, add load to a recovering database, and still end in a false 404."
+        },
+        {
+          "text": "Return 503 with `Retry-After` from the catch for every error, so nothing gets cached.",
+          "correct": false,
+          "why": "Genuinely missing products would then also return 503, so crawlers and clients retry dead URLs forever and real 404s disappear."
+        },
+        {
+          "text": "Map only the typed `NotFound` to 404; let anything else surface as a 5xx with a generic body, logged with its cause.",
+          "correct": true,
+          "why": "Known domain errors become client answers; infrastructure failures stay failures, are not cached as content, and trip the error-rate alert."
+        }
+      ],
+      "explain": "Errors are data. Map only known, typed domain errors to 4xx and let everything else become a 5xx; a catch-all that turns 'database down' into 'not found' or `[]` poisons caches and blinds monitoring.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc9457.html",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q07",
+      "domain": "api",
+      "stem": "A CRM's nightly job imports about 50k contacts per customer CSV through the function below. The job always reports `{ imported: 0 }`, yet most rows appear minutes later, and a few are missing with nothing but a log line. Customers are about to get a 'sync finished' email driven by this result. Which redesign is right?",
+      "code": "export async function importContacts(rows, repo) {\n  let imported = 0;\n  rows.forEach(async (row) => {\n    try { await repo.save(row); imported++; }\n    catch (e) { logger.error(e); }\n  });\n  return { imported };\n}",
+      "options": [
+        {
+          "text": "Replace `forEach` with `await Promise.all(rows.map(...))` so the count is final, and keep the try/catch that logs each failed row.",
+          "correct": false,
+          "why": "The function now waits, but it fires 50k saves at once against a small pool and still hides failures in logs, so the email reports success."
+        },
+        {
+          "text": "Await the saves with bounded concurrency and return `{ imported, failed: [{ row, reason }] }` so the caller can alert or retry.",
+          "correct": true,
+          "why": "The result exists only after the work finishes, the pool is protected, and failures are part of the return value instead of a log line."
+        },
+        {
+          "text": "Remove the try/catch so the first failing row makes the whole import reject.",
+          "correct": false,
+          "why": "Inside `forEach(async)` the rejection is unhandled and can crash the process; even when awaited, one bad row aborts 50k good ones."
+        },
+        {
+          "text": "Keep the loop and wait `await new Promise(r => setTimeout(r, 5000))` before returning the count.",
+          "correct": false,
+          "why": "A guessed sleep is wrong on any slow day and still reports nothing about which rows failed."
+        }
+      ],
+      "explain": "Async work must be awaited before you report on it, and failures must come back as data (a failed list, an `AggregateError`), not a log line. Bound concurrency for large batches so the fix does not become a self-inflicted pool outage.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise/allSettled"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q08",
+      "domain": "api",
+      "stem": "A public REST API has 300 partner integrations and a mobile app whose old versions stay installed for up to 18 months. The team wants to replace `amount` (a decimal string) with `amount_minor` (an integer) in `GET /orders`. Which rollout is safe?",
+      "options": [
+        {
+          "text": "Ship `/v2/orders` with the new field and switch `/v1` off next sprint once partners have been emailed.",
+          "correct": false,
+          "why": "Old app versions cannot be forced to upgrade, so turning v1 off within weeks breaks real users for over a year."
+        },
+        {
+          "text": "Rename the field in place and add a response header explaining the change to clients.",
+          "correct": false,
+          "why": "Every client that reads `amount` breaks on deploy; nobody's code reads an explanatory header."
+        },
+        {
+          "text": "Make the new shape the default and let old clients opt back in with `?fields=amount`.",
+          "correct": false,
+          "why": "Changing the default breaks every client that does not know about the new parameter, which is all of them."
+        },
+        {
+          "text": "Add `amount_minor` alongside `amount`, mark the old field deprecated, and remove it only after measured usage reaches zero.",
+          "correct": true,
+          "why": "Additive changes break nobody, and measuring who still reads the old field turns removal into a data-driven decision."
+        }
+      ],
+      "explain": "Evolve APIs additively: add, deprecate, measure, then remove in a new version after a sunset date. Long-lived clients (mobile, partners) set the real timeline, not the server's deploy cadence.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc8594.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q09",
+      "domain": "security",
+      "stem": "A chat product unfurls links server-side from pods in an AWS VPC. The current guard rejects a URL if its hostname is `localhost` or `127.0.0.1` or starts with `10.` or `192.168.`, then calls `fetch(url)`. A pentester still pulled the node's IAM credentials. Which two changes close the hole? (Choose two.)",
+      "options": [
+        {
+          "text": "Resolve the hostname, reject if any address is loopback, private, link-local or IPv4-mapped, then connect to that validated IP.",
+          "correct": true,
+          "why": "Checking resolved addresses catches hostnames that point inward and the many spellings of internal IPs, and pinning the IP defeats DNS rebinding."
+        },
+        {
+          "text": "Fetch with `redirect: 'manual'` and run the same validation on every `Location` hop.",
+          "correct": true,
+          "why": "`fetch` follows redirects by default, so a public URL can bounce to 169.254.169.254; each hop must pass the same check."
+        },
+        {
+          "text": "Add `169.254.169.254`, `0.0.0.0` and `[::1]` to the hostname blocklist.",
+          "correct": false,
+          "why": "String blocklists miss decimal forms (`2130706433`), `[::ffff:7f00:1]`, and any domain that simply resolves to an internal address."
+        },
+        {
+          "text": "Set a 2-second timeout and a 1 MB cap on the response body.",
+          "correct": false,
+          "why": "Good hygiene against slow or huge responses, but the credentials response is tiny and fast, so it does nothing for SSRF."
+        },
+        {
+          "text": "URL-encode the user's URL before passing it to `fetch` so it cannot smuggle in extra characters.",
+          "correct": false,
+          "why": "Encoding does not change where the request goes; the attack uses perfectly well-formed URLs."
+        }
+      ],
+      "explain": "SSRF defence works on where the connection actually goes, not on how the URL is spelled: allowlist schemes, resolve, reject internal ranges on every address, connect to the validated IP, and re-validate each redirect. Defence in depth (IMDSv2, egress policy) limits damage when a check is missed.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q10",
+      "domain": "security",
+      "stem": "An internal-but-internet-facing admin search builds ``ORDER BY ${req.query.sort} ${req.query.dir}`` while binding all `WHERE` values as parameters. A security review flags it; the author replies 'we use parameterized queries everywhere'. What is the right fix?",
+      "options": [
+        {
+          "text": "Bind the column as a parameter too: `ORDER BY $1`.",
+          "correct": false,
+          "why": "A bound parameter is a value, not an identifier, so the database sorts by a constant and results come back silently unsorted."
+        },
+        {
+          "text": "Strip semicolons and SQL keywords such as `DROP` from `sort` before interpolating it.",
+          "correct": false,
+          "why": "Injection in ORDER BY needs no semicolon: a `CASE WHEN (SELECT …)` expression leaks data one bit at a time."
+        },
+        {
+          "text": "Check `sort` against `/^[a-z_]+$/` and interpolate `dir` unchanged, since it can only switch between ASC and DESC anyway.",
+          "correct": false,
+          "why": "`dir` is still injectable, and the regex allows sorting by any column such as `password_hash`, which works as a data oracle."
+        },
+        {
+          "text": "Look `sort` up in a fixed map of allowed columns and restrict `dir` to `ASC` or `DESC`; reply 400 otherwise.",
+          "correct": true,
+          "why": "Identifiers and keywords cannot be parameterized, so they must come from a server-side allowlist; client input only selects a key."
+        }
+      ],
+      "explain": "Parameters protect values, not identifiers or keywords. Anything user-controlled that becomes structure (column, direction, table) must be chosen from an allowlist; regexes and keyword stripping leave expression injection open.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q11",
+      "domain": "security",
+      "stem": "A payments webhook receiver runs behind `express.json()`. It computes the HMAC over `JSON.stringify(req.body)` and compares it to the header with `===`. Last night the provider changed its serializer (extra spaces, different key order), every webhook got 401, and 6k orders are stuck in 'pending'. What is the right design?",
+      "options": [
+        {
+          "text": "Sort the keys and strip whitespace on both sides before hashing, so both serializers produce the same canonical string every time.",
+          "correct": false,
+          "why": "You still are not hashing the bytes that were signed; number formats and Unicode escapes differ, so canonicalisation is fragile and can be gamed."
+        },
+        {
+          "text": "Hash the raw request bytes captured before parsing, length-check then constant-time compare, and parse only after it verifies.",
+          "correct": true,
+          "why": "The signature covers bytes, so verifying the exact bytes is robust to formatting, and a constant-time compare avoids leaking the digest."
+        },
+        {
+          "text": "Drop signature checks and accept webhooks only from the provider's published IP ranges.",
+          "correct": false,
+          "why": "IP ranges change and are often shared cloud ranges; it removes integrity protection entirely in exchange for a brittle allowlist."
+        },
+        {
+          "text": "Hash the documented fields concatenated in order (`id`, `amount`, `status`) instead of the whole body.",
+          "correct": false,
+          "why": "That is not the message the provider signed, so it never matches, and unsigned fields could be tampered with."
+        }
+      ],
+      "explain": "Signatures are over bytes, so verify the raw body before any parsing, compare in constant time after a length check, and add a timestamp tolerance against replay. Re-serialising parsed JSON is the classic way verification breaks or gets bypassed.",
+      "refs": [
+        "https://docs.stripe.com/webhooks#verify-manually",
+        "https://nodejs.org/api/crypto.html#cryptotimingsafeequala-b"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q12",
+      "domain": "security",
+      "stem": "A B2B invoicing API checks `invoice.orgId === user.orgId` inside the `GET /invoices/:id` handler. This sprint an AI agent added a bulk `POST /invoices/export` (takes an array of ids) and a GraphQL `invoice(id)` resolver; both only check that the caller is logged in. 9k tenants share the database. What is the structural fix?",
+      "options": [
+        {
+          "text": "Scope invoice reads in the data-access layer by the `orgId` from the token, so every entry point inherits the tenant check.",
+          "correct": true,
+          "why": "When the repository cannot load another tenant's row, a new handler, resolver or job cannot forget the check."
+        },
+        {
+          "text": "Copy the `orgId` comparison into the two new handlers and add 'check tenant ownership' to the PR checklist for future endpoints.",
+          "correct": false,
+          "why": "It fixes today's two holes but relies on every future entry point remembering, which is exactly what just failed."
+        },
+        {
+          "text": "Switch invoice ids to UUIDv4 so other tenants' ids cannot be guessed or enumerated.",
+          "correct": false,
+          "why": "Ids leak through emails, URLs and logs; unguessable ids slow enumeration but never authorize anything."
+        },
+        {
+          "text": "Rate-limit the export endpoint and the GraphQL resolver to 10 calls per minute per user.",
+          "correct": false,
+          "why": "Rate limits slow a bulk scrape; they do not stop a single request for another tenant's invoice."
+        }
+      ],
+      "explain": "Authorization belongs on every path to the data, so put it where all paths converge (repository scoping, row-level security) rather than in each handler. AI-generated new entry points are the most common place an existing check is silently skipped.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q13",
+      "domain": "observability",
+      "stem": "At about 2k rps, on-call notices that log lines from one request carry another request's ID, so tracing a failed checkout through the logs leads to the wrong customer. You want a fix that does not thread a parameter through every function. Which change works?",
+      "code": "let currentRequestId: string;\napp.use((req, _res, next) => {\n  currentRequestId = req.header('x-request-id') ?? randomUUID();\n  next();\n});\nexport const log = (msg: string) =>\n  console.log(JSON.stringify({ msg, requestId: currentRequestId }));",
+      "options": [
+        {
+          "text": "Generate a fresh `randomUUID()` inside `log()` so the ID on a line can never be stale.",
+          "correct": false,
+          "why": "Every line then has its own ID, so nothing correlates; it trades wrong IDs for useless ones."
+        },
+        {
+          "text": "Store the context in `AsyncLocalStorage` (`als.run({ requestId }, next)`) and read it in `log()`.",
+          "correct": true,
+          "why": "The store follows each request's async chain, so concurrent requests never see each other's ID, and no signatures change."
+        },
+        {
+          "text": "Create `logger.child({ requestId })` in the middleware and assign it to the shared module-level logger.",
+          "correct": false,
+          "why": "It is the same shared mutable slot, just holding a logger; the next request overwrites it while the first is still awaiting."
+        },
+        {
+          "text": "Guard the middleware with a mutex so only one request can set the ID at a time.",
+          "correct": false,
+          "why": "The overwrite happens later, while the first request is awaiting I/O; serialising the assignment changes nothing."
+        }
+      ],
+      "explain": "Node interleaves many requests on one thread, so any module-level 'current request' is shared state. Per-request context belongs in `AsyncLocalStorage`; also validate inbound IDs and echo them in the response.",
+      "refs": [
+        "https://nodejs.org/api/async_context.html#class-asynclocalstorage"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q14",
+      "domain": "observability",
+      "stem": "A checkout API has an SLO of 99.9% successful requests over 30 days. On-call is paged on CPU above 80% several times a week, usually for nothing, and last month slept through a two-hour night incident where 5% of checkouts failed while CPU stayed normal. What alerting should replace this?",
+      "options": [
+        {
+          "text": "Page when the error rate is above 0.1% in any single minute.",
+          "correct": false,
+          "why": "It tracks the right signal but any short blip pages someone, so on-call learns to ignore it."
+        },
+        {
+          "text": "Keep the CPU alert and add a daily email summarising SLO compliance.",
+          "correct": false,
+          "why": "The 5% outage would be noticed the next morning; CPU stays a cause-based alert that misses symptom-only failures."
+        },
+        {
+          "text": "Page on fast error-budget burn confirmed by a long and a short window (e.g. 1 h and 5 min); open a ticket on slow burn.",
+          "correct": true,
+          "why": "Burn rate measures how fast users are being hurt relative to the SLO, and the two windows make it both quick to fire and quick to reset."
+        },
+        {
+          "text": "Alert when the rolling 30-day availability drops below 99.9%, since that is exactly the number the SLO promises to customers.",
+          "correct": false,
+          "why": "By the time the 30-day number breaches, the month's budget is already spent; it is a report, not an alert."
+        }
+      ],
+      "explain": "Page on symptoms users feel, measured against the SLO. Multi-window burn-rate alerts (for example 14.4x over 1 h confirmed by 5 min) catch fast outages without paging on blips; slower burns become tickets.",
+      "refs": [
+        "https://sre.google/workbook/alerting-on-slos/"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q15",
+      "domain": "observability",
+      "stem": "A team added `userId` and the raw `path` (like `/orders/8812`) as labels on `http_requests_total` to debug a single customer's issue. The product has 3M users, and two days later Prometheus is out of memory. What is the right fix?",
+      "options": [
+        {
+          "text": "Give Prometheus more memory and cut retention to 3 days.",
+          "correct": false,
+          "why": "Memory is driven by active series, which now grows with users and ids; retention barely changes it and the growth continues."
+        },
+        {
+          "text": "Hash `userId` into a short 8-character label value to make each series smaller.",
+          "correct": false,
+          "why": "Shorter strings do not reduce the number of distinct series, which is what exhausts memory."
+        },
+        {
+          "text": "Label by route template (`/orders/:id`), method and status class; keep user and order ids in logs, traces and exemplars.",
+          "correct": true,
+          "why": "Metrics stay bounded and cheap to aggregate, while per-request detail lives in signals built for high cardinality."
+        },
+        {
+          "text": "Sample metrics so only 10% of requests increment the counter.",
+          "correct": false,
+          "why": "Sampling makes counts wrong and still creates a series for nearly every user over time."
+        }
+      ],
+      "explain": "Metric labels must have bounded cardinality: route templates, status classes, regions. Unbounded identifiers belong in logs and traces; link them to metrics with exemplars rather than labels.",
+      "refs": [
+        "https://prometheus.io/docs/practices/naming/#labels"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q16",
+      "domain": "testing",
+      "stem": "An agent was asked to 'refactor `calculateInvoice` for readability'. The diff also changes `qty || 1` to `qty ?? 1`, `discountCode == 10` to `===`, and moves rounding from each line to the total. All 12 existing tests pass. The function produces about 9k invoices a day. What should the reviewer require before merge?",
+      "options": [
+        {
+          "text": "Characterization tests on recorded real inputs (incl. `qty: 0`, string codes) matching old outputs; split the 'fixes' out.",
+          "correct": true,
+          "why": "A refactor must not change observable behaviour; golden tests on odd inputs prove it, and real bug fixes get their own reviewed change."
+        },
+        {
+          "text": "Approve it: each new idiom is the modern, stricter form, the existing test suite is green, and the behaviour changes are improvements.",
+          "correct": false,
+          "why": "Each idiom change alters invoices (`qty: 0`, string codes, rounding), and the old tests evidently never covered those inputs."
+        },
+        {
+          "text": "Require 100% line coverage on the refactored module before it can merge.",
+          "correct": false,
+          "why": "Lines can all be executed by happy-path inputs; coverage does not check that outputs on edge inputs stayed the same."
+        },
+        {
+          "text": "Revert it and freeze the billing module against refactoring until the next audit.",
+          "correct": false,
+          "why": "Overreaction: refactoring billing is fine with a characterization safety net, and freezing it leaves the code hard to change."
+        }
+      ],
+      "explain": "Refactoring means behaviour stays exactly the same, odd edge cases included. Pin current behaviour with characterization tests first, refactor in small green steps, and report suspected bugs separately; models 'modernise' idioms by reflex.",
+      "refs": [
+        "https://martinfowler.com/bliki/DefinitionOfRefactoring.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q17",
+      "domain": "testing",
+      "stem": "A 3k-test CI suite takes 14 minutes and fails randomly in about 2% of runs. Most of the time and flakes trace back to the `TokenCache` tests, which `await sleep(1100)` to cross a 1 s TTL and read `new Date()` directly. What change fixes both problems?",
+      "options": [
+        {
+          "text": "Raise the sleeps to 2000 ms and the test timeout to 5 s, so even slow, overloaded CI runners always cross the TTL before asserting.",
+          "correct": false,
+          "why": "It makes the suite slower and only lowers the flake rate; a busy runner can still miss the window."
+        },
+        {
+          "text": "Let CI retry failed tests up to three times before reporting red.",
+          "correct": false,
+          "why": "It hides the flake, keeps the slow sleeps, and can hide a real boundary bug that only fails sometimes."
+        },
+        {
+          "text": "Inject a clock, or enable `t.mock.timers` for `Date` and `setTimeout`, and `tick()` to just before and exactly at expiry.",
+          "correct": true,
+          "why": "Virtual time is instant and deterministic, and ticking to both sides of the boundary catches `<` versus `<=` bugs."
+        },
+        {
+          "text": "Move the TTL tests to a nightly suite so they stop blocking merges.",
+          "correct": false,
+          "why": "The tests stay slow and flaky, and TTL regressions are now found a day later instead of before merge."
+        }
+      ],
+      "explain": "Tests that depend on real time are slow and nondeterministic. Control time explicitly (injected clock or mock timers), test both sides of every boundary, and keep tests independent of the host's zone and speed.",
+      "refs": [
+        "https://nodejs.org/api/test.html#class-mocktimers"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q18",
+      "domain": "testing",
+      "stem": "Fourteen services owned by six teams share a staging environment where the end-to-end suite takes 50 minutes and is red 40% of the time. Breaking API changes still reach production: last week a provider renamed a response field that one consumer depended on. What catches this earlier and cheaply?",
+      "options": [
+        {
+          "text": "Add e2e scenarios to staging that cover every consumer of every endpoint.",
+          "correct": false,
+          "why": "It makes the slowest, flakiest gate bigger, and a 40%-red suite is already being ignored."
+        },
+        {
+          "text": "Consumer-driven contract tests: consumers publish the interactions they rely on and the provider's CI verifies them before merge.",
+          "correct": true,
+          "why": "The provider learns in its own fast pipeline that a change breaks a real consumer, without a shared environment."
+        },
+        {
+          "text": "Have each consumer generate its client types from the provider's OpenAPI document.",
+          "correct": false,
+          "why": "Generated types help the consumer compile, but the provider can still ship the rename; nothing stops the break at the provider."
+        },
+        {
+          "text": "Require every breaking change to bump the URL version.",
+          "correct": false,
+          "why": "A policy only helps when the author knows the change is breaking; this rename was an accident nobody flagged."
+        }
+      ],
+      "explain": "Test the agreement between services at the level where it lives: the provider verifies consumers' contracts in its own CI. End-to-end environments are slow and shared; keep only a few smoke paths there.",
+      "refs": [
+        "https://martinfowler.com/articles/consumerDrivenContracts.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q19",
+      "domain": "deploys",
+      "stem": "You need to rename `users.fullname` to `display_name` on a 120M-row Postgres table. A deploy rolls 30 pods over about 10 minutes, so old and new code run side by side, and the service is used around the clock. Which plan is safe?",
+      "options": [
+        {
+          "text": "`ALTER TABLE … RENAME COLUMN` in the same deploy as the code change; in Postgres it only updates the catalog and is instant.",
+          "correct": false,
+          "why": "The rename is fast, but pods still on the old code query `fullname` and fail until the rollout finishes, and rollback breaks too."
+        },
+        {
+          "text": "Deploy the code that reads `display_name` first, then run the rename once all pods are on it.",
+          "correct": false,
+          "why": "Until the rename runs, every new pod queries a column that does not exist yet."
+        },
+        {
+          "text": "Add `display_name`, write both, backfill in batches, switch reads, stop writing `fullname`, and drop it in a later release.",
+          "correct": true,
+          "why": "Expand/contract keeps every intermediate schema compatible with both the old and new code, so rollouts and rollbacks stay safe."
+        },
+        {
+          "text": "Do the rename at 3 a.m. with all pods scaled to zero for a short maintenance window.",
+          "correct": false,
+          "why": "It works only with downtime, which a round-the-clock service is trying to avoid, and still needs a coordinated code switch."
+        }
+      ],
+      "explain": "During a rolling deploy two versions of the code share one schema. Use expand/contract: add, dual-write, backfill, switch reads, stop old writes, then remove in a later release, so every step is compatible with the version before it.",
+      "refs": [
+        "https://martinfowler.com/bliki/ParallelChange.html"
+      ]
+    },
+    {
+      "id": "code-practices-v1-q20",
+      "domain": "deploys",
+      "stem": "You are adding a second payment provider for 12 EU countries, launching Monday. The new provider has had incidents this year. A full deploy takes 25 minutes, and finance wants a way to send traffic back to the old provider within a minute. What release approach fits?",
+      "options": [
+        {
+          "text": "Ship the code dark behind a server-side flag, ramp it by country and percentage, and keep the flag as a kill switch.",
+          "correct": true,
+          "why": "Release is decoupled from deploy, exposure grows gradually, and turning the flag off reroutes payments in seconds without a deploy."
+        },
+        {
+          "text": "Keep the integration on a release branch and merge it Monday morning, so no new payment code runs in production before launch.",
+          "correct": false,
+          "why": "It becomes a big-bang switch whose only undo is a 25-minute revert deploy during a payment incident."
+        },
+        {
+          "text": "Read `USE_NEW_PROVIDER` from an environment variable at startup and flip it if there is trouble.",
+          "correct": false,
+          "why": "Changing it needs a restart or redeploy across the fleet, which misses the one-minute requirement."
+        },
+        {
+          "text": "Canary the deploy to 5% of pods and watch errors before continuing the rollout.",
+          "correct": false,
+          "why": "A canary limits deploy risk, but turning the provider off still means a rollback deploy, and a per-pod split is not per-country."
+        }
+      ],
+      "explain": "Separate deploy (code on servers) from release (users exposed). Server-side flags let you ramp by segment and act as kill switches measured in seconds; just remember to remove them once the rollout is done.",
+      "refs": [
+        "https://martinfowler.com/articles/feature-toggles.html"
+      ]
+    }
+  ]
+}

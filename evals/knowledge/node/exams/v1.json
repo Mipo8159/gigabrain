@@ -1,0 +1,676 @@
+{
+  "topic": "node",
+  "variant": 1,
+  "of": 5,
+  "title": "Node.js in production — variant 1",
+  "description": "Blocking the loop with big JSON and ReDoS, the libuv threadpool, per-replica state, backpressure and off-heap memory, deadlines, ALB keep-alive and Kubernetes rollouts.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "event-loop",
+      "name": "Event loop and blocking work",
+      "weight": 0.25
+    },
+    {
+      "id": "scaling",
+      "name": "Workers, processes and scaling out",
+      "weight": 0.2
+    },
+    {
+      "id": "streams-memory",
+      "name": "Streams, backpressure and memory",
+      "weight": 0.2
+    },
+    {
+      "id": "io",
+      "name": "Timeouts, cancellation and connections",
+      "weight": 0.2
+    },
+    {
+      "id": "ops",
+      "name": "Shutdown, failures and observability",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "node-v1-q01",
+      "domain": "event-loop",
+      "stem": "A food-delivery order API runs on Node 24, one process per pod, at about 300 rps. An admin endpoint `/export` loads all of a city's orders (~120 MB as JSON) into an array and sends `res.json(rows)`. Whenever an admin clicks it, every other request on that pod times out for about 3 seconds. Which change fixes the stall for everyone else?",
+      "options": [
+        {
+          "text": "Raise `server.requestTimeout` so the other requests wait out the export instead of timing out.",
+          "correct": false,
+          "why": "Tempting because the symptom is timeouts, but the loop is still frozen for 3 s; waiting longer just converts errors into a 3 s latency spike for 300 rps."
+        },
+        {
+          "text": "Stream rows from a DB cursor as NDJSON through `pipeline`.",
+          "correct": true,
+          "why": "Serialising row by row keeps each loop turn short and lets backpressure pace the cursor, so other requests interleave and memory stays flat."
+        },
+        {
+          "text": "Give the pod 4 vCPUs instead of 1 so the export has its own core.",
+          "correct": false,
+          "why": "JS runs on one thread per process; extra cores do nothing for a synchronous `JSON.stringify` that owns the only event loop."
+        },
+        {
+          "text": "Do the `JSON.stringify` in a worker thread and `postMessage` the string back.",
+          "correct": false,
+          "why": "It moves the stringify, but the 120 MB array still has to be structured-cloned into the worker and the huge result cloned back, both on the main thread, and peak memory doubles."
+        }
+      ],
+      "explain": "Anything that is synchronous and proportional to data size (`JSON.stringify`, `JSON.parse`, sort) blocks every request on the process. Make the work incremental (streams, cursors) so the loop gets turns between chunks; extra cores and timeouts do not help a single thread.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+      ]
+    },
+    {
+      "id": "node-v1-q02",
+      "domain": "event-loop",
+      "stem": "A loyalty service recomputes points for a 2-million-row batch inside the API process. To keep the pod responsive the author made it \"cooperative\" as shown. The Kubernetes liveness probe (1 s timeout) still fails during the batch and the pod gets restarted. What should change?",
+      "code": "async function recompute(rows) {\n  for (let i = 0; i < rows.length; i++) {\n    applyRules(rows[i]);                 // ~2 µs CPU each\n    if (i % 10_000 === 0) await Promise.resolve();   // \"yield\"\n  }\n}",
+      "options": [
+        {
+          "text": "Yield with `setImmediate` from `node:timers/promises` instead.",
+          "correct": true,
+          "why": "`setImmediate` is a macrotask: the loop returns to its I/O and timer phases between chunks, so the probe request is accepted and answered."
+        },
+        {
+          "text": "Lower the chunk size from 10 000 to 100 so each microtask is shorter.",
+          "correct": false,
+          "why": "Smaller chunks still resume through the microtask queue, which drains completely before I/O runs; the probe still waits for the whole batch."
+        },
+        {
+          "text": "Replace `await Promise.resolve()` with `process.nextTick` callbacks.",
+          "correct": false,
+          "why": "`nextTick` runs even earlier than promise jobs and also drains before the loop advances, so I/O is starved just the same."
+        },
+        {
+          "text": "Raise the liveness probe timeout to 30 s for the duration of the batch.",
+          "correct": false,
+          "why": "It stops the restarts but every user request on that pod still waits for the full batch; the loop is genuinely blocked."
+        }
+      ],
+      "explain": "`await` on an already-resolved promise only queues a microtask, and microtasks drain before the loop polls I/O or runs timers. To let I/O in, yield with a macrotask (`setImmediate`), or move heavy work to a worker thread.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick"
+      ]
+    },
+    {
+      "id": "node-v1-q03",
+      "domain": "event-loop",
+      "stem": "A login service hashes passwords with async `crypto.pbkdf2` (about 150 ms of CPU each) on 4-vCPU pods with the default `UV_THREADPOOL_SIZE`. During a 9 a.m. login burst, event-loop delay stays under 5 ms, yet an unrelated `/receipts` endpoint that uses `fs.promises.readFile` jumps from 5 ms to 2 s. Which diagnosis and fix are right?",
+      "options": [
+        {
+          "text": "The event loop is blocked by hashing; switch to `pbkdf2Sync` so hashing finishes faster.",
+          "correct": false,
+          "why": "Loop delay is low, so the loop is not blocked; `pbkdf2Sync` would actually block it and stall everything, not just file reads."
+        },
+        {
+          "text": "The disk is slow under load; move receipts to an in-memory cache.",
+          "correct": false,
+          "why": "Plausible for a file-read slowdown, but it only happens during the hashing burst, which points at a shared resource rather than the disk."
+        },
+        {
+          "text": "Both use libuv's 4-thread pool; bound hashing and size the pool.",
+          "correct": true,
+          "why": "pbkdf2 and fs calls queue for the same 4 libuv threads, so file reads wait behind hashes. Bounding hash concurrency (or moving hashing to its own worker pool) and setting `UV_THREADPOOL_SIZE` at start-up removes the head-of-line blocking."
+        },
+        {
+          "text": "Increase `--max-old-space-size`; the burst causes GC pauses that slow I/O.",
+          "correct": false,
+          "why": "GC pauses would show up as event-loop delay, which is low here; heap size has nothing to do with the threadpool queue."
+        }
+      ],
+      "explain": "Async is not free: `fs`, `dns.lookup`, async `crypto` (pbkdf2, scrypt) and async `zlib` all queue on libuv's threadpool, 4 threads by default. One expensive caller can starve the others while the event loop looks healthy. Bound expensive pool work and size `UV_THREADPOOL_SIZE` (set before start-up) on purpose.",
+      "refs": [
+        "https://nodejs.org/api/cli.html#uv_threadpool_sizesize",
+        "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+      ]
+    },
+    {
+      "id": "node-v1-q04",
+      "domain": "event-loop",
+      "stem": "A signup endpoint validates emails with `/^([a-zA-Z0-9]+\\.?)+@example\\.com$/`. Someone posts a 40 000-character local part with no `@`. That pod sits at 100% CPU for minutes, every request on it times out, and the per-request `AbortSignal.timeout(2000)` does nothing. What is the most robust fix?",
+      "options": [
+        {
+          "text": "Cap the input length before validating and rewrite the pattern so it cannot backtrack exponentially.",
+          "correct": true,
+          "why": "The nested quantifier backtracks exponentially and is synchronous, so nothing can interrupt it. Bounding input size and using a linear-time pattern (or a non-backtracking engine such as RE2) removes the attack."
+        },
+        {
+          "text": "Race the regex against a 2 s timer with `Promise.race` and reject on timeout.",
+          "correct": false,
+          "why": "The regex runs synchronously; the timer callback cannot run until the regex returns, so the race never fires in time."
+        },
+        {
+          "text": "Run the validation in a worker thread for each request.",
+          "correct": false,
+          "why": "It protects the main loop, but each attack request now pins a worker core for minutes; a handful of requests exhausts the pool and the CPU quota."
+        },
+        {
+          "text": "Add more pods and rely on the HPA to absorb the load.",
+          "correct": false,
+          "why": "Each malicious request costs the attacker nothing and burns a whole pod's loop; scaling just raises your bill while the attack scales too."
+        }
+      ],
+      "explain": "A regular expression with nested quantifiers (ReDoS) is synchronous CPU work that no timeout, signal or `await` can interrupt. Defend at the input: length limits, and patterns that run in linear time.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+      ]
+    },
+    {
+      "id": "node-v1-q05",
+      "domain": "event-loop",
+      "stem": "Your SRE team wants an alert that fires when a Node 24 API's event loop is being blocked, before users notice. Pods have 2 vCPUs and run one Node process each. Which two signals are the right ones to alert on? (Choose two.)",
+      "options": [
+        {
+          "text": "p99 of `perf_hooks.monitorEventLoopDelay()`",
+          "correct": true,
+          "why": "It measures how late the loop serves timers, which is exactly the delay every request experiences when the loop is blocked."
+        },
+        {
+          "text": "`performance.eventLoopUtilization()` staying near 1",
+          "correct": true,
+          "why": "ELU shows the share of time the loop is busy rather than idle; near 1 means no headroom left on the one JS thread, regardless of how many cores the pod has."
+        },
+        {
+          "text": "Pod CPU usage above 80% of its 2-vCPU limit",
+          "correct": false,
+          "why": "Tempting, but one saturated JS thread shows up as about 50% of a 2-vCPU pod, so this alert stays quiet while the loop is fully blocked."
+        },
+        {
+          "text": "`process.memoryUsage().heapUsed` growth",
+          "correct": false,
+          "why": "Heap growth signals leaks or allocation pressure, not blocking; a tight CPU loop can block for seconds with a flat heap."
+        },
+        {
+          "text": "The number of open sockets on the server",
+          "correct": false,
+          "why": "Socket count follows traffic and keep-alive behaviour; it can rise or stay flat while blocked, so it does not identify blocking."
+        }
+      ],
+      "explain": "Measure the loop itself: event-loop delay (lateness) and event-loop utilization (busy fraction). Process CPU percentages get diluted by the cores a single-threaded runtime cannot use.",
+      "refs": [
+        "https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions",
+        "https://nodejs.org/api/perf_hooks.html#performanceeventlooputilizationutilization1-utilization2"
+      ]
+    },
+    {
+      "id": "node-v1-q06",
+      "domain": "scaling",
+      "stem": "A real-estate listings API runs one Node process per 4-vCPU pod. 95% of requests are I/O-bound; 5% resize uploaded photos with a pure-JavaScript library, about 300 ms of CPU each. During upload peaks, the I/O-bound requests on the same pod see 300 ms+ stalls. Which change fits best?",
+      "options": [
+        {
+          "text": "A fixed pool of three `worker_threads` (e.g. Piscina) for the resize.",
+          "correct": true,
+          "why": "The resize leaves the main loop, which keeps serving I/O requests, and the pool uses the three otherwise idle cores without unbounded thread creation."
+        },
+        {
+          "text": "Use the `cluster` module to fork four processes per pod.",
+          "correct": false,
+          "why": "It uses all four cores, but whichever process gets a resize still blocks its own loop for 300 ms, so I/O requests landing on it still stall."
+        },
+        {
+          "text": "Raise `UV_THREADPOOL_SIZE` to 16.",
+          "correct": false,
+          "why": "The libuv pool only serves native async work (fs, crypto, zlib); a pure-JS resize runs on the main thread and ignores it."
+        },
+        {
+          "text": "Replace each 4-vCPU pod with four 1-vCPU pods.",
+          "correct": false,
+          "why": "Same CPU, but every pod still runs the resize on its only loop, so the stall pattern is unchanged, just spread across more pods."
+        }
+      ],
+      "explain": "Worker threads are for CPU-heavy JS that must not share the loop with latency-sensitive requests. More processes or pods add throughput, but each one still blocks while it does CPU work. Size the pool to the cores you actually have.",
+      "refs": [
+        "https://nodejs.org/api/worker_threads.html"
+      ]
+    },
+    {
+      "id": "node-v1-q07",
+      "domain": "scaling",
+      "stem": "A public API limits each API key to 100 requests per minute with an in-memory counter in each Node process. Traffic grew, and the deployment went from 1 pod to 6 behind a round-robin load balancer. Customers now report they can make about 600 requests a minute. What should replace the limiter?",
+      "options": [
+        {
+          "text": "Sticky sessions keyed on the API key at the load balancer.",
+          "correct": false,
+          "why": "It does pin each key to one counter, but load gets uneven when a few keys are huge, and counters reset whenever that pod restarts or the HPA rebalances."
+        },
+        {
+          "text": "Divide the limit by the pod count, so each pod allows 17 per minute.",
+          "correct": false,
+          "why": "It works only if traffic is spread perfectly and the pod count never changes; with HPA scaling, both assumptions break."
+        },
+        {
+          "text": "An atomic counter or token bucket in Redis that every pod consults.",
+          "correct": true,
+          "why": "One shared counter (atomic `INCR` with expiry, or a Lua token bucket) gives the same limit no matter how many pods run, and survives pod restarts."
+        },
+        {
+          "text": "Switch to the `cluster` module so all workers share the primary's memory.",
+          "correct": false,
+          "why": "Cluster workers are separate processes with separate memory, and it would not span the 6 pods anyway."
+        }
+      ],
+      "explain": "Anything a replica keeps in memory (counters, sessions, locks, caches) silently multiplies or diverges when you scale out. State that must be global goes in a shared store; keep the Node processes stateless.",
+      "refs": [
+        "https://12factor.net/processes"
+      ]
+    },
+    {
+      "id": "node-v1-q08",
+      "domain": "scaling",
+      "stem": "A newsletter service schedules the daily digest with `setInterval(sendDigest, 24 * 3600_000)` at process start. After the team enabled the HPA (2 to 8 pods), subscribers sometimes get five copies, and on days with a deploy they get none. Which design fixes both problems?",
+      "options": [
+        {
+          "text": "Switch to the `node-cron` library with a fixed `0 7 * * *` schedule.",
+          "correct": false,
+          "why": "It fixes the start-time drift, but every replica still runs the schedule, so subscribers still get one copy per pod."
+        },
+        {
+          "text": "Only send from the pod whose `process.env.HOSTNAME` ends with `-0`, and skip the others.",
+          "correct": false,
+          "why": "Deployment pod names have random suffixes, so no pod reliably matches; you would need a StatefulSet, and that pod's downtime then skips the digest."
+        },
+        {
+          "text": "Add random jitter to the interval so the replicas don't collide.",
+          "correct": false,
+          "why": "Jitter spreads the duplicates out in time but every replica still sends; it also leaves the deploy-reset problem untouched."
+        },
+        {
+          "text": "A Kubernetes CronJob with an idempotent send; remove the API timer.",
+          "correct": true,
+          "why": "One scheduler outside the API fires exactly once per schedule regardless of replica count or restarts; an idempotency key per day covers a retried job."
+        }
+      ],
+      "explain": "In-process timers are per-replica and die with the process. Scheduled work in a horizontally scaled service belongs to one external scheduler (or a leader lock), and the job itself must be idempotent because schedulers retry.",
+      "refs": [
+        "https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/"
+      ]
+    },
+    {
+      "id": "node-v1-q09",
+      "domain": "scaling",
+      "stem": "A ticketing API uses `pg.Pool({ max: 20 })` in each pod. The HPA can scale to 120 pods for on-sales, and each pod needs about 8 concurrent queries at peak. The Postgres 17 primary has `max_connections = 500`. At the last on-sale, new pods crashed with `sorry, too many clients already`. What do you change?",
+      "options": [
+        {
+          "text": "Raise `max_connections` to 2 500 on the primary so every pod's full pool always fits.",
+          "correct": false,
+          "why": "Each Postgres connection is a backend process with its own memory; thousands of mostly idle connections hurt the primary, and the next HPA bump breaks again."
+        },
+        {
+          "text": "A transaction-mode pooler (PgBouncer or RDS Proxy), smaller per-pod pools.",
+          "correct": true,
+          "why": "Pods × pool size is the real connection count. A pooler multiplexes many client connections onto a few hundred server connections, so the scale-out no longer translates into backend processes."
+        },
+        {
+          "text": "Set `max: 4` in every pod so 120 × 4 fits under 500.",
+          "correct": false,
+          "why": "The arithmetic fits, but pods need 8 concurrent queries at peak, so requests queue for connections inside every pod and latency climbs."
+        },
+        {
+          "text": "Use the `cluster` module so each pod shares one pool across workers.",
+          "correct": false,
+          "why": "Cluster workers are separate processes with separate pools; it multiplies connections rather than sharing them."
+        }
+      ],
+      "explain": "Connection count = replicas × per-process pool max. When autoscaling multiplies replicas, put a pooler between the app and the database and size per-pod pools to real concurrency, instead of letting the HPA ceiling decide your database load.",
+      "refs": [
+        "https://node-postgres.com/apis/pool",
+        "https://www.pgbouncer.org/features.html"
+      ]
+    },
+    {
+      "id": "node-v1-q10",
+      "domain": "streams-memory",
+      "stem": "A bank's statement export streams CSV rows to mobile clients with the loop shown. On a slow 3G connection one export grew the pod's memory by 900 MB, and three of them got the pod OOMKilled. Which fix addresses the cause?",
+      "code": "for await (const row of db.cursor('SELECT * FROM tx WHERE account_id = $1', [id])) {\n  res.write(toCsvLine(row));     // return value ignored\n}\nres.end();",
+      "options": [
+        {
+          "text": "Raise the pod memory limit to 4 GiB.",
+          "correct": false,
+          "why": "It postpones the kill; memory still grows with the slowest client's lag, so enough slow clients exhaust any limit."
+        },
+        {
+          "text": "Await `'drain'` whenever `res.write()` returns `false`.",
+          "correct": true,
+          "why": "`write()` returning false is the backpressure signal; waiting for `'drain'` lets the slow socket pace the cursor, so buffered memory stays near the high-water mark."
+        },
+        {
+          "text": "Call `res.flushHeaders()` before the loop so data leaves sooner.",
+          "correct": false,
+          "why": "It only sends the headers early; the body is still produced faster than a slow client consumes it."
+        },
+        {
+          "text": "Batch 1 000 rows into one `res.write()` call to reduce overhead.",
+          "correct": false,
+          "why": "Fewer calls, same total bytes queued in memory; batching does not respect backpressure."
+        }
+      ],
+      "explain": "A writable stream buffers whatever you write past its high-water mark. Ignoring `write()`'s return value turns a slow consumer into unbounded memory. Respect `'drain'`, or let `pipeline` handle it.",
+      "refs": [
+        "https://nodejs.org/en/learn/modules/backpressuring-in-streams"
+      ]
+    },
+    {
+      "id": "node-v1-q11",
+      "domain": "streams-memory",
+      "stem": "A document-upload proxy forwards files through gzip to object storage with `req.pipe(zlib.createGzip()).pipe(uploadStream)` and a single `'error'` handler on `uploadStream`. Mobile clients often abort mid-upload. Over a day, open file descriptors and memory climb, and occasionally the process crashes with an unhandled `'error'` from gzip. What is the right change?",
+      "options": [
+        {
+          "text": "Add `'error'` handlers on `req` and on the gzip stream that log and continue.",
+          "correct": false,
+          "why": "It stops the crashes, but `.pipe()` still doesn't destroy the other streams when one fails, so the leaked descriptors and buffers remain."
+        },
+        {
+          "text": "Call `req.setTimeout(30_000)` so aborted uploads time out sooner.",
+          "correct": false,
+          "why": "A timeout ends the request faster but doesn't clean up the gzip and upload streams still attached by `.pipe()`."
+        },
+        {
+          "text": "Buffer the upload in memory, then gzip and upload once the request ends.",
+          "correct": false,
+          "why": "No streams to leak, but memory now scales with file size times concurrency, which is worse at scale."
+        },
+        {
+          "text": "`await pipeline(req, zlib.createGzip(), uploadStream)` from `stream/promises`.",
+          "correct": true,
+          "why": "`pipeline` forwards an error from any stage, destroys every stream in the chain, and keeps backpressure, so an aborted client releases its resources."
+        }
+      ],
+      "explain": "`.pipe()` moves data but not failure: errors don't propagate and other stages are not destroyed. In services that face flaky clients, use `pipeline` so one failure tears down the whole chain.",
+      "refs": [
+        "https://nodejs.org/api/stream.html#streampipelinesource-transforms-destination-options"
+      ]
+    },
+    {
+      "id": "node-v1-q12",
+      "domain": "streams-memory",
+      "stem": "A telemetry gateway receives 1 MB binary chunks and keeps a dedup cache: `seen.set(id, chunk.subarray(0, 64))` for the last 10 000 chunks. The cache should cost about 640 KB, but the pod's `arrayBuffers` metric sits near 10 GB and it gets OOMKilled. Which fix addresses the cause?",
+      "options": [
+        {
+          "text": "Each `subarray` shares the 1 MB parent's memory; store a copy with `Buffer.from(chunk.subarray(0, 64))`.",
+          "correct": true,
+          "why": "A view keeps its whole backing ArrayBuffer alive, so 10 000 64-byte views pin 10 000 MB-sized buffers. Copying the 64 bytes lets the parent be collected."
+        },
+        {
+          "text": "The `Map` is leaking; swap it for a `WeakMap` keyed on `id`.",
+          "correct": false,
+          "why": "`WeakMap` keys must be objects, and string ids can't be weak keys; the real problem is what each value retains, not the map."
+        },
+        {
+          "text": "V8 is not collecting fast enough; call `global.gc()` every minute.",
+          "correct": false,
+          "why": "The buffers are still reachable through the views, so no GC can free them; forcing GC just adds pauses."
+        },
+        {
+          "text": "Raise `--max-old-space-size` so the cache fits.",
+          "correct": false,
+          "why": "Buffer memory lives outside the V8 heap and isn't governed by that flag; the retention is a bug, not a sizing issue."
+        }
+      ],
+      "explain": "Buffer `subarray`/`slice` return views, not copies; keeping a small view keeps the large allocation alive. When you keep a small part of a big buffer for a long time, copy it. Watch `arrayBuffers` and `external`, not just `heapUsed`.",
+      "refs": [
+        "https://nodejs.org/api/buffer.html#bufsubarraystart-end"
+      ]
+    },
+    {
+      "id": "node-v1-q13",
+      "domain": "streams-memory",
+      "stem": "An image-upload API pod has a 1 GiB memory limit and runs `node --max-old-space-size=900`. Under upload load it gets OOMKilled (exit 137) while dashboards show `heapUsed` at about 300 MB; `process.memoryUsage().arrayBuffers` reached about 650 MB just before the kill. Which reading and change are right?",
+      "options": [
+        {
+          "text": "A heap leak; capture a heap snapshot and find the retaining object.",
+          "correct": false,
+          "why": "Heap snapshots focus on the JS heap, which is only 300 MB here; the growth is in Buffer memory outside the heap."
+        },
+        {
+          "text": "Raise `--max-old-space-size` to 1 024 so V8 has room.",
+          "correct": false,
+          "why": "That flag limits only the V8 old space; it doesn't bound Buffer memory and leaves even less room before the container limit."
+        },
+        {
+          "text": "Run with `--expose-gc` and call `gc()` after each upload completes to free the buffers.",
+          "correct": false,
+          "why": "If the buffers are still referenced by in-flight uploads, GC cannot free them; manual GC just adds pauses."
+        },
+        {
+          "text": "Off-heap Buffers; stream the uploads and leave headroom under the limit.",
+          "correct": true,
+          "why": "The kill comes from RSS over the cgroup limit; uploads held in Buffers count against RSS, not the heap flag. Streaming bounds them, and a heap limit well under 1 GiB leaves room for off-heap memory."
+        }
+      ],
+      "explain": "`--max-old-space-size` caps the JS heap only. RSS also includes Buffers, native allocations and code. Set the heap well below the container limit and bound off-heap memory by streaming. An exit code of 137 means the kernel killed the process, which is a different event from V8's \"heap out of memory\" crash.",
+      "refs": [
+        "https://nodejs.org/api/process.html#processmemoryusage",
+        "https://nodejs.org/api/cli.html#--max-old-space-sizesize-in-mib"
+      ]
+    },
+    {
+      "id": "node-v1-q14",
+      "domain": "io",
+      "stem": "A travel site's quote service calls a pricing partner with the function shown. The partner sometimes sends headers at once and then trickles the body for minutes. When that happens, in-flight requests to the quote service climb into the thousands and the pod runs out of memory. Which minimal change fixes it?",
+      "code": "async function getQuote(id) {\n  const ac = new AbortController();\n  const t = setTimeout(() => ac.abort(), 800);\n  const res = await fetch(`${PRICING}/quotes/${id}`, { signal: ac.signal });\n  clearTimeout(t);\n  return res.json();\n}",
+      "options": [
+        {
+          "text": "Wrap the call in `Promise.race` with an 800 ms sleep and return a fallback quote.",
+          "correct": false,
+          "why": "The caller stops waiting, but nothing cancels the fetch; the socket and body keep streaming in the background, so resources still pile up."
+        },
+        {
+          "text": "`signal: AbortSignal.timeout(800)`, never cleared, so it also bounds `res.json()`.",
+          "correct": true,
+          "why": "The signal governs body consumption too; keeping it active makes the 800 ms a total deadline, and the stalled body is aborted with a `TimeoutError`."
+        },
+        {
+          "text": "Rely on undici's built-in `bodyTimeout` to cut stalled bodies.",
+          "correct": false,
+          "why": "It does exist, but the default is 300 s, which is far too long to protect an 800 ms budget."
+        },
+        {
+          "text": "Retry the call up to three times when the body is slow.",
+          "correct": false,
+          "why": "Retries without a deadline on each attempt multiply hung sockets and add load on a struggling partner."
+        }
+      ],
+      "explain": "A timeout that stops at the headers is not a request timeout. Keep the abort signal alive until the body is fully consumed, and make sure the timeout actually cancels the work rather than just stopping the wait.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#static-method-abortsignaltimeoutdelay",
+        "https://undici.nodejs.org/#/docs/api/Dispatcher?id=parameter-dispatchoptions"
+      ]
+    },
+    {
+      "id": "node-v1-q15",
+      "domain": "io",
+      "stem": "Checkout calls Inventory with `fetch` and a 5 s timeout, retrying 3 times. The edge gateway in front of Checkout gives up after 2 s. During an Inventory slowdown, Inventory's load triples, and most of that work serves requests whose callers are already gone. What design change addresses this?",
+      "options": [
+        {
+          "text": "Shorten Checkout's timeout to 1 s and keep the 3 retries.",
+          "correct": false,
+          "why": "Better, but the retries still run after the 2 s caller has gone, and a fixed 1 s can't adapt to time already spent upstream."
+        },
+        {
+          "text": "Add a circuit breaker on Inventory and keep the timeouts as they are.",
+          "correct": false,
+          "why": "A breaker helps once Inventory fails hard, but it does not stop work for callers that have already given up while Inventory is merely slow."
+        },
+        {
+          "text": "Propagate a deadline: derive one `AbortSignal` from the remaining budget and the client disconnect, and retry only within it.",
+          "correct": true,
+          "why": "Each hop gets the time actually left, and one signal cancels the fetch and the retries when either the budget runs out or the caller disconnects, so no work is done for dead requests."
+        },
+        {
+          "text": "Scale Inventory horizontally so it absorbs retry traffic.",
+          "correct": false,
+          "why": "It pays for capacity whose only job is serving abandoned requests; the amplification is still there."
+        }
+      ],
+      "explain": "Timeouts must shrink as a request goes deeper: pass the remaining deadline down, and cancel downstream work (`AbortSignal.any` of the deadline and the client disconnect) when the caller is gone. Retries live inside that budget, never outside it.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#static-method-abortsignalanysignals"
+      ]
+    },
+    {
+      "id": "node-v1-q16",
+      "domain": "io",
+      "stem": "A Node 24 API behind an AWS Application Load Balancer (idle timeout 60 s) shows a small but steady rate of 502s at moderate traffic, with no errors in the app logs. The app uses the default `http.Server` settings. Which cause and fix are most likely?",
+      "options": [
+        {
+          "text": "Node's 5 s `keepAliveTimeout` is below the ALB's 60 s; raise it above 60 s.",
+          "correct": true,
+          "why": "When the target closes an idle keep-alive connection first, the ALB can send a request onto it and gets a reset, which it reports as 502. The target's idle timeout should be longer than the ALB's."
+        },
+        {
+          "text": "Lower the ALB idle timeout to 4 s so the load balancer always closes idle connections first.",
+          "correct": false,
+          "why": "It removes the race too, but the ALB idle timeout also applies to the client side, so it would cut off slow clients and long polls across the whole site."
+        },
+        {
+          "text": "Make clients retry on 502 at the edge.",
+          "correct": false,
+          "why": "It hides the symptom and adds load; the connection race still happens at the same rate."
+        },
+        {
+          "text": "Send `Connection: close` on every response.",
+          "correct": false,
+          "why": "It works but throws away connection reuse between the ALB and the targets, adding handshake latency and churn at scale."
+        }
+      ],
+      "explain": "Between a proxy and a server, whoever closes an idle keep-alive connection first must be the proxy. Set the Node server's `keepAliveTimeout` above the load balancer's idle timeout; intermittent 502s with clean app logs are the classic sign.",
+      "refs": [
+        "https://nodejs.org/api/http.html#serverkeepalivetimeout",
+        "https://docs.aws.amazon.com/elasticloadbalancing/latest/application/application-load-balancers.html#connection-idle-timeout"
+      ]
+    },
+    {
+      "id": "node-v1-q17",
+      "domain": "io",
+      "stem": "A status page polls 40 partner endpoints every 10 s with `const res = await fetch(url); return res.ok;`. Each response carries about 300 KB of JSON nobody needs. After a day, the pod holds thousands of open sockets and memory keeps growing, and the partners complain about connection counts. What fixes it?",
+      "options": [
+        {
+          "text": "Switch to `HEAD` requests on endpoints that don't support them.",
+          "correct": false,
+          "why": "Where `HEAD` isn't supported you get 405s or a different code path, so the check stops measuring health; it also leaves the fetch bug in place."
+        },
+        {
+          "text": "Add `Connection: close` to every request so sockets are released after each poll.",
+          "correct": false,
+          "why": "Sockets close, but each poll now pays a new TCP/TLS handshake, and the unread body is still left behind on every call."
+        },
+        {
+          "text": "Read or cancel every body (`await res.body?.cancel()`) before returning.",
+          "correct": true,
+          "why": "undici returns a socket to the pool only after the body ends; cancelling or consuming it frees the connection for reuse."
+        },
+        {
+          "text": "Lower the poll interval to 60 s.",
+          "correct": false,
+          "why": "It slows the leak but doesn't stop it; every unread body still holds a socket."
+        }
+      ],
+      "explain": "In Node's `fetch` (undici), an unread body keeps its connection busy. Status-only calls must still consume or cancel the body, or keep-alive reuse breaks and sockets and memory grow.",
+      "refs": [
+        "https://undici.nodejs.org/#/?id=garbage-collection",
+        "https://nodejs.org/api/globals.html#fetch"
+      ]
+    },
+    {
+      "id": "node-v1-q18",
+      "domain": "ops",
+      "stem": "Every rolling deploy of a checkout API on Kubernetes produces a burst of 502s for 2 to 3 seconds per pod. The SIGTERM handler calls `server.close()` at once. Readiness probes run every 5 s. What change removes the 502s?",
+      "options": [
+        {
+          "text": "Fail readiness, keep serving a few seconds, then close the listener and drain.",
+          "correct": true,
+          "why": "Endpoint removal propagates asynchronously after SIGTERM; continuing to accept for a short window (or a `preStop` sleep) lets the load balancers stop routing before the listener closes."
+        },
+        {
+          "text": "Call `server.closeAllConnections()` on SIGTERM so the pod exits faster.",
+          "correct": false,
+          "why": "It kills in-flight requests too, which adds errors instead of removing them, and doesn't fix traffic arriving at a closed listener."
+        },
+        {
+          "text": "Increase `terminationGracePeriodSeconds` to 120 so in-flight requests have time to finish.",
+          "correct": false,
+          "why": "More time to finish doesn't help if the listener closes at once; new requests still arrive at a closed port during endpoint propagation."
+        },
+        {
+          "text": "Set `maxUnavailable: 0` in the rollout strategy.",
+          "correct": false,
+          "why": "It keeps capacity up during the rollout, but each terminating pod still closes its listener before traffic stops arriving."
+        }
+      ],
+      "explain": "In Kubernetes, SIGTERM and endpoint removal happen in parallel. A graceful shutdown keeps accepting briefly, then stops accepting, finishes in-flight requests, closes idle keep-alive sockets, and exits before the grace period ends.",
+      "refs": [
+        "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination",
+        "https://nodejs.org/api/http.html#serverclosecallback"
+      ]
+    },
+    {
+      "id": "node-v1-q19",
+      "domain": "ops",
+      "stem": "A dashboard endpoint (shown) is wrapped in `try/catch` and should return 503 when the alerts database is down. Instead, when that database went down, every pod entered CrashLoopBackOff with exit code 1. Which explanation and fix are right?",
+      "code": "app.get('/dashboard', async (req, res) => {\n  try {\n    const profile = loadProfile(req.user);   // ~300 ms\n    const alerts  = loadAlerts(req.user);    // rejects in ~20 ms when alerts-db is down\n    res.json({ profile: await profile, alerts: await alerts });\n  } catch {\n    res.status(503).json({ error: 'degraded' });\n  }\n});",
+      "options": [
+        {
+          "text": "`res.json` throws after the catch already sent a response; guard with `res.headersSent`.",
+          "correct": false,
+          "why": "Double-send bugs log errors but don't crash the process with exit code 1; the stack would also point at `res.json`, not a rejection."
+        },
+        {
+          "text": "`alerts` rejects unhandled while `profile` is awaited; use `Promise.allSettled`.",
+          "correct": true,
+          "why": "Node's default `--unhandled-rejections=throw` kills the process when a rejection has no handler at the end of that turn; the later `await` inside `try` comes too late. `allSettled` attaches handlers to both at once."
+        },
+        {
+          "text": "Express doesn't catch async errors; add an error middleware.",
+          "correct": false,
+          "why": "This handler catches its own errors; the crash happens before the catch is reached because the rejection is unhandled at the time it occurs."
+        },
+        {
+          "text": "Set `--unhandled-rejections=warn` so the process keeps running.",
+          "correct": false,
+          "why": "It stops the crash, but you then serve requests after an ignored failure and lose the signal; fix the code instead."
+        }
+      ],
+      "explain": "Starting promises early and awaiting them one by one leaves the later ones unhandled while you wait on the first. Node treats an unhandled rejection as a crash by default. For parallel calls, use `Promise.all`/`allSettled` so every promise has a handler at once.",
+      "refs": [
+        "https://nodejs.org/api/cli.html#--unhandled-rejectionsmode"
+      ]
+    },
+    {
+      "id": "node-v1-q20",
+      "domain": "ops",
+      "stem": "A payments API's liveness probe calls `/health`, which runs `SELECT 1` with a 1 s timeout. During a 40 s Postgres failover, Kubernetes restarted all 30 pods. They came back cold, opened 30 new connection pools at once, and stretched the outage to 4 minutes. How should the probes change?",
+      "options": [
+        {
+          "text": "Raise the liveness probe timeout to 60 s so it outlasts any realistic Postgres failover window.",
+          "correct": false,
+          "why": "It avoids this restart, but a genuinely hung process now takes over a minute to be replaced, and the probe still couples liveness to the database."
+        },
+        {
+          "text": "Liveness checks only the process and its loop; dependencies go to readiness or metrics.",
+          "correct": true,
+          "why": "Liveness answers \"should this container be restarted?\". A restart cannot fix a database, so a dependency outage must not trigger restarts; readiness or degraded responses handle it."
+        },
+        {
+          "text": "Remove the liveness probe and keep only readiness.",
+          "correct": false,
+          "why": "Then a pod whose loop is truly wedged is never restarted; you lose the one thing liveness is for."
+        },
+        {
+          "text": "Probe Postgres through RDS Proxy so failover is hidden.",
+          "correct": false,
+          "why": "A proxy can shorten failover, but the probe design still restarts every pod whenever the dependency hiccups."
+        }
+      ],
+      "explain": "Liveness should fail only when restarting this container would fix the problem. Checking shared dependencies in liveness turns one dependency blip into a fleet-wide restart storm.",
+      "refs": [
+        "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+      ]
+    }
+  ]
+}

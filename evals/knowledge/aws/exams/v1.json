@@ -1,0 +1,682 @@
+{
+  "topic": "aws",
+  "variant": 1,
+  "of": 5,
+  "title": "AWS for Node backends — variant 1",
+  "description": "Leans on SQS/Lambda failure handling, idempotent payments and ledgers, hot counters and Route 53 failover timing.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "delivery",
+      "name": "Delivery, retries and failure routing (SQS, Lambda, EventBridge, Step Functions)",
+      "weight": 0.3
+    },
+    {
+      "id": "dynamo",
+      "name": "DynamoDB keys, hot partitions and conditional writes",
+      "weight": 0.25
+    },
+    {
+      "id": "sdk",
+      "name": "SDK clients, timeouts, throttling and partial failures",
+      "weight": 0.2
+    },
+    {
+      "id": "storage",
+      "name": "S3 uploads and object integrity",
+      "weight": 0.1
+    },
+    {
+      "id": "region",
+      "name": "Multi-region and failover",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "aws-v1-q01",
+      "domain": "delivery",
+      "stem": "A checkout service drains an SQS standard queue with a Lambda (timeout 60 s, batch size 10, `MaximumBatchingWindowInSeconds` 5). The queue was created with CDK defaults. At 400 orders/min, about 3% of orders get two confirmation emails and some land in the DLQ after only a few slow runs. What change fixes the root cause?",
+      "options": [
+        {
+          "text": "Raise the queue visibility timeout to at least 6 × 60 s + 5 s and keep `maxReceiveCount` at 5 or more.",
+          "correct": true,
+          "why": "The default 30 s visibility timeout is shorter than the function's run time, so messages become visible again and get a second consumer. The 6× rule plus the batching window covers retries and throttling."
+        },
+        {
+          "text": "Lower the Lambda timeout to 25 s so it always finishes inside the 30 s visibility timeout.",
+          "correct": false,
+          "why": "Tempting because it makes the numbers line up, but slow runs then time out and fail, and Lambda retries under throttling still need headroom. It trades duplicates for failures."
+        },
+        {
+          "text": "Switch to a FIFO queue with content-based deduplication so each order message is delivered and processed exactly once.",
+          "correct": false,
+          "why": "FIFO dedups at send time within 5 minutes; it does not stop redelivery when a consumer outlives the visibility timeout. Duplicates from slow processing remain."
+        },
+        {
+          "text": "Set `maxReceiveCount` to 1 so a message is never processed twice.",
+          "correct": false,
+          "why": "That sends any message that was redelivered once straight to the DLQ, including healthy orders that were merely slow. It hides duplicates by losing work."
+        }
+      ],
+      "explain": "Visibility timeout is a lease, not a deadline for the consumer. Size it to outlive every retry path: AWS advises at least six times the function timeout plus the batching window, with `maxReceiveCount` of 5 or more so transient throttles don't push good messages to the DLQ. Nothing enforces the 6x rule, so check it in infra tests.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q02",
+      "domain": "delivery",
+      "stem": "An inventory consumer processes batches of 10 SQS messages. One malformed SKU in a batch makes all 10 messages retry, and the 9 good ones are reprocessed until the bad one reaches the DLQ. The event source mapping already has `ReportBatchItemFailures` enabled. Which bug in the handler causes this?",
+      "code": "export const handler = async (event: SQSEvent) => {\n  const failures: { itemIdentifier: string }[] = [];\n  for (const record of event.Records) {\n    try {\n      await reserveStock(JSON.parse(record.body));\n    } catch (err) {\n      failures.push({ itemIdentifier: record.messageId });\n    }\n  }\n  if (failures.length) throw new Error(`${failures.length} failed`);\n  return { batchItemFailures: failures };\n};",
+      "options": [
+        {
+          "text": "It throws after the loop, which fails the whole batch and makes Lambda ignore the item list.",
+          "correct": true,
+          "why": "With partial batch responses a thrown error still means the whole batch failed. The handler must return `{ batchItemFailures }` and never throw."
+        },
+        {
+          "text": "It reports `messageId`; Lambda expects the `receiptHandle` to identify failed items.",
+          "correct": false,
+          "why": "`itemIdentifier` must be the `messageId`. Using the receipt handle is the actual bug pattern that fails the whole batch, so this change would make things worse."
+        },
+        {
+          "text": "Batch size 10 is too large for partial failures; drop it to 1 so a single bad SKU can only ever fail its own invocation.",
+          "correct": false,
+          "why": "Batch size 1 does isolate failures, but at ten times the invocations. Partial batch responses exist precisely so large batches don't need that."
+        },
+        {
+          "text": "It needs a FIFO queue, because partial batch responses are a FIFO-only feature.",
+          "correct": false,
+          "why": "Partial batch responses work on standard and FIFO queues. The FIFO case only adds the rule about reporting the messages after the first failure."
+        }
+      ],
+      "explain": "A partial batch response is a return value, not an exception. Catch per record, collect `messageId`s of failures, return them, and never throw: a throw, a missing flag on the event source mapping, or an unknown id all turn into 'the whole batch failed'.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q03",
+      "domain": "delivery",
+      "stem": "A wallet ledger consumes an SQS FIFO queue grouped by `accountId`. A batch for one account arrives as `[deposit 100, withdraw 80, deposit 20]`. The withdraw fails on a transient DB error. The handler reports only the withdraw's `messageId` in `batchItemFailures` and commits the two deposits. Which outcome follows, and how should the handler report failures?",
+      "options": [
+        {
+          "text": "Order breaks: the last deposit lands before the retried withdraw. Report the failed message and every later one in the batch.",
+          "correct": true,
+          "why": "FIFO ordering is only kept if nothing after a failure is committed. Reporting the failure plus everything after it makes those messages come back in order."
+        },
+        {
+          "text": "No effect: FIFO keeps the failed message at the head of its message group, so per-account order is preserved without any handler change.",
+          "correct": false,
+          "why": "SQS does hold the group, but the handler already applied the later deposit in this invocation. The queue can't undo work the handler committed."
+        },
+        {
+          "text": "The batch is rejected because FIFO queues do not accept partial batch responses; switch to batch size 1.",
+          "correct": false,
+          "why": "FIFO supports partial batch responses. Batch size 1 would avoid the bug but throws away throughput that the correct reporting rule keeps."
+        },
+        {
+          "text": "Order breaks only across accounts; within one group SQS re-sorts the retried message by sequence number.",
+          "correct": false,
+          "why": "SQS doesn't re-sort committed effects. The order inside the group is exactly what broke here."
+        }
+      ],
+      "explain": "On FIFO, a partial batch failure has to stop at the first failure and report that message and all later ones from the batch. Ordering is a property of what you commit, not only of what the queue delivers. Powertools' `SqsFifoPartialProcessor` implements this rule.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q04",
+      "domain": "delivery",
+      "stem": "An EventBridge rule routes `OrderPlaced` events to a fulfilment API destination. The partner's API was down for 30 hours over a weekend; on Monday about 12,000 orders were never fulfilled and nothing shows in any queue. The target has no retry policy or DLQ configured. What should the team add so the next long outage loses nothing?",
+      "options": [
+        {
+          "text": "Raise the event bus's archive retention so the events can be replayed later.",
+          "correct": false,
+          "why": "Archive and replay can recover events, but only if an archive was set up and someone knows what to replay. It doesn't tell you which deliveries failed, and replaying everything re-sends the ones that succeeded."
+        },
+        {
+          "text": "A target retry policy plus a standard SQS DLQ in the same Region, with a queue policy allowing `events.amazonaws.com`.",
+          "correct": true,
+          "why": "By default EventBridge retries for 24 hours (up to 185 attempts) and then drops the event. A same-Region standard queue DLQ catches what retries can't deliver, so it can be redriven."
+        },
+        {
+          "text": "A FIFO DLQ on the target so the failed orders are kept in their original order.",
+          "correct": false,
+          "why": "EventBridge target DLQs must be standard queues; FIFO is not supported. The intent is reasonable but the configuration fails."
+        },
+        {
+          "text": "Increase `MaximumRetryAttempts` to its highest value; with enough attempts nothing is dropped.",
+          "correct": false,
+          "why": "Retries are bounded by event age too (24 hours max). A 30-hour outage outlasts any retry policy, and without a DLQ the event is still dropped."
+        }
+      ],
+      "explain": "EventBridge retries for at most 24 hours and then silently drops the event unless the target has a DLQ. Every target that matters needs an explicit retry policy and a standard, same-Region DLQ with a queue policy that lets EventBridge send to it. CDK's target props add that policy for you.",
+      "refs": [
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html",
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-dlq.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q05",
+      "domain": "delivery",
+      "stem": "To protect a Postgres primary that tolerates about 20 concurrent writers, a team set **reserved concurrency = 5** on the SQS consumer Lambda. During a 10× traffic spike the DLQ fills with valid messages that never hit an error in the code. Which change keeps the cap and stops the DLQ flood?",
+      "options": [
+        {
+          "text": "Drop reserved concurrency; set the event source mapping's maximum concurrency to 5.",
+          "correct": true,
+          "why": "With reserved concurrency the poller keeps pulling messages it can't invoke, they return to the queue and their receive count climbs. ESM maximum concurrency limits the pollers themselves, so messages wait in the queue instead."
+        },
+        {
+          "text": "Raise `maxReceiveCount` to 100 so throttled messages have more chances before the DLQ.",
+          "correct": false,
+          "why": "It hides the symptom, but throttled receives still burn attempts and add latency, and a real poison message now loops 100 times."
+        },
+        {
+          "text": "Put an RDS Proxy in front of Postgres and remove the concurrency limit completely.",
+          "correct": false,
+          "why": "RDS Proxy pools connections but doesn't make the primary accept unlimited write load. Removing the cap lets hundreds of functions contend on the database."
+        },
+        {
+          "text": "Lower the batch size to 1 so each throttled invocation affects only one message.",
+          "correct": false,
+          "why": "Throttles still return messages to the queue and increment their receive count, and batch size 1 multiplies invocations. It doesn't address the cause."
+        }
+      ],
+      "explain": "Reserved concurrency limits the function, not the SQS poller, so excess polled messages get throttled and burn receive attempts. To apply backpressure on an SQS source, cap the event source mapping's maximum concurrency and let the queue absorb the spike.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-scaling.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q06",
+      "domain": "delivery",
+      "stem": "A payments service receives provider webhooks (the provider retries on any non-2xx and sometimes double-sends), writes them to an SQS standard queue, and a Lambda captures funds. Finance found 0.02% double captures. Which two changes together make the capture effectively once? (Choose two.)",
+      "options": [
+        {
+          "text": "Claim the provider's event id with a DynamoDB conditional put (`IN_PROGRESS` with an expiry, later `DONE`) and skip events already claimed or done.",
+          "correct": true,
+          "why": "A conditional write is an atomic claim on the event id, so a concurrent or later delivery loses the race; the expiry lets a crashed attempt be retried."
+        },
+        {
+          "text": "Pass an idempotency key derived from the provider event id to the capture call so a repeated call is a no-op at the payment API.",
+          "correct": true,
+          "why": "If the Lambda crashes after capture but before marking done, the retry calls capture again; the downstream idempotency key makes that second call harmless."
+        },
+        {
+          "text": "Switch the queue to FIFO with content-based deduplication.",
+          "correct": false,
+          "why": "FIFO dedups only within 5 minutes and only on the body; provider retries can arrive hours later with different envelopes, and consumer retries still redeliver."
+        },
+        {
+          "text": "Check `GetItem` for the event id at the start of the handler and skip if found.",
+          "correct": false,
+          "why": "Check-then-act races: two concurrent deliveries both read 'not found' and both capture."
+        },
+        {
+          "text": "Delete the SQS message as the first step of the handler so it can't be redelivered.",
+          "correct": false,
+          "why": "That converts at-least-once into at-most-once: a crash after delete loses the payment entirely."
+        }
+      ],
+      "explain": "Exactly-once effect = at-least-once delivery + idempotent side effects. Claim the business key atomically (conditional write) and push an idempotency key into any external call, because the crash window between 'did it' and 'recorded it' always exists.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html",
+        "https://docs.powertools.aws.dev/lambda/typescript/latest/features/idempotency/"
+      ]
+    },
+    {
+      "id": "aws-v1-q07",
+      "domain": "dynamo",
+      "stem": "A flash-sale service keeps the units sold in one item `pk = SALE#2026-11-27`, updated with `ADD sold :1` on every purchase. At 4,000 purchases/s the on-demand table returns `ThrottlingException` even though account and table limits are far above that rate. Which design change removes the throttling?",
+      "options": [
+        {
+          "text": "Switch the table to provisioned mode with 10,000 WCU.",
+          "correct": false,
+          "why": "Table-level capacity isn't the limit; a single partition key is capped near 1,000 WCU/s no matter what mode or total capacity you buy."
+        },
+        {
+          "text": "Shard the counter over N keys (`SALE#…#0..N-1`), write a random shard, sum shards on read.",
+          "correct": true,
+          "why": "Spreading the key over N partitions multiplies the write ceiling by N; reads pay a small fan-out, which is cheap for a counter."
+        },
+        {
+          "text": "Use `TransactWriteItems` per purchase so the counter and the order row are updated atomically and never drift apart.",
+          "correct": false,
+          "why": "Transactions still write the same hot item, at twice the capacity cost, and add conflict errors on top of throttling."
+        },
+        {
+          "text": "Add a GSI on `pk` so reads of the counter stop competing with the writes.",
+          "correct": false,
+          "why": "The problem is write throughput on one key; a GSI adds more writes and doesn't spread the base item."
+        }
+      ],
+      "explain": "DynamoDB scales by partition, and one partition key tops out around 1,000 writes/s and 3,000 reads/s. On-demand mode doesn't change that per-key ceiling. Hot aggregates need write sharding (or buffering through a queue), with the cost moved to the read side.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-sharding.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q08",
+      "domain": "dynamo",
+      "stem": "Sign-up must guarantee one account per email. The current code does `GetItem` on a `EMAIL#<email>` item, and if absent writes the user item and the email item with two `PutItem` calls. During a marketing push, support found two accounts sharing an email. What should the write path become?",
+      "options": [
+        {
+          "text": "A `TransactWriteItems` with both Puts, each with `attribute_not_exists(pk)`.",
+          "correct": true,
+          "why": "The transaction makes the email claim and the user creation atomic, and the condition rejects the second sign-up regardless of timing."
+        },
+        {
+          "text": "Keep the read, but use `ConsistentRead: true` on the `GetItem`.",
+          "correct": false,
+          "why": "A strongly consistent read still leaves a window between read and write; two concurrent sign-ups both see 'absent'."
+        },
+        {
+          "text": "Put a GSI on the user item's `email` attribute and query it before writing.",
+          "correct": false,
+          "why": "GSIs are eventually consistent and never enforce uniqueness; this is the same race with a staler read."
+        },
+        {
+          "text": "Two sequential `PutItem`s with `attribute_not_exists` on the email item only.",
+          "correct": false,
+          "why": "This closes the race on the email, but if the process dies between the two puts you get an orphan claim or a user without its claim; the transaction removes that gap."
+        }
+      ],
+      "explain": "In DynamoDB, uniqueness comes from a dedicated key item plus a conditional write, and multi-item invariants come from `TransactWriteItems`. Reading first is never a uniqueness check, however consistent the read.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q09",
+      "domain": "dynamo",
+      "stem": "An admin page lists 'flagged' orders for a merchant with the code below. Merchants with many orders report the first page is often empty or short while 'Next' shows more flagged orders. Why do the pages come back short?",
+      "code": "const out = await ddb.send(new QueryCommand({\n  TableName: \"orders\",\n  KeyConditionExpression: \"pk = :m\",\n  FilterExpression: \"#s = :flagged\",\n  ExpressionAttributeNames: { \"#s\": \"status\" },\n  ExpressionAttributeValues: { \":m\": `MERCHANT#${id}`, \":flagged\": \"FLAGGED\" },\n  Limit: 20,\n  ExclusiveStartKey: cursor,\n}));\nreturn { items: out.Items, next: out.LastEvaluatedKey };",
+      "options": [
+        {
+          "text": "`Limit` caps items evaluated before the filter, so a page can hold zero matches yet still return a `LastEvaluatedKey`; loop until enough matches are collected.",
+          "correct": true,
+          "why": "The filter runs after `Limit` and the 1 MB page cap, so short or empty pages are normal and only `LastEvaluatedKey` says whether there's more."
+        },
+        {
+          "text": "`FilterExpression` is eventually consistent and drops recently changed items.",
+          "correct": false,
+          "why": "Consistency is the same as the underlying read; filters don't add staleness. Short pages happen even on old data."
+        },
+        {
+          "text": "The query should use `Scan`, because `Query` cannot apply a `FilterExpression`.",
+          "correct": false,
+          "why": "Query supports filters; a Scan would read the whole table and make the page problem much worse."
+        },
+        {
+          "text": "`Limit: 20` returns at most 20 matches but DynamoDB stops early on hot partitions.",
+          "correct": false,
+          "why": "Limit isn't a result count, and hot partitions throttle rather than return short pages."
+        }
+      ],
+      "explain": "`Limit` and the 1 MB cap apply to items read, not items matched. Any filtered read must loop on `LastEvaluatedKey` until it has N matches, and build the client cursor from the last returned item's key, not from an over-read page. If filtering discards most items, put the predicate in the key or a sparse index instead.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.FilterExpression.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.Pagination.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q10",
+      "domain": "dynamo",
+      "stem": "After `POST /orders` writes an order to the base table, the client redirects to 'My orders', which runs a `Query` on a GSI keyed by `customerId`. About 1 in 50 users don't see the order they just placed. The PM wants that gone without slowing the whole page. What do you do?",
+      "options": [
+        {
+          "text": "Add `ConsistentRead: true` to the GSI query.",
+          "correct": false,
+          "why": "GSIs only support eventually consistent reads; this throws a `ValidationException`."
+        },
+        {
+          "text": "Sleep 500 ms after the write before redirecting.",
+          "correct": false,
+          "why": "GSI lag has no upper bound you can rely on; the sleep slows every order and still misses on bad days."
+        },
+        {
+          "text": "Return the new order from the POST and merge a strongly consistent `GetItem` of it into the list.",
+          "correct": true,
+          "why": "Read-your-write comes from the base table; merging the one just-written item fixes the visible gap without changing the list read."
+        },
+        {
+          "text": "Change the GSI projection to `ALL` so the index carries the full item and is updated in the same write as the base table.",
+          "correct": false,
+          "why": "Projection decides which attributes are copied, not when; GSI propagation stays asynchronous."
+        }
+      ],
+      "explain": "GSIs are asynchronously maintained copies: never strongly consistent, never unique. When a user must see their own write, read that item from the base table (with `ConsistentRead`) or carry it from the write response.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q11",
+      "domain": "dynamo",
+      "stem": "A wallet transfer uses `TransactWriteItems` to debit A, credit B and insert a ledger row. A Lambda sends the transaction, the SDK times out after the request reached DynamoDB, and the SQS message is retried a minute later. Finance sees a double transfer. Which change prevents this at the lowest cost?",
+      "options": [
+        {
+          "text": "Set `ClientRequestToken` to the transfer id so a repeat within 10 minutes is idempotent, and make the ledger Put conditional on `attribute_not_exists` for retries after that.",
+          "correct": true,
+          "why": "The token makes SDK and fast retries return the original outcome; the conditional ledger Put covers retries that come later than the token window."
+        },
+        {
+          "text": "Wrap the transaction in a `GetItem` on the ledger row first and skip if it exists.",
+          "correct": false,
+          "why": "Check-then-act races with a concurrent retry and adds a read per transfer; the condition inside the transaction already does the check atomically."
+        },
+        {
+          "text": "Set the SDK's `maxAttempts` to 1 so a timed-out transaction is never resent.",
+          "correct": false,
+          "why": "SQS still redelivers the message, so the duplicate just moves one layer up."
+        },
+        {
+          "text": "Use `BatchWriteItem` instead, since it can't partially apply.",
+          "correct": false,
+          "why": "BatchWriteItem isn't atomic, allows no conditions, and can partially succeed with `UnprocessedItems`."
+        }
+      ],
+      "explain": "A timeout doesn't mean the write failed. Transactions take an idempotency token that's valid for 10 minutes; anything that can retry later (a queue, a DLQ redrive) also needs a business-key condition inside the transaction so the second attempt is rejected.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q12",
+      "domain": "sdk",
+      "stem": "A Lambda calls DynamoDB through a client configured below. During a network brownout, p99 latency jumps to the full 30 s Lambda timeout instead of failing at ~1 s, and invocations pile up. SDK 3.1150 with `@smithy/node-http-handler` 4.12 is bundled. What explains it?",
+      "code": "const ddb = new DynamoDBClient({\n  maxAttempts: 2,\n  requestHandler: { connectionTimeout: 300, requestTimeout: 1000 },\n});",
+      "options": [
+        {
+          "text": "Since node-http-handler 4.4.0, `requestTimeout` only logs a warning unless `throwOnRequestTimeout: true` is set.",
+          "correct": true,
+          "why": "The whole-request timer became advisory by default; you must opt in to throwing, or use `abortSignal` for a hard deadline."
+        },
+        {
+          "text": "`maxAttempts: 2` means two retries, so the total is three 1-second attempts plus backoff.",
+          "correct": false,
+          "why": "`maxAttempts` counts the first try, and three 1 s attempts wouldn't reach 30 s anyway."
+        },
+        {
+          "text": "Lambda freezes the event loop between invocations, so SDK timers never fire.",
+          "correct": false,
+          "why": "Timers run normally during an invocation; freezing only happens between invocations."
+        },
+        {
+          "text": "`requestTimeout` only covers connection setup and TLS; once the socket is open, a slow response body has no timeout at all.",
+          "correct": false,
+          "why": "That's `connectionTimeout`'s job. `requestTimeout` covers the whole request, it just doesn't throw by default anymore."
+        }
+      ],
+      "explain": "Check timeout semantics against the installed handler version, not old examples. In current SDK v3, set `throwOnRequestTimeout: true` (plus `connectionTimeout` and optionally `socketTimeout`), or pass `AbortSignal.timeout(ms)` to `send()` for a hard per-call budget that fits under the Lambda timeout.",
+      "refs": [
+        "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/node-http-handler",
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q13",
+      "domain": "sdk",
+      "stem": "An API Lambda (synchronous, behind API Gateway) writes to DynamoDB with SDK `maxAttempts: 10`; the mobile app retries failed calls 3 times; and a wrapper in the service retries the whole operation 3 times. During a throttling event, DynamoDB load rises ~40× and recovery takes 20 minutes after the cause is fixed. Which change most reduces the blast radius?",
+      "options": [
+        {
+          "text": "Keep retries with backoff in one layer (the SDK, with a small `maxAttempts`) and make the others fail fast, so attempts don't multiply.",
+          "correct": true,
+          "why": "Retries multiply across layers (10 × 3 × 3 = 90 attempts per user action). Retrying at one layer, with jitter and a retry quota, bounds amplification."
+        },
+        {
+          "text": "Switch the SDK to `retryMode: 'adaptive'` and keep all three layers.",
+          "correct": false,
+          "why": "Adaptive rate-limits one client's sends, but the outer layers still multiply attempts; the storm is reduced, not removed."
+        },
+        {
+          "text": "Raise table capacity 40× during incidents so retries succeed.",
+          "correct": false,
+          "why": "It pays to absorb self-inflicted load and still needs someone to scale on time; the amplification remains."
+        },
+        {
+          "text": "Add a fixed 100 ms delay between retries in the service wrapper.",
+          "correct": false,
+          "why": "Fixed delays synchronise clients into waves; without jitter and with three layers still stacked, the load pattern barely changes."
+        }
+      ],
+      "explain": "Retries at every layer multiply. Pick one layer to retry (usually closest to the dependency, with exponential backoff, jitter and a retry budget) and make the rest fail fast or retry only on clearly different failures. Otherwise a short throttle turns into a long brownout.",
+      "refs": [
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q14",
+      "domain": "sdk",
+      "stem": "A nightly job imports 2 million price rows using `BatchWriteItem` in chunks of 25 and logs 'done' when every `send()` resolves. At peak days a few thousand prices are missing with no error in the logs. Which cause fits these symptoms best?",
+      "options": [
+        {
+          "text": "`BatchWriteItem` returns `UnprocessedItems` with HTTP 200 when throttled, and the job never resends them.",
+          "correct": true,
+          "why": "Batch APIs report per-item failure in the response. The job must loop on `UnprocessedItems` with exponential backoff."
+        },
+        {
+          "text": "Batches over 16 MB are silently truncated by DynamoDB.",
+          "correct": false,
+          "why": "Oversized requests are rejected with an error, not truncated; this would show up in logs."
+        },
+        {
+          "text": "Duplicate keys inside one 25-item batch are silently merged by DynamoDB, so one of the two price writes is dropped without an error.",
+          "correct": false,
+          "why": "Duplicate keys in one batch reject the whole batch with a `ValidationException`, which throws."
+        },
+        {
+          "text": "The SDK drops the request if `maxAttempts` is exceeded without throwing.",
+          "correct": false,
+          "why": "When retries are exhausted the SDK rejects the promise; it never silently drops."
+        }
+      ],
+      "explain": "Partial-success APIs (`BatchWriteItem`, `BatchGetItem`, `SendMessageBatch`, `PublishBatch`, `PutEvents`) return 200 with per-item failures. Always read the per-item result and retry only the leftovers with backoff.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q15",
+      "domain": "sdk",
+      "stem": "A pricing Lambda serving 800 req/s builds `new DynamoDBClient({})` and `DynamoDBDocumentClient.from(...)` at the start of every invocation. p50 is fine but p95 is 3× higher than in a load test of the same code on ECS. Which change fixes the tail latency?",
+      "options": [
+        {
+          "text": "Set `AWS_NODEJS_CONNECTION_REUSE_ENABLED=1` on the function.",
+          "correct": false,
+          "why": "That variable only applied to SDK v2; v3 already keeps connections alive. The cost here is building the client per call."
+        },
+        {
+          "text": "Move client creation to module scope so warm invocations reuse one client and its TLS connections.",
+          "correct": true,
+          "why": "Clients are cheap to call and expensive to create; module scope reuses credentials, config resolution and sockets across warm invokes."
+        },
+        {
+          "text": "Raise memory to 3,008 MB for more CPU during TLS handshakes.",
+          "correct": false,
+          "why": "More CPU shortens the handshake but still repeats it per invocation; it costs money to treat the symptom."
+        },
+        {
+          "text": "Add provisioned concurrency sized to peak so cold starts, which cause the per-request client setup cost, disappear from p95.",
+          "correct": false,
+          "why": "The per-invocation client cost isn't a cold start; it happens on warm invokes too."
+        }
+      ],
+      "explain": "Create SDK clients once per execution environment (module scope, or top-level `await` for async init) and reuse them. SDK v3 keeps connections alive by default; the expensive part is repeating construction and handshakes per request.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/nodejs-handler.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q16",
+      "domain": "storage",
+      "stem": "A marketplace lets sellers upload product photos through a presigned PUT URL generated with `PutObjectCommand({ Bucket, Key, ContentType: 'image/jpeg' })`. A pentest uploaded a 4 GB HTML file through one of these URLs, and the CDN served it as `text/html`. What should the upload design change to?",
+      "options": [
+        {
+          "text": "Validate the requested `ContentType` and file extension in the backend before signing, and refuse to sign anything that isn't an image.",
+          "correct": false,
+          "why": "The backend only validates what the client claims; the uploader can still send any body and header afterwards because the URL doesn't bind them."
+        },
+        {
+          "text": "Shorten `expiresIn` to 60 seconds.",
+          "correct": false,
+          "why": "A short expiry narrows the window but doesn't constrain what is uploaded inside it."
+        },
+        {
+          "text": "Use a presigned POST with `content-length-range` and a `Content-Type` condition; serve with a fixed type after scanning.",
+          "correct": true,
+          "why": "Presigned POST policies enforce size and content-type conditions at S3; serving behind a check removes trust in client headers."
+        },
+        {
+          "text": "Enable S3 Object Lock on the bucket.",
+          "correct": false,
+          "why": "Object Lock prevents deletion/overwrite; it has nothing to say about what is uploaded."
+        }
+      ],
+      "explain": "A presigned PUT signs only a few fields; by default just `host`, so `ContentType` isn't enforced. To constrain uploads, sign the header (`signableHeaders`) or use presigned POST conditions for size and type, and never trust client-declared types when serving.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q17",
+      "domain": "storage",
+      "stem": "A video service uploads 2–20 GB masters with a hand-written multipart flow. Workers crash mid-upload a few times a day. The bill shows S3 storage growing 8% per month above the visible object total. What should the team change?",
+      "options": [
+        {
+          "text": "Enable bucket versioning plus a lifecycle rule on noncurrent versions, so the parts of failed uploads can be found, listed and expired.",
+          "correct": false,
+          "why": "Incomplete multipart parts aren't object versions; versioning would add more hidden storage, not reveal these parts."
+        },
+        {
+          "text": "Switch every upload to a single `PutObject` call.",
+          "correct": false,
+          "why": "Single PUT is capped at 5 GB, which excludes most masters, and a crash still loses the work."
+        },
+        {
+          "text": "Add a lifecycle rule `AbortIncompleteMultipartUpload` (e.g. after 1 day) and call `AbortMultipartUpload` in the failure path.",
+          "correct": true,
+          "why": "Incomplete parts are invisible in listings but billed; the lifecycle rule reaps the ones a crash leaves, and explicit abort covers handled errors."
+        },
+        {
+          "text": "Move the bucket to S3 Intelligent-Tiering.",
+          "correct": false,
+          "why": "That lowers the per-GB price of objects but leaves the orphaned parts billed indefinitely."
+        }
+      ],
+      "explain": "Multipart uploads that never complete leave billed parts you can't see in a normal listing. Every bucket that takes multipart uploads needs an abort-incomplete lifecycle rule, plus try/abort in code, or `lib-storage` `Upload` which aborts on error by default.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpu-abort-incomplete-mpu-lifecycle-config.html",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q18",
+      "domain": "region",
+      "stem": "A ticketing platform runs active-active in `us-east-1` and `eu-west-1` with DynamoDB global tables (multi-Region eventual consistency). Each Region decrements `remaining` on a shared event item with `UpdateItem ... ConditionExpression: remaining > :zero`. A popular concert oversold by 140 seats. How should the writes be organised?",
+      "options": [
+        {
+          "text": "Wrap the decrement in `TransactWriteItems` with the same condition so the check and the decrement are atomic across both Regions.",
+          "correct": false,
+          "why": "Transactions are ACID only within the Region where they run; replication to the other Region is still asynchronous."
+        },
+        {
+          "text": "Raise replication speed by adding a third replica Region.",
+          "correct": false,
+          "why": "More replicas don't make conflicting concurrent writes see each other; conflicts are still resolved by last writer wins."
+        },
+        {
+          "text": "Give each event a home Region and route all inventory writes for that event there, keeping reads local.",
+          "correct": true,
+          "why": "With one writer per item, conditions are evaluated against the authoritative copy; cross-Region conflicts disappear while reads stay close to users."
+        },
+        {
+          "text": "Use strongly consistent reads before decrementing in each Region.",
+          "correct": false,
+          "why": "Strong reads are consistent only within the local Region; the other Region's in-flight writes are still invisible."
+        }
+      ],
+      "explain": "Global tables (MREC) replicate asynchronously and resolve conflicts with last writer wins; condition expressions only see the local replica. Invariants on a shared item need a single write Region per item (or a multi-Region strongly consistent table, with its latency cost).",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q19",
+      "domain": "region",
+      "stem": "A booking API uses Route 53 failover records (primary `us-east-1`, secondary `us-west-2`) with a health check every 30 s, failure threshold 3, and record TTL 3600 s. In a drill, health checks flipped within 2 minutes but many clients kept hitting the dead Region for over 45 minutes. What should change first?",
+      "options": [
+        {
+          "text": "Lower the record TTL to around 60 s so resolvers re-query soon after the failover.",
+          "correct": true,
+          "why": "Route 53 changes its answer quickly, but resolvers and clients cache the old one for the TTL; a long TTL caps how fast traffic can move."
+        },
+        {
+          "text": "Set the health check interval to 10 s.",
+          "correct": false,
+          "why": "That shaves seconds off detection, which wasn't the slow part; the hour-long TTL still dominates."
+        },
+        {
+          "text": "Replace failover routing with weighted routing split 50/50 so both Regions always carry traffic and neither is ever cold.",
+          "correct": false,
+          "why": "Weighted routing sends half of traffic to a dead Region unless it's also health-checked, and the TTL problem remains."
+        },
+        {
+          "text": "Move the health check to CloudWatch alarms instead of endpoint checks.",
+          "correct": false,
+          "why": "Alarm-based checks change what is measured, not how long clients keep cached answers."
+        }
+      ],
+      "explain": "DNS failover time = detection time + TTL + client caching. Health checks are usually the fast part; record TTL and clients that cache DNS (long-lived connection pools) decide how long traffic keeps hitting the failed Region.",
+      "refs": [
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover-configuring.html",
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-how-route-53-chooses-records.html"
+      ]
+    },
+    {
+      "id": "aws-v1-q20",
+      "domain": "region",
+      "stem": "A SaaS API is moving from one Region to warm standby in a second Region with RTO 15 min and RPO under 1 min. Data is in DynamoDB and user uploads in S3. Which two choices meet the objectives without building custom replication? (Choose two.)",
+      "options": [
+        {
+          "text": "Convert the DynamoDB table to a global table with a replica in the standby Region.",
+          "correct": true,
+          "why": "Global tables replicate continuously, typically within a second, which meets an RPO under a minute with no custom pipeline."
+        },
+        {
+          "text": "S3 Cross-Region Replication with Replication Time Control on the upload bucket.",
+          "correct": true,
+          "why": "RTC replicates most objects within seconds and 99.99% within 15 minutes with metrics to alert on, giving a measurable RPO for uploads."
+        },
+        {
+          "text": "Nightly DynamoDB export to S3 copied to the standby Region.",
+          "correct": false,
+          "why": "Exports are cheap and simple but give an RPO of up to 24 hours, far above the target."
+        },
+        {
+          "text": "AWS Backup copies of DynamoDB every hour to the standby Region.",
+          "correct": false,
+          "why": "Backups are a good last line of defence, but an hourly copy is an RPO of up to an hour and restores take longer than 15 minutes."
+        },
+        {
+          "text": "A Lambda on DynamoDB Streams that writes every change to a table in the other Region.",
+          "correct": false,
+          "why": "It works but is exactly the custom replication the question excludes, with its own retries, ordering and conflict bugs."
+        }
+      ],
+      "explain": "Match the replication mechanism to RPO: continuous replication (global tables, S3 CRR/RTC) for seconds-to-minutes, backups and exports for hours. Prefer managed replication over stream-copying code, which has to solve ordering and conflicts itself.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-time-control.html"
+      ]
+    }
+  ]
+}

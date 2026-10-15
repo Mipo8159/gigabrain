@@ -1,0 +1,668 @@
+{
+  "topic": "kafka",
+  "variant": 3,
+  "of": 5,
+  "title": "Kafka at scale — variant 3",
+  "description": "Streaming media, ad-tech and parcels: cross-topic ordering, partitioner pitfalls, slow batches and expired offsets, commit bugs, CDC and transitive schemas, rack-aware fetching and zero-RPO trade-offs.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "partitioning",
+      "name": "Partitioning, keys and ordering",
+      "weight": 0.2
+    },
+    {
+      "id": "groups",
+      "name": "Consumer groups, rebalancing and lag",
+      "weight": 0.2
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery semantics, idempotence and transactions",
+      "weight": 0.2
+    },
+    {
+      "id": "integration",
+      "name": "Outbox, retries, DLQ and schema evolution",
+      "weight": 0.2
+    },
+    {
+      "id": "scale",
+      "name": "Replication, multi-region and capacity",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "kafka-v3-q01",
+      "domain": "partitioning",
+      "stem": "A B2B analytics SaaS on `@confluentinc/kafka-javascript` wants its five enterprise tenants isolated from noisy small tenants on the shared `ingest` topic (96 partitions, keyed by tenant ID). An engineer plans a custom partitioner that sends enterprise tenants to partitions 0–15 and everyone else to 16–95. What should the team do instead?",
+      "options": [
+        {
+          "text": "Write the custom partitioner in a native addon, since JavaScript partitioners are slow",
+          "correct": false,
+          "why": "Speed is not the issue: the Confluent KafkaJS API does not support custom partitioners at all, and a native fork is a maintenance burden."
+        },
+        {
+          "text": "Move enterprise tenants to their own topic with its own consumers",
+          "correct": true,
+          "why": "A separate topic isolates them physically (own partitions, consumer group, retention and ACLs) without fighting the client's partitioner. Quotas are per user/client-id, so give those producers their own client-id or user too."
+        },
+        {
+          "text": "Compute the partition in the app and pass it explicitly on every send, for all producers",
+          "correct": false,
+          "why": "Explicit partitions do work, but every producer in every service must share that mapping forever, and any producer that forgets lands tenants on the wrong partitions."
+        },
+        {
+          "text": "Raise the enterprise tenants' quotas so they win the contention",
+          "correct": false,
+          "why": "Quotas throttle clients, not keys sharing a partition; enterprise records still queue behind noisy tenants in the same partitions."
+        }
+      ],
+      "explain": "Isolation in Kafka is cheapest at the topic boundary: separate topics get separate partitions, consumer groups, retention and ACLs (quotas are set per user/client-id, so they need separate client identities). Custom partitioning logic spreads a hidden contract across every producer, and the Confluent JS client does not support it anyway.",
+      "refs": [
+        "https://github.com/confluentinc/confluent-kafka-javascript/blob/master/MIGRATION.md"
+      ]
+    },
+    {
+      "id": "kafka-v3-q02",
+      "domain": "partitioning",
+      "stem": "A subscription service publishes `subscription-created` and `subscription-cancelled` to two separate topics, both keyed by subscription ID with the same partition count. The billing consumer reads both topics in one group and sometimes processes a cancel before its create, charging a cancelled customer. Which fix holds up durably?",
+      "options": [
+        {
+          "text": "Use the `range` assignor so partition N of both topics goes to the same member",
+          "correct": false,
+          "why": "Same member is not the same order: the member fetches from two logs independently and can process either one first."
+        },
+        {
+          "text": "Delay processing of cancel events by 30 seconds",
+          "correct": false,
+          "why": "Usually hides the race, but any lag spike longer than 30 seconds brings it back."
+        },
+        {
+          "text": "Publish both event types to one `subscriptions` topic keyed by subscription ID",
+          "correct": true,
+          "why": "Ordering exists only within one partition; one topic puts a subscription's create and cancel in the same log, in write order."
+        },
+        {
+          "text": "Compare event timestamps and buffer whichever arrives early",
+          "correct": false,
+          "why": "Works most of the time but needs an unbounded buffer and trusts producer clocks."
+        }
+      ],
+      "explain": "Kafka gives no order across topics, even with identical keys and partition counts. Events whose relative order matters belong in the same topic under the same key.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_concepts_and_terms"
+      ]
+    },
+    {
+      "id": "kafka-v3-q03",
+      "domain": "partitioning",
+      "stem": "A routing service decides which shard owns a parcel by computing which partition its key lands on in `parcels`, using the helper below, and checks it against where the Java producers actually wrote. About half of all keys disagree. Which bug explains the mismatch?",
+      "code": "import { murmur2 } from './murmur2'; // Java-compatible, seed 0x9747b28c\n\nexport function partitionFor(key: string, n: number): number {\n  const bytes = Buffer.from(key, 'utf8');\n  return Math.abs(murmur2(bytes)) % n;\n}",
+      "options": [
+        {
+          "text": "`Math.abs` is not Java's `toPositive`; use `(murmur2(bytes) & 0x7fffffff) % n`",
+          "correct": true,
+          "why": "For negative hashes, Math.abs and masking the sign bit give different numbers, so roughly half of keys map to a different partition."
+        },
+        {
+          "text": "The key must be encoded as UTF-16, as Java strings are",
+          "correct": false,
+          "why": "Java's serializer encodes string keys as UTF-8 bytes before hashing, which the helper already does."
+        },
+        {
+          "text": "The modulo should use the number of brokers, not partitions",
+          "correct": false,
+          "why": "Partition choice depends only on the key hash and the partition count; broker count is irrelevant."
+        },
+        {
+          "text": "murmur2 needs seed 0 when called from Node",
+          "correct": false,
+          "why": "The seed is fixed at 0x9747b28c in Java's implementation; changing it would make every key disagree."
+        }
+      ],
+      "explain": "Java's rule is `(murmur2(utf8Bytes) & 0x7fffffff) % numPartitions`. Re-implementing it is a compatibility contract; test against vectors generated by the real client, including negative-hash and non-ASCII keys.",
+      "refs": [
+        "https://kafka.js.org/docs/producing"
+      ]
+    },
+    {
+      "id": "kafka-v3-q04",
+      "domain": "partitioning",
+      "stem": "Years ago an ad-tech team created `bid-audit` with 2,000 partitions \"for future scale\". It carries 300 msg/s. Producers now send tiny batches, end-to-end latency is high, and broker restarts take long because of leader elections across many partitions. Ordering is per auction ID. How do they get to a sensible partition count?",
+      "options": [
+        {
+          "text": "Reduce the partition count to 24 with `kafka-topics --alter`",
+          "correct": false,
+          "why": "Kafka can only increase a topic's partition count; the alter call is rejected."
+        },
+        {
+          "text": "Keep 2,000 partitions and raise `linger.ms` so producers fill bigger batches across all of them",
+          "correct": false,
+          "why": "Bigger lingers help batching slightly but add latency and do nothing for restart time or per-partition overhead."
+        },
+        {
+          "text": "Create a 24-partition topic, move producers, drain the old topic, then delete it",
+          "correct": true,
+          "why": "A new topic is the only way to shrink partitions; since auction events are short-lived, a drain-then-switch keeps per-auction order."
+        },
+        {
+          "text": "Leave it; partition count has no cost on KRaft clusters",
+          "correct": false,
+          "why": "KRaft improves metadata scale, but every partition still costs files, replication fetches, small batches and election work."
+        }
+      ],
+      "explain": "Partition counts only go up, and each partition has a cost in batching, files, replication and failover time. Size for planned peak with headroom, and plan a new topic when you got it badly wrong.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#basic_ops_modify_topic"
+      ]
+    },
+    {
+      "id": "kafka-v3-q05",
+      "domain": "groups",
+      "stem": "A streaming-media playback-events group has 48 partitions and 48 consumers. Lag is near zero on 45 partitions and growing steadily on partitions 3, 17 and 40. CPU on all pods is similar and no rebalances are happening. Which is the most likely explanation to investigate first?",
+      "options": [
+        {
+          "text": "Too few consumers for the load; scale the group out to 96 pods so busy partitions get help",
+          "correct": false,
+          "why": "Every partition already has a member; more consumers would sit idle, and most partitions are fine."
+        },
+        {
+          "text": "A few heavy keys hash to those partitions, or a slow or retrying message is stuck there",
+          "correct": true,
+          "why": "Lag isolated to a few partitions points at what is on them (skewed keys or a stuck record), not at group capacity."
+        },
+        {
+          "text": "The broker hosting those partitions is overloaded; restart it",
+          "correct": false,
+          "why": "Possible but less likely: those three partitions usually have leaders on different brokers, and restarting hides the evidence."
+        },
+        {
+          "text": "The group is using the `range` assignor; switch to `uniform`",
+          "correct": false,
+          "why": "With one consumer per partition, the assignor makes no difference to per-partition throughput."
+        }
+      ],
+      "explain": "Read lag per partition, not per group. Uniform lag means capacity; lag on a few partitions means skew or a stuck message, which more consumers cannot fix.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#monitoring"
+      ]
+    },
+    {
+      "id": "kafka-v3-q06",
+      "domain": "groups",
+      "stem": "An ad-impressions group has 200 members across many pods, reading a 400-partition topic. Under the classic eager protocol, adding a single member stopped all 200 for several seconds. The team is moving to `group.protocol: 'consumer'` on Kafka 4.3. What behaviour should they expect when one member is added afterwards?",
+      "options": [
+        {
+          "text": "All members still pause, but the pause is shorter because the broker computes assignments",
+          "correct": false,
+          "why": "Faster assignment is not the main change; the new protocol avoids a group-wide pause altogether."
+        },
+        {
+          "text": "No rebalance happens; the new member waits until another one leaves",
+          "correct": false,
+          "why": "The new member gets partitions; the broker reassigns some of them to it."
+        },
+        {
+          "text": "Every member re-fetches all its partitions from the earliest offset",
+          "correct": false,
+          "why": "Members resume from committed offsets; rebalancing never resets positions."
+        },
+        {
+          "text": "Only the partitions moving to the new member are revoked; others keep consuming",
+          "correct": true,
+          "why": "KIP-848 assignment is incremental and broker-driven, so unaffected members continue without a global barrier."
+        }
+      ],
+      "explain": "The new consumer protocol makes rebalances incremental: the coordinator moves only the partitions that need to move. Large groups benefit most, since a membership change no longer stops everyone.",
+      "refs": [
+        "https://www.confluent.io/blog/kip-848-consumer-rebalance-protocol/"
+      ]
+    },
+    {
+      "id": "kafka-v3-q07",
+      "domain": "groups",
+      "stem": "A parcel-label service on kafkajs processes `eachBatch` of up to 500 labels, each a slow PDF render. Members are regularly thrown out of the group mid-batch and the next owner re-renders labels already printed. Here is the handler. What change keeps membership and limits replays?",
+      "code": "await consumer.run({\n  eachBatch: async ({ batch }) => {\n    for (const m of batch.messages) {\n      await renderLabel(m);           // ~400 ms each\n    }\n    // offsets resolved by kafkajs after the batch\n  },\n});",
+      "options": [
+        {
+          "text": "Render the whole batch with `Promise.all` to finish faster",
+          "correct": false,
+          "why": "Shorter, but a 500-render burst may still overrun and it saturates the renderer; it also loses all progress on a failure."
+        },
+        {
+          "text": "Raise `sessionTimeout` to 10 minutes so the group tolerates a full 500-label batch",
+          "correct": false,
+          "why": "It hides the problem, and dead members now take 10 minutes to be replaced."
+        },
+        {
+          "text": "Per message: check `isRunning()`/`isStale()`, `resolveOffset`, then `await heartbeat()`",
+          "correct": true,
+          "why": "Heartbeating keeps the member alive, resolveOffset records progress so a handover replays at most one label, and isStale stops work on revoked partitions."
+        },
+        {
+          "text": "Switch to `eachMessage` and let auto-commit save offsets every 5 seconds in the background",
+          "correct": false,
+          "why": "eachMessage heartbeats between messages, but a crash or revoke still replays up to 5 seconds of renders."
+        }
+      ],
+      "explain": "In long batches, make progress and liveness explicit: resolve each offset, heartbeat, and stop when the batch is stale. The replay after a handover is then one message, not a whole batch.",
+      "refs": [
+        "https://kafka.js.org/docs/consuming"
+      ]
+    },
+    {
+      "id": "kafka-v3-q08",
+      "domain": "groups",
+      "stem": "A tax-reporting consumer group runs only during the last week of each quarter. This quarter it started, found no committed offsets, applied `auto.offset.reset=latest`, and skipped eleven weeks of events still in the topic's 90-day retention. Nobody reset anything. What happened, and what should the team change?",
+      "options": [
+        {
+          "text": "Retention deleted the offsets topic; raise topic retention",
+          "correct": false,
+          "why": "The data was still there; it was the group's committed offsets that disappeared, which data retention does not control."
+        },
+        {
+          "text": "Idle groups' offsets expire after `offsets.retention.minutes` (7 days by default); extend it or checkpoint and seek",
+          "correct": true,
+          "why": "An idle group loses its offsets after the retention window, then the reset policy applies; a longer window or an external checkpoint keeps its position."
+        },
+        {
+          "text": "The new consumer protocol drops classic offsets; switch back",
+          "correct": false,
+          "why": "Offsets are stored per group regardless of protocol; nothing in the stem changed protocol."
+        },
+        {
+          "text": "`latest` was correct; switch to `earliest` for the first run of each quarter only",
+          "correct": false,
+          "why": "earliest would reread 90 days, much of it already reported; it swaps skipping for duplicating."
+        }
+      ],
+      "explain": "Committed offsets are not kept forever: once a group is empty they expire after `offsets.retention.minutes`. Seasonal or batch consumers need a longer window or their own checkpoint.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#brokerconfigs_offsets.retention.minutes"
+      ]
+    },
+    {
+      "id": "kafka-v3-q09",
+      "domain": "delivery",
+      "stem": "A stock-trading producer uses `acks=1` for low latency. A broker hosting partition leaders crashed; the producer had received success for 1,200 orders that never appeared on the new leader. The topic has replication factor 3. Which setting caused the loss?",
+      "options": [
+        {
+          "text": "Replication factor 3 is too low for financial data",
+          "correct": false,
+          "why": "RF 3 is standard; the records never reached the followers, so more replicas would not have helped."
+        },
+        {
+          "text": "Compression delayed the follower fetch",
+          "correct": false,
+          "why": "Compression affects batch size, not whether an ack waits for followers."
+        },
+        {
+          "text": "`acks=1`: the leader acknowledged before followers had the records",
+          "correct": true,
+          "why": "With acks=1 only the leader's copy exists at ack time; when it died, a follower without those records became leader."
+        },
+        {
+          "text": "Unclean leader election was enabled, so an out-of-sync follower took over",
+          "correct": false,
+          "why": "Unclean election can lose data, but here the in-sync followers simply never received records acknowledged only by the leader."
+        }
+      ],
+      "explain": "The ack level is your durability promise: acks=1 means \"one copy\". Use acks=all with min.insync.replicas ≥ 2 for anything you cannot lose.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#producerconfigs_acks"
+      ]
+    },
+    {
+      "id": "kafka-v3-q10",
+      "domain": "delivery",
+      "stem": "A streaming-media billing consumer with auto-commit on processes each playback event with the handler below. After a deploy restart, some events were never billed and no errors were logged. Why were events lost?",
+      "code": "await consumer.run({\n  eachMessage: async ({ message }) => {\n    // fire and forget so the consumer stays fast\n    billPlayback(JSON.parse(message.value.toString()))\n      .catch(err => log.error(err));\n  },\n});",
+      "options": [
+        {
+          "text": "The handler returns before billing finishes, so auto-commit commits offsets for unbilled events",
+          "correct": true,
+          "why": "The client considers the message done when the handler resolves; a restart then skips events whose billing was still in flight."
+        },
+        {
+          "text": "`JSON.parse` throws on some events and the error is swallowed",
+          "correct": false,
+          "why": "A parse error would throw synchronously inside the handler and be visible; the loss also happens with valid events."
+        },
+        {
+          "text": "Auto-commit commits too slowly, so the restart replays and then discards in-flight events",
+          "correct": false,
+          "why": "Slow commits cause duplicates, not losses."
+        },
+        {
+          "text": "The consumer should use `eachBatch` for billing workloads",
+          "correct": false,
+          "why": "eachBatch with the same fire-and-forget pattern would lose events the same way."
+        }
+      ],
+      "explain": "Commit follows handler completion. Fire-and-forget work inside a handler turns at-least-once into at-most-once; await the effect (or track and commit completed offsets yourself).",
+      "refs": [
+        "https://kafka.js.org/docs/consuming"
+      ]
+    },
+    {
+      "id": "kafka-v3-q11",
+      "domain": "delivery",
+      "stem": "An ad-budget consumer commits manually after each message with the code below. In staging, everything looks fine. In production, after restarts, budgets miss large ranges of spend events. Why are spend events missing?",
+      "code": "eachMessage: async ({ topic, partition, message }) => {\n  await applySpend(message);\n  await consumer.commitOffsets([\n    { topic, partition, offset: message.offset + 1 },\n  ]);\n},",
+      "options": [
+        {
+          "text": "Committing after every message overloads the group coordinator, which silently drops some commits",
+          "correct": false,
+          "why": "Frequent commits cost throughput but are not silently dropped."
+        },
+        {
+          "text": "It should commit `message.offset`, not offset + 1",
+          "correct": false,
+          "why": "The committed offset is the next one to read, so +1 is the right intent; committing the offset itself would replay the last message."
+        },
+        {
+          "text": "Manual commits are ignored unless auto-commit is also on",
+          "correct": false,
+          "why": "Manual commit works without auto-commit; that is its purpose."
+        },
+        {
+          "text": "`message.offset` is a string, so `+ 1` concatenates ('41' → '411') and commits far ahead",
+          "correct": true,
+          "why": "The group jumps past real messages; after a restart it resumes at the inflated offset and skips everything between."
+        }
+      ],
+      "explain": "Offsets in Node clients are 64-bit strings. Compute the next offset with BigInt (`(BigInt(o) + 1n).toString()`); string concatenation and Number both corrupt it.",
+      "refs": [
+        "https://kafka.js.org/docs/consuming"
+      ]
+    },
+    {
+      "id": "kafka-v3-q12",
+      "domain": "delivery",
+      "stem": "An ad-tech pipeline reads raw `impressions`, aggregates per campaign per minute, and writes `campaign-spend` which billing reads. Everything stays inside Kafka. Billing must never double-count a minute after a crash, and the team can afford some extra latency. Which approach fits?",
+      "options": [
+        {
+          "text": "Idempotent producer only; it prevents duplicates after a crash",
+          "correct": false,
+          "why": "It dedupes producer retries within a session; after a crash the reprocessed input produces new records."
+        },
+        {
+          "text": "Transactions: output plus input offsets committed atomically; billing reads `read_committed`",
+          "correct": true,
+          "why": "This is exactly the Kafka-to-Kafka case transactions cover; a crash aborts partial output and offsets together."
+        },
+        {
+          "text": "At-least-once delivery, with billing deduping each campaign-minute in an in-memory set",
+          "correct": false,
+          "why": "It works until billing restarts and loses the set."
+        },
+        {
+          "text": "Commit input offsets before producing the aggregate",
+          "correct": false,
+          "why": "A crash between commit and produce loses the minute: at-most-once."
+        }
+      ],
+      "explain": "When input and output are both Kafka topics, transactions give exactly-once at the cost of latency (consumers wait for commit markers). Outside Kafka, use idempotent sinks instead.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#semantics"
+      ]
+    },
+    {
+      "id": "kafka-v3-q13",
+      "domain": "integration",
+      "stem": "An e-commerce platform's outbox relay polls Postgres and handles 500 events/s. Black Friday forecasts 8,000/s; polling queries already cost noticeable DB load, and per-order ordering must hold. The platform team runs Kafka Connect already. Which approach should they move to?",
+      "options": [
+        {
+          "text": "Keep polling but every 10 ms instead of 200 ms, with a covering index on the outbox",
+          "correct": false,
+          "why": "Lower latency, but query load rises twentyfold on an already loaded database."
+        },
+        {
+          "text": "Skip the outbox: publish to Kafka right after the DB commit",
+          "correct": false,
+          "why": "A crash between commit and publish loses events; the outbox exists to prevent that dual write."
+        },
+        {
+          "text": "Run 16 polling relays with `SKIP LOCKED`",
+          "correct": false,
+          "why": "Throughput rises, but concurrent relays can publish one order's events out of order."
+        },
+        {
+          "text": "CDC with Debezium reading the outbox from the WAL, keyed by aggregate ID",
+          "correct": true,
+          "why": "Log-based capture reads committed changes in commit order without polling queries, and keying by aggregate keeps per-order order."
+        }
+      ],
+      "explain": "Polling outboxes hit a ceiling in DB load and ordering under parallelism. Change data capture reads the WAL in commit order, which scales and preserves order when events are keyed by aggregate ID.",
+      "refs": [
+        "https://debezium.io/documentation/reference/stable/transformations/outbox-event-router.html"
+      ]
+    },
+    {
+      "id": "kafka-v3-q14",
+      "domain": "integration",
+      "stem": "A recommendation team rebuilds its feature store by replaying `user-activity` from tiered storage, a full year of Avro data written under 14 schema versions. The subject uses BACKWARD. A replay failed: the current consumer schema could not read records from version 3, though each version had passed the registry check. What should the subject use?",
+      "options": [
+        {
+          "text": "BACKWARD_TRANSITIVE, so each new schema must read data from every earlier version",
+          "correct": true,
+          "why": "Plain BACKWARD checks only against the latest version; a long replay needs compatibility with all versions."
+        },
+        {
+          "text": "FORWARD, so old readers can read new data",
+          "correct": false,
+          "why": "The direction is wrong: the problem is a new reader reading very old data."
+        },
+        {
+          "text": "FULL, which checks both directions against the last version",
+          "correct": false,
+          "why": "Still only against the latest version; incompatibilities with version 3 could slip through."
+        },
+        {
+          "text": "NONE, plus a hand-written converter for each of the 13 older versions in the consumer",
+          "correct": false,
+          "why": "Works with enough effort, but throws away the registry's checks and makes every replay a bespoke project."
+        }
+      ],
+      "explain": "Non-transitive modes compare only with the previous version, so incompatibilities can accumulate across steps. If consumers may read old data from far back (replays, long retention), use a *_TRANSITIVE mode.",
+      "refs": [
+        "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html"
+      ]
+    },
+    {
+      "id": "kafka-v3-q15",
+      "domain": "integration",
+      "stem": "A shipping platform delivers carrier webhooks from a `webhook-out` consumer. Receivers are flaky (timeouts for minutes at a time), each webhook is independent, and order between webhooks does not matter. One slow receiver must not delay others. Which design elements fit? (Choose two.)",
+      "options": [
+        {
+          "text": "On failure, publish to delayed retry topics (for example 1 min, 10 min, 1 h) and continue",
+          "correct": true,
+          "why": "With no ordering requirement, non-blocking retry topics keep the main partition flowing while failures wait out the receiver's outage."
+        },
+        {
+          "text": "After the last retry, publish to a DLQ with the original headers and alert",
+          "correct": true,
+          "why": "Bounded retries need an end; the DLQ keeps the payload and origin for manual or automated redelivery."
+        },
+        {
+          "text": "Retry in the handler with backoff until the receiver answers",
+          "correct": false,
+          "why": "Blocking retries hold up every other webhook on the partition behind one flaky receiver."
+        },
+        {
+          "text": "Park every later webhook for the same receiver until the failed one succeeds",
+          "correct": false,
+          "why": "Key parking is for ordered streams; here order does not matter, so it only adds delay."
+        },
+        {
+          "text": "Sleep 60 seconds in the handler before retrying once",
+          "correct": false,
+          "why": "A long sleep blocks the partition and can exceed the poll interval, triggering a rebalance."
+        }
+      ],
+      "explain": "Pick the retry pattern from the ordering requirement. Independent messages suit non-blocking retry topics with increasing delays and a final DLQ; ordered streams need blocking retry or key parking.",
+      "refs": [
+        "https://www.confluent.io/blog/error-handling-patterns-in-kafka/"
+      ]
+    },
+    {
+      "id": "kafka-v3-q16",
+      "domain": "integration",
+      "stem": "A catalogue service publishes `ProductChanged { productId }` and nothing else. Forty consumer services react by calling the catalogue's REST API for the current product. During a bulk price update of 2 million products, the catalogue API collapsed under the callbacks. What change addresses the root cause?",
+      "options": [
+        {
+          "text": "Rate-limit consumers so they call the API more slowly",
+          "correct": false,
+          "why": "Protects the API, but every consumer falls hours behind during bulk updates."
+        },
+        {
+          "text": "Put a cache in front of the catalogue API",
+          "correct": false,
+          "why": "Helps reads of unchanged products, but every event signals a change, so most callbacks miss the cache."
+        },
+        {
+          "text": "Carry the changed product state in the event (event-carried state transfer)",
+          "correct": true,
+          "why": "Consumers get what they need from the event itself, so the catalogue's API load no longer scales with event volume × consumer count."
+        },
+        {
+          "text": "Batch events into one message per 1,000 products so consumers make fewer calls",
+          "correct": false,
+          "why": "Fewer messages, but each consumer still calls back for all 2 million products."
+        }
+      ],
+      "explain": "Thin notification events create callback storms proportional to events × consumers. Carry the state consumers need in the event, ideally on a compacted topic keyed by entity ID.",
+      "refs": [
+        "https://martinfowler.com/articles/201701-event-driven.html"
+      ]
+    },
+    {
+      "id": "kafka-v3-q17",
+      "domain": "scale",
+      "stem": "A video platform runs a 3-AZ Kafka cluster in AWS. The finance team flags that cross-AZ data transfer is the largest Kafka cost: consumers in every AZ read from partition leaders that are usually in another AZ. Replication factor is 3 with one replica per AZ. What change cuts consumer cross-AZ traffic?",
+      "options": [
+        {
+          "text": "Move all partition leaders into one AZ and run every consumer there too",
+          "correct": false,
+          "why": "Consumers in the other two AZs still cross AZs, and losing that AZ moves every leader at once."
+        },
+        {
+          "text": "Reduce replication factor to 1",
+          "correct": false,
+          "why": "Removes replication traffic but any broker loss loses data."
+        },
+        {
+          "text": "Rack-aware follower fetching: `broker.rack`, the rack-aware selector, `client.rack`",
+          "correct": true,
+          "why": "Follower fetching lets each consumer read from the replica in its own AZ, removing most cross-AZ consumer reads."
+        },
+        {
+          "text": "Turn on zstd compression on consumers",
+          "correct": false,
+          "why": "Compression is chosen by producers; it shrinks bytes on all paths but does not remove cross-AZ reads."
+        }
+      ],
+      "explain": "Follower fetching (KIP-392) lets consumers read from the closest in-sync replica. With rack awareness on brokers and clients, consumer traffic stays inside the AZ.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#brokerconfigs_replica.selector.class"
+      ]
+    },
+    {
+      "id": "kafka-v3-q18",
+      "domain": "scale",
+      "stem": "A media company runs Confluent Platform and is designing DR between two regions. Their consumers are not idempotent yet, and the main requirement is that after failover consumers resume at the same offset numbers without translation. Which replication approach fits best?",
+      "options": [
+        {
+          "text": "MirrorMaker 2 with the identity replication policy",
+          "correct": false,
+          "why": "It keeps topic names but not offsets: mirrored records get new offsets in the target, so positions still need translation."
+        },
+        {
+          "text": "Cluster Linking, whose mirror topics keep the source offsets",
+          "correct": true,
+          "why": "Cluster Linking replicates byte-for-byte, so offsets match and consumer positions carry over without translation."
+        },
+        {
+          "text": "A nightly snapshot of every topic's segments to object storage in the DR region",
+          "correct": false,
+          "why": "Cheap, but RPO is up to a day and restoring does not recreate consumer positions."
+        },
+        {
+          "text": "Dual-write from producers to both clusters",
+          "correct": false,
+          "why": "Each cluster assigns its own offsets, and producers must handle partial failures; positions do not match."
+        }
+      ],
+      "explain": "MM2 copies records and translates offsets through checkpoints; Confluent Cluster Linking mirrors with identical offsets. Both are asynchronous, so some recent data can still be lost on failover.",
+      "refs": [
+        "https://docs.confluent.io/platform/current/multi-dc-deployments/cluster-linking/index.html"
+      ]
+    },
+    {
+      "id": "kafka-v3-q19",
+      "domain": "scale",
+      "stem": "A payments regulator demands zero data loss (RPO 0) if one data centre is lost. The company has three data centres in one metro area with about 2 ms round trip between them; write latency may rise a little. An engineer proposes MirrorMaker 2 to a standby DC. Which design meets the requirement?",
+      "options": [
+        {
+          "text": "MirrorMaker 2 to a standby DC with replication lag alerts",
+          "correct": false,
+          "why": "MM2 is asynchronous; records acknowledged in the lost DC but not yet mirrored are gone, so RPO is above zero."
+        },
+        {
+          "text": "Cluster Linking to a standby DC, promoting the mirror topics on failover",
+          "correct": false,
+          "why": "Also asynchronous; it shrinks but does not remove the loss window."
+        },
+        {
+          "text": "Stretch one cluster over the three DCs: RF 3 rack-aware, min ISR 2, `acks=all`",
+          "correct": true,
+          "why": "Each ack waits for copies in two DCs synchronously, which the 2 ms round trips make affordable; losing one DC loses no acked data."
+        },
+        {
+          "text": "Two independent clusters with producers writing to both",
+          "correct": false,
+          "why": "Partial failures leave the clusters divergent, and producers need their own reconciliation; it is not a guarantee."
+        }
+      ],
+      "explain": "Asynchronous replication (MM2, Cluster Linking) always has a non-zero RPO. Zero RPO needs synchronous replication within one cluster, which is only practical when the sites are close.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#design_ha"
+      ]
+    },
+    {
+      "id": "kafka-v3-q20",
+      "domain": "scale",
+      "stem": "A clickstream producer sends 400-byte events at 80,000/s and is CPU- and request-bound: brokers show very high request rates with tiny batches. Latency up to 50 ms is acceptable. Which producer tuning should come first?",
+      "options": [
+        {
+          "text": "Add brokers to handle the request rate",
+          "correct": false,
+          "why": "Adds cost to absorb inefficiency; the batches stay tiny."
+        },
+        {
+          "text": "Raise `linger.ms` and `batch.size` and enable compression",
+          "correct": true,
+          "why": "Lingering a few ms fills larger batches, cutting request count, and compression works far better on bigger batches."
+        },
+        {
+          "text": "Set `acks=0` to stop waiting for responses",
+          "correct": false,
+          "why": "Fewer waits, but any failure loses data, and requests stay small."
+        },
+        {
+          "text": "Add partitions so that each partition leader receives fewer requests per second",
+          "correct": false,
+          "why": "More partitions split the same traffic into even smaller batches."
+        }
+      ],
+      "explain": "Throughput comes from batching. Trade a little latency (`linger.ms`) for larger batches and compression before adding hardware or partitions.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#producerconfigs_linger.ms"
+      ]
+    }
+  ]
+}

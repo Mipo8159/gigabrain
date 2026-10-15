@@ -31,7 +31,13 @@ SKIP_DIRS = {".git", "inbox", "node_modules"}
 
 def files_to_scan():
     in_repo = subprocess.run(["git", "rev-parse", "--git-dir"], capture_output=True).returncode == 0
-    if "--all" in sys.argv or not in_repo:
+    if "--all" in sys.argv and in_repo:
+        # Tracked + untracked-but-not-ignored: gitignored eval transcripts can never
+        # be committed, and walking them made --all always red (2026-10-14).
+        r = subprocess.run(["git", "ls-files", "-co", "--exclude-standard"],
+                           capture_output=True, text=True, check=True)
+        return [f for f in r.stdout.splitlines() if f and not f.startswith("inbox/")]
+    if not in_repo:
         out = []
         for d, dirs, names in os.walk("."):
             dirs[:] = [x for x in dirs if not (d == "." and x in SKIP_DIRS) and x != "node_modules"]
@@ -85,8 +91,10 @@ def main():
                 print(f"  ✗ {f} lines {','.join(nums)}: {name}")
                 hits += 1
 
-    # Client internals must never reach brain/ (it is pushed to GitHub).
+    # Client internals must never reach any pushed file (gigabrain is on GitHub).
     # Terms are case-insensitive; one per line in .githooks/client-terms.
+    # Was brain/ only until 2026-10-14: a client name slipped into labs.md,
+    # ai-craft/ and me/ unflagged.
     try:
         with open(".githooks/client-terms") as tf:
             terms = [t.split("#", 1)[0].strip().lower() for t in tf]
@@ -95,7 +103,7 @@ def main():
         terms = []
     for f in files:
         rel = f[2:] if f.startswith("./") else f
-        if not rel.startswith("brain/") or not os.path.isfile(f):
+        if rel == ".githooks/client-terms" or not os.path.isfile(f):
             continue
         lines = read_lines(f) or []
         for t in terms:

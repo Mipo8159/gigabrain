@@ -1,0 +1,676 @@
+{
+  "topic": "aws",
+  "variant": 2,
+  "of": 5,
+  "title": "AWS for Node backends — variant 2",
+  "description": "Leans on logistics flows: SNS fan-out, FIFO groups, stream poison records, sparse indexes, deadlines and active-active routing.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "delivery",
+      "name": "Delivery, retries and failure routing (SQS, Lambda, EventBridge, Step Functions)",
+      "weight": 0.3
+    },
+    {
+      "id": "dynamo",
+      "name": "DynamoDB keys, hot partitions and conditional writes",
+      "weight": 0.25
+    },
+    {
+      "id": "sdk",
+      "name": "SDK clients, timeouts, throttling and partial failures",
+      "weight": 0.2
+    },
+    {
+      "id": "storage",
+      "name": "S3 uploads and object integrity",
+      "weight": 0.1
+    },
+    {
+      "id": "region",
+      "name": "Multi-region and failover",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "aws-v2-q01",
+      "domain": "delivery",
+      "stem": "A parcel-tracking platform publishes `ParcelScanned` to an SNS topic fanned out to four SQS queues. A new billing consumer was added with a subscription filter policy on `{\"carrier\": [\"DHL\"]}`, where `carrier` is a field in the JSON body. The billing queue receives nothing, and in staging (where the test pushed directly to SQS) everything worked. Which explanation fits both observations?",
+      "options": [
+        {
+          "text": "The filter policy scope defaults to message attributes, so a body-field policy matches nothing; set `FilterPolicyScope: MessageBody` and make the consumer agree on raw delivery or the SNS envelope.",
+          "correct": true,
+          "why": "Filter scope defaults to `MessageAttributes`. And without raw delivery the SQS body is the SNS envelope, so staging fixtures that skipped SNS hid both mismatches."
+        },
+        {
+          "text": "SNS fan-out to more than three SQS queues needs a FIFO topic.",
+          "correct": false,
+          "why": "Standard SNS topics fan out to many subscribers; FIFO is about ordering and dedup, not subscriber count."
+        },
+        {
+          "text": "Filter policies only work on FIFO subscriptions.",
+          "correct": false,
+          "why": "Filter policies work on standard subscriptions; the issue is what part of the message the policy looks at."
+        },
+        {
+          "text": "The SQS queue policy must allow `sns.amazonaws.com`; without it SNS drops messages that match a filter.",
+          "correct": false,
+          "why": "A missing queue policy blocks all deliveries to the queue, filtered or not. It's worth checking, but the other three queues on the same pattern work, and staging bypassed SNS entirely."
+        }
+      ],
+      "explain": "SNS→SQS has two silent mismatches: filter scope (attributes by default) and the envelope (the body is SNS JSON unless raw delivery is on). Test consumers with fixtures that went through SNS, and make the infra setting and the consumer's parsing agree.",
+      "refs": [
+        "https://docs.aws.amazon.com/sns/latest/dg/sns-message-filtering-scope.html",
+        "https://docs.aws.amazon.com/sns/latest/dg/sns-large-payload-raw-message-delivery.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q02",
+      "domain": "delivery",
+      "stem": "Courier proof-of-delivery photos land in S3 and trigger a Lambda that extracts GPS metadata. A corrupted HEIC file makes the function throw. The team assumed S3 would keep retrying, but the record silently never appears and nothing is in any queue. What should they configure?",
+      "options": [
+        {
+          "text": "An on-failure destination (or DLQ) on the function's asynchronous invocation config, and alert on it.",
+          "correct": true,
+          "why": "S3 invokes Lambda asynchronously: two retries by default, then the event is discarded unless an on-failure destination or DLQ is set."
+        },
+        {
+          "text": "Enable S3 Event Notifications retry on the bucket with a maximum of 185 attempts and a 24-hour event age, like an EventBridge target.",
+          "correct": false,
+          "why": "That retry policy belongs to EventBridge targets. S3 hands the event to Lambda's async queue, and Lambda's async settings decide retries."
+        },
+        {
+          "text": "Switch the trigger to an SQS queue with `maxReceiveCount` 1000.",
+          "correct": false,
+          "why": "Routing through SQS is a reasonable design, but a poison file then loops 1,000 times before anyone sees it; the missing piece is a failure destination."
+        },
+        {
+          "text": "Wrap the handler in try/catch and return success.",
+          "correct": false,
+          "why": "That turns a visible failure into silent data loss; the record still never appears."
+        }
+      ],
+      "explain": "Know which layer owns retries. For asynchronous Lambda invocations (S3, SNS, EventBridge), Lambda retries twice by default and then drops the event unless you configure an on-failure destination or DLQ.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q03",
+      "domain": "delivery",
+      "stem": "A dispatch service moved to an SQS FIFO queue for per-order ordering and sends every message with `MessageGroupId: \"dispatch\"`. Throughput dropped from 900 msg/s to about 40 msg/s and Lambda concurrency stays at 1. Which change restores parallelism without losing the ordering the team needs?",
+      "options": [
+        {
+          "text": "Raise Lambda reserved concurrency to 100 so more instances pull from the queue.",
+          "correct": false,
+          "why": "Lambda can only have one batch in flight per message group; with one group, more concurrency has nothing to process."
+        },
+        {
+          "text": "Use the order id as `MessageGroupId`.",
+          "correct": true,
+          "why": "Ordering is needed per order, so each order becomes its own group; Lambda then processes many groups in parallel while keeping order within each."
+        },
+        {
+          "text": "Turn on high-throughput FIFO mode for the queue and keep the single group, so SQS can partition the queue internally.",
+          "correct": false,
+          "why": "High throughput mode raises the queue's API limits, but delivery in one group is still serial, so consumer concurrency stays at 1."
+        },
+        {
+          "text": "Increase the batch size from 10 to 100.",
+          "correct": false,
+          "why": "FIFO batch size is capped at 10 for Lambda, and larger batches don't create parallelism within one group anyway."
+        }
+      ],
+      "explain": "In FIFO, the message group is the unit of both ordering and parallelism. Choose the narrowest key that the ordering requirement actually needs (order, account, device). One global group serialises the whole system.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-scaling.html",
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/using-messagededuplicationid-property.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q04",
+      "domain": "delivery",
+      "stem": "A billing service sends `ChargeRequested` to a FIFO queue with `MessageDeduplicationId: crypto.randomUUID()`. When the HTTP call to SQS times out, the SDK retries the send. Riders occasionally see two charges a few seconds apart. What should the dedup id be?",
+      "options": [
+        {
+          "text": "A stable value derived from the business key, such as a hash of `rideId` plus the charge type.",
+          "correct": true,
+          "why": "Dedup only works if a resend carries the same id. A business-derived id makes SDK and application retries collapse within the 5-minute window."
+        },
+        {
+          "text": "`Date.now()` so retries a few seconds later get different ids and are kept apart in the queue for auditing.",
+          "correct": false,
+          "why": "Different ids defeat dedup; that keeps exactly the duplicates the team wants to remove."
+        },
+        {
+          "text": "Leave it unset and rely on `ContentBasedDeduplication` while adding a timestamp field to the body.",
+          "correct": false,
+          "why": "Content-based dedup hashes the body, so a timestamp in the body makes every resend unique."
+        },
+        {
+          "text": "The message's SQS `MessageId` from the first send.",
+          "correct": false,
+          "why": "SQS assigns the `MessageId` on success; when the first send timed out the producer may never have seen it."
+        }
+      ],
+      "explain": "FIFO dedup ids must be deterministic for the same logical message. A random UUID or a timestamp per attempt turns dedup off. Dedup lasts 5 minutes, so consumers still need idempotency for later repeats.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/using-messagededuplicationid-property.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q05",
+      "domain": "delivery",
+      "stem": "A Lambda reads a DynamoDB stream of shipment updates and pushes them to a search index. One record with an oversized address makes the function throw every time. For the last 9 hours no updates for that shard reached search, and the iterator age alarm is firing. Which two settings stop one bad record from blocking the shard while keeping it for inspection? (Choose two.)",
+      "options": [
+        {
+          "text": "`BisectBatchOnFunctionError: true` so the failing batch is split to isolate the bad record.",
+          "correct": true,
+          "why": "Bisecting narrows the failure down to the poison record so the good records around it get through."
+        },
+        {
+          "text": "`MaximumRetryAttempts` (or `MaximumRecordAgeInSeconds`) with an on-failure destination such as an SQS queue.",
+          "correct": true,
+          "why": "Bounded retries stop the shard from blocking for the full 24-hour retention, and the destination keeps a pointer to the failed records."
+        },
+        {
+          "text": "A DLQ on the source DynamoDB table.",
+          "correct": false,
+          "why": "DynamoDB tables have no DLQ; failure routing for stream processing is configured on the Lambda event source mapping."
+        },
+        {
+          "text": "Increase the stream's retention to 7 days so the record isn't lost while engineers investigate.",
+          "correct": false,
+          "why": "DynamoDB Streams retention is fixed at 24 hours, and a longer retention would only lengthen the blockage."
+        },
+        {
+          "text": "Raise `ParallelizationFactor` to 10 so other records flow around the stuck one.",
+          "correct": false,
+          "why": "Parallelization splits a shard by partition key; records with the same key as the poison one still queue behind it."
+        }
+      ],
+      "explain": "Stream sources (DynamoDB Streams, Kinesis) block the shard until a batch succeeds or the records expire. Always bound retries, bisect on error and send failures to a destination; otherwise one bad record stalls everything behind it.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-errors.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q06",
+      "domain": "delivery",
+      "stem": "Driver apps send status updates (`ASSIGNED`, `PICKED_UP`, `DELIVERED`) through an SQS standard queue to a Lambda that writes `status` on the delivery item. About 0.1% of deliveries end up showing `PICKED_UP` after they were delivered. Moving to FIFO would cost a redesign of the producer. Which fix is cheapest and correct?",
+      "options": [
+        {
+          "text": "Delay every message by 5 seconds with `DelaySeconds` so earlier updates arrive first.",
+          "correct": false,
+          "why": "Delays shift all messages equally and don't order them; retries and parallel consumers still reorder."
+        },
+        {
+          "text": "Read the item first and only write if the new status ranks higher than the stored one, skipping the write otherwise.",
+          "correct": false,
+          "why": "The idea is right but read-then-write races with a concurrent update; the comparison has to happen inside the write."
+        },
+        {
+          "text": "Send a monotonic `seq` from the device and write with `ConditionExpression: attribute_not_exists(seq) OR seq < :seq`.",
+          "correct": true,
+          "why": "The conditional write makes stale or duplicate updates no-ops atomically, which handles both reordering and redelivery."
+        },
+        {
+          "text": "Set the Lambda's reserved concurrency to 1.",
+          "correct": false,
+          "why": "A single consumer still sees redeliveries and retries out of order, and it caps throughput for every driver."
+        }
+      ],
+      "explain": "Standard queues neither order nor dedupe. When the business needs 'latest wins', carry a version or sequence in the message and let a conditional write reject anything older, instead of paying for global ordering.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q07",
+      "domain": "dynamo",
+      "stem": "A B2B logistics SaaS stores shipments with `pk = TENANT#<id>`, `sk = SHIPMENT#<id>`. One retailer now generates 40% of all writes (~3,000/s at peak), and only its requests are throttled. Its access patterns are 'get shipment by id' and 'list recent shipments for tenant'. What key change scales it?",
+      "options": [
+        {
+          "text": "Make `pk = TENANT#<id>#SHIPMENT#<id>` for the item and serve 'recent shipments' from a GSI whose key adds a small shard suffix to the tenant id.",
+          "correct": true,
+          "why": "Per-shipment keys spread writes across partitions; a sharded GSI key keeps the list query possible as N parallel queries merged by date."
+        },
+        {
+          "text": "Move the big tenant to its own table with provisioned capacity sized for its peak, leaving the key design as it is.",
+          "correct": false,
+          "why": "A separate table doesn't help if one partition key still takes all of the tenant's writes; the per-key limit is the same."
+        },
+        {
+          "text": "Switch the table to on-demand mode so it can absorb the tenant's spikes.",
+          "correct": false,
+          "why": "On-demand removes table-level planning, but a single partition key still hits the per-partition ceiling."
+        },
+        {
+          "text": "Add a random suffix to `sk`.",
+          "correct": false,
+          "why": "The sort key doesn't choose the partition; every item still shares the same `pk`."
+        }
+      ],
+      "explain": "Partition keys need high cardinality relative to write rate. A tenant id is a fine key until one tenant dominates; then key items individually and serve tenant-wide lists from a sharded index, paying a small fan-out on read.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-sharding.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q08",
+      "domain": "dynamo",
+      "stem": "Two dispatcher instances sometimes assign the same driver to different orders within the same second. Each does `GetItem(driver)`, checks `status = 'IDLE'`, then `PutItem` with `status = 'BUSY', orderId`. What should the write become?",
+      "options": [
+        {
+          "text": "A `PutItem` with `ConsistentRead` enabled on the earlier `GetItem` so both dispatchers see the latest status.",
+          "correct": false,
+          "why": "`PutItem` has no `ConsistentRead`, and a consistent read before the write still leaves the race window open."
+        },
+        {
+          "text": "An `UpdateItem` setting `BUSY` and `orderId`, conditioned on `#status = :idle`.",
+          "correct": true,
+          "why": "The condition is evaluated atomically with the write; the second dispatcher gets `ConditionalCheckFailedException` and picks another driver."
+        },
+        {
+          "text": "A distributed lock in Redis around the read and write, with a TTL long enough to cover a slow dispatcher.",
+          "correct": false,
+          "why": "It can work, but adds a second system with its own failure modes (lock expiry, failover) to do what a conditional write does natively."
+        },
+        {
+          "text": "A `TransactGetItems` followed by a `TransactWriteItems`.",
+          "correct": false,
+          "why": "Two separate transactions are still read-then-write; only a condition inside the write closes the gap."
+        }
+      ],
+      "explain": "For state-machine transitions, put the expected current state in a `ConditionExpression` (or a version number for optimistic locking). Losing the condition race is the signal to retry with fresh data, not an error to page on.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q09",
+      "domain": "dynamo",
+      "stem": "A same-day delivery app holds a time slot for 10 minutes by writing `HOLD#<slot>` with a TTL attribute set to now + 600. Customers report slots showing 'held' long after 10 minutes, blocking bookings at peak. What should the design change?",
+      "options": [
+        {
+          "text": "Lower the TTL to 9 minutes to compensate for the deletion delay.",
+          "correct": false,
+          "why": "TTL deletion has no tight upper bound (it can take days); subtracting a minute doesn't change that."
+        },
+        {
+          "text": "Run a Lambda every minute that scans for expired holds and deletes them.",
+          "correct": false,
+          "why": "This works but scans the table every minute, costing capacity and still lagging by up to a minute; the check can be done in the write itself."
+        },
+        {
+          "text": "Treat `expiresAt < now` as expired in reads and in the booking condition; let TTL only clean up storage.",
+          "correct": true,
+          "why": "TTL is housekeeping, not a timer. Expired-but-present items must be ignored by queries and overwritten by a condition like `attribute_not_exists(pk) OR expiresAt < :now`."
+        },
+        {
+          "text": "Put the holds in a GSI whose projection carries the TTL attribute, so expired holds are dropped from the index before the base table.",
+          "correct": false,
+          "why": "GSI removals follow base-table deletes; they can't be earlier than TTL itself."
+        }
+      ],
+      "explain": "DynamoDB TTL deletes expired items in the background, typically within a few days, and expired items stay readable until then. Business expiry belongs in conditions and filters; TTL only reclaims storage.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q10",
+      "domain": "dynamo",
+      "stem": "A freight board has 30 million loads; at any time about 5,000 are `OPEN`. Carriers poll 'open loads in region X' every few seconds. Today that's a `Scan` with a filter, consuming most of the table's read capacity. Which design serves this access pattern?",
+      "options": [
+        {
+          "text": "A GSI with `status` as partition key and `region` as sort key, querying `status = OPEN` plus a `region` equality per carrier.",
+          "correct": false,
+          "why": "This puts every OPEN load under one GSI partition key value, which is a hot key, and the index also holds every closed load."
+        },
+        {
+          "text": "Cache the Scan result in ElastiCache for 5 seconds.",
+          "correct": false,
+          "why": "It reduces read load but still scans 30 million items every refresh, and adds a cache tier to run."
+        },
+        {
+          "text": "Use parallel Scan with 16 segments so the full scan finishes faster on each poll.",
+          "correct": false,
+          "why": "Parallel scan finishes faster by consuming capacity even faster; it still reads every item."
+        },
+        {
+          "text": "Write a `openRegion` attribute only while a load is open (remove it on close) and query a GSI keyed on it.",
+          "correct": true,
+          "why": "A sparse GSI holds only items that carry the key attribute, so the index is the 5,000 open loads, partitioned by region."
+        }
+      ],
+      "explain": "Sparse GSIs are DynamoDB's 'materialised filter': set the key attribute only on items that belong in the index and remove it to drop them. Queries then cost proportional to matches, not to table size.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q11",
+      "domain": "dynamo",
+      "stem": "Each booking runs a `TransactWriteItems` that inserts the booking, decrements the driver's capacity, and increments a single `STATS#global` item used by a dashboard. Above ~300 bookings/s, many transactions fail with `TransactionCanceledException` reason `TransactionConflict`. What should change?",
+      "options": [
+        {
+          "text": "Retry transaction conflicts immediately in a tight loop until they succeed.",
+          "correct": false,
+          "why": "Immediate retries add more contention on the same hot item and make the conflict rate worse."
+        },
+        {
+          "text": "Raise the table's write capacity so transactions finish faster.",
+          "correct": false,
+          "why": "The failures are conflicts on one item, not capacity throttling; more capacity doesn't reduce contention."
+        },
+        {
+          "text": "Remove the stats increment from the transaction and update aggregates asynchronously, e.g. from DynamoDB Streams.",
+          "correct": true,
+          "why": "Every transaction touching one item makes them all conflict with each other. Keeping the hot aggregate out of the critical transaction removes the shared item."
+        },
+        {
+          "text": "Split it into three separate `UpdateItem` calls run in parallel, so no single request has to hold all three items at once.",
+          "correct": false,
+          "why": "That removes conflicts but also atomicity: a crash could book a driver without decrementing capacity."
+        }
+      ],
+      "explain": "Transactions on a shared item serialize on that item. Keep transactions to the items whose invariant truly needs atomicity, and move counters and dashboards to asynchronous, eventually consistent updates.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q12",
+      "domain": "sdk",
+      "stem": "A one-off backfill rewrites 50 million route items into an on-demand table using 64 parallel workers. Within minutes, the live API's writes to the same table start throttling and p99 latency triples. Which control should the team put in place?",
+      "options": [
+        {
+          "text": "Rate-limit the backfill explicitly (a token bucket per worker sized to a share of capacity), with SDK backoff on throttles.",
+          "correct": true,
+          "why": "Background work must have a budget of its own; an explicit rate keeps live traffic's share intact."
+        },
+        {
+          "text": "Raise the SDK's `maxAttempts` on the live API so throttled writes retry until they succeed.",
+          "correct": false,
+          "why": "More retries on the victim add load during the contention and stretch latency further."
+        },
+        {
+          "text": "Run the backfill with 128 workers so it finishes in half the time and the impact window is shorter.",
+          "correct": false,
+          "why": "Doubling the rate doubles the pressure on the same partitions; the incident gets worse, not shorter."
+        },
+        {
+          "text": "Switch the table to provisioned mode for the backfill window and back to on-demand after it completes.",
+          "correct": false,
+          "why": "Changing modes doesn't separate the two workloads; they still share partitions and the backfill still crowds out live writes."
+        }
+      ],
+      "explain": "Batch and background jobs share partitions with live traffic. Give them an explicit throughput budget (token bucket, SDK adaptive retry mode, or a queue with capped consumers) instead of letting the database's throttling arbitrate between them.",
+      "refs": [
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q13",
+      "domain": "sdk",
+      "stem": "A quote API has a 2 s end-to-end SLA. It calls DynamoDB and then SQS, each through a client with `maxAttempts: 3`, `connectionTimeout: 500` and `requestTimeout: 1500, throwOnRequestTimeout: true`. Under a partial DynamoDB brownout, requests take 5–6 s before failing. What change honours the SLA?",
+      "options": [
+        {
+          "text": "Lower `maxAttempts` to 1 on both clients.",
+          "correct": false,
+          "why": "That bounds each call but drops the useful retry for fast transient errors; the per-call timeouts still add up past 2 s."
+        },
+        {
+          "text": "Pass `abortSignal: AbortSignal.timeout(remainingMs)` from a request-level deadline to each `send()`.",
+          "correct": true,
+          "why": "A shared deadline caps the total including retries and backoff; each call only gets the budget that is left."
+        },
+        {
+          "text": "Raise Lambda memory so the SDK's retries run faster on more CPU.",
+          "correct": false,
+          "why": "The time is spent waiting on the network and backoff, not on CPU."
+        },
+        {
+          "text": "Set `requestTimeout` to 2000 ms so that each attempt individually matches the SLA and nothing is cut short too early.",
+          "correct": false,
+          "why": "Per-attempt timeouts multiply by attempts; 3 × 2 s per call blows the SLA by more."
+        }
+      ],
+      "explain": "Per-attempt timeouts times attempts times calls is the true worst case. Use a request-level deadline and pass the remaining budget to every SDK call through `abortSignal`, so retries spend only the time that is left.",
+      "refs": [
+        "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/node-http-handler",
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q14",
+      "domain": "sdk",
+      "stem": "A route-planning service publishes `RouteChanged` events with `PutEvents` in batches of 10 and treats a resolved promise as success. A downstream ETA service misses about 1 in 2,000 events during traffic peaks. What should the publisher do?",
+      "options": [
+        {
+          "text": "Check `FailedEntryCount` and resend only the entries whose `ErrorCode` is set, matched by index, with backoff.",
+          "correct": true,
+          "why": "`PutEvents` returns 200 with per-entry failures, and entries line up with the request by position."
+        },
+        {
+          "text": "Switch to one `PutEvents` per event so failures throw.",
+          "correct": false,
+          "why": "A single-entry request still reports failure in the response body; it costs 10× the calls and doesn't throw."
+        },
+        {
+          "text": "Raise SDK `maxAttempts` to 10, since a resolved promise means all retries succeeded.",
+          "correct": false,
+          "why": "The SDK only retries whole-request errors; per-entry failures inside a 200 aren't retried."
+        },
+        {
+          "text": "Add an EventBridge archive and replay missed events nightly.",
+          "correct": false,
+          "why": "Events that failed at `PutEvents` never reached the bus, so the archive never had them."
+        }
+      ],
+      "explain": "Batch publish APIs return per-item status. Treat the response, not the promise, as the result: read the failure count, retry exactly the failed items, and surface the ones that keep failing.",
+      "refs": [
+        "https://docs.aws.amazon.com/eventbridge/latest/APIReference/API_PutEvents.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q15",
+      "domain": "sdk",
+      "stem": "A team fixed hanging DynamoDB calls by adding `throwOnRequestTimeout: true` and verified it locally with SDK 3.1150. In production on `nodejs24.x`, built with CDK `NodejsFunction` defaults, calls still hang for 30 s. Why does production differ from the local test?",
+      "options": [
+        {
+          "text": "`nodejs24.x` doesn't support AbortController-based timeouts, so the option has no effect there.",
+          "correct": false,
+          "why": "Node 24 supports `AbortController` and timers fully; the runtime isn't the limitation."
+        },
+        {
+          "text": "CDK marks `@aws-sdk/*` as external by default, so the function runs the runtime's bundled SDK, which can predate the option.",
+          "correct": true,
+          "why": "With externals, your package.json version isn't what runs. Bundling the SDK (`bundleAwsSDK: true`) makes production match what was tested."
+        },
+        {
+          "text": "Lambda overrides SDK timeouts with the function timeout.",
+          "correct": false,
+          "why": "Lambda doesn't touch SDK client settings; it only stops the invocation at the function timeout."
+        },
+        {
+          "text": "The option needs a matching `AWS_SDK_THROW_ON_TIMEOUT=1` environment variable on the function before the HTTP handler will honour it.",
+          "correct": false,
+          "why": "No such variable exists; the option is read from the client's `requestHandler` config."
+        }
+      ],
+      "explain": "Know which SDK version actually runs in production. CDK `NodejsFunction` leaves `@aws-sdk/*` out of the bundle by default and uses the runtime's copy, so recent SDK behaviour you rely on (timeouts, checksums) needs `bundleAwsSDK: true`.",
+      "refs": [
+        "https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_lambda_nodejs-readme.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q16",
+      "domain": "storage",
+      "stem": "A driver-onboarding app lets phones upload licence photos with presigned PUT URLs created by a default `S3Client` (SDK 3.1150). Since a dependency bump, uploads to the company's S3-compatible on-prem store fail, and some browser uploads to S3 fail too. The URL contains `x-amz-checksum-crc32=AAAAAA==`. What should change?",
+      "options": [
+        {
+          "text": "Sign the URL with `requestChecksumCalculation: \"WHEN_REQUIRED\"` on the presigning client.",
+          "correct": true,
+          "why": "Newer SDKs bake a CRC32 into presigned PUTs, computed over an empty body; turning default checksums off for presigning removes it."
+        },
+        {
+          "text": "Strip the query parameter from the URL on the client before uploading so S3 skips the checksum check.",
+          "correct": false,
+          "why": "Removing a signed parameter invalidates the signature, so S3 rejects the request."
+        },
+        {
+          "text": "Make the phone compute the CRC32 of the photo and append it in a new query parameter after signing.",
+          "correct": false,
+          "why": "Anything added after signing isn't covered by the signature; the baked-in empty-body checksum is still there."
+        },
+        {
+          "text": "Pin the SDK below the version that introduced default checksums.",
+          "correct": false,
+          "why": "It would remove the parameter but freezes the SDK and its fixes; the client setting solves it on current versions."
+        }
+      ],
+      "explain": "Since client-s3 3.729.0, checksums are calculated by default and get baked into presigned PUT URLs as the checksum of an empty body. Configure presigning clients with `requestChecksumCalculation: WHEN_REQUIRED` and test the generated URL.",
+      "refs": [
+        "https://github.com/aws/aws-sdk-js-v3/issues/6810",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q17",
+      "domain": "storage",
+      "stem": "A telematics pipeline writes ~9,000 small objects/s to `s3://telemetry/2026-10-15/<uuid>.json`, one prefix per day. Each morning, writes start returning `503 SlowDown` for several minutes before settling. What change addresses the cause?",
+      "options": [
+        {
+          "text": "Enable S3 Transfer Acceleration on the bucket so uploads go through edge locations closer to the vehicles.",
+          "correct": false,
+          "why": "Acceleration speeds long-distance transfers; it doesn't raise per-prefix request rates."
+        },
+        {
+          "text": "Retry `503`s without backoff until they succeed.",
+          "correct": false,
+          "why": "Immediate retries add load to the prefix that is already being throttled."
+        },
+        {
+          "text": "Spread writes across many prefixes (e.g. `<hash>/2026-10-15/...`) and back off on `SlowDown`.",
+          "correct": true,
+          "why": "S3 scales request rate per prefix (about 3,500 writes/s each). Spreading keys across prefixes multiplies the ceiling."
+        },
+        {
+          "text": "Move to S3 Express One Zone so the request ceiling no longer applies.",
+          "correct": false,
+          "why": "It's a valid high-throughput option but changes durability (single AZ) and cost, which the stem never traded away."
+        }
+      ],
+      "explain": "S3 supports at least 3,500 writes and 5,500 reads per second per prefix and scales up gradually, returning `503 SlowDown` meanwhile. High-rate writers should spread keys over many prefixes from the start and back off with jitter.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q18",
+      "domain": "region",
+      "stem": "A payouts service runs in two Regions on a DynamoDB global table (eventual consistency). Each payout is claimed with `PutItem(IDEMP#<payoutId>, attribute_not_exists)` before sending money. During a regional impairment, clients retried in the other Region seconds later, and 37 payouts were sent twice. Which design closes this?",
+      "options": [
+        {
+          "text": "Add `ConsistentRead: true` to a `GetItem` on the claim before writing.",
+          "correct": false,
+          "why": "Consistent reads only cover the local replica, and replication from the impaired Region may be delayed for much longer than seconds."
+        },
+        {
+          "text": "Keep idempotency claims in a multi-Region strongly consistent table (three Regions, or two plus a witness), accepting slower claim writes.",
+          "correct": true,
+          "why": "With MRSC, a conditional claim sees writes from every Region, so the retry in the second Region finds the first claim."
+        },
+        {
+          "text": "Shorten the claim item's TTL so stuck claims don't block retries.",
+          "correct": false,
+          "why": "TTL affects cleanup, not cross-Region visibility; the second Region still doesn't see the first claim."
+        },
+        {
+          "text": "Wrap the claim in `TransactWriteItems` together with the payout record so the claim and the payout can't diverge in either Region.",
+          "correct": false,
+          "why": "Transactions are atomic only within the Region where they run; replicas still converge asynchronously."
+        }
+      ],
+      "explain": "Conditional writes on an eventually consistent global table are checked against the local replica only. Global uniqueness or idempotency needs a single home Region per key or a multi-Region strongly consistent table, and you pay for it in write latency.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q19",
+      "domain": "region",
+      "stem": "A rider API uses Route 53 failover with a health check on `/healthz`, which returns 200 whenever the Node process is up. When the primary Region's DynamoDB endpoint had elevated errors, every request failed, yet no failover happened. How should the health check change?",
+      "options": [
+        {
+          "text": "Point the health check at the ALB's TCP port instead.",
+          "correct": false,
+          "why": "A TCP check is even shallower; it passes as long as the load balancer accepts connections."
+        },
+        {
+          "text": "Make `/healthz` call every dependency including third-party APIs shared by both Regions.",
+          "correct": false,
+          "why": "A shared dependency outage would then fail both Regions' checks and leave nowhere to fail over to."
+        },
+        {
+          "text": "Lower the health check failure threshold to 1.",
+          "correct": false,
+          "why": "Faster detection of a check that still says 'healthy' changes nothing."
+        },
+        {
+          "text": "Have the health endpoint check Region-local critical dependencies (with short timeouts and caching), not just the process.",
+          "correct": true,
+          "why": "Failover only helps when the check reflects what users experience in that Region; local dependencies are the ones the other Region doesn't share."
+        }
+      ],
+      "explain": "A health check decides failover, so it must measure what actually breaks a Region for users. Make it deep enough to include Region-local dependencies, but not so deep that a shared dependency fails every Region at once.",
+      "refs": [
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-how-route-53-chooses-records.html"
+      ]
+    },
+    {
+      "id": "aws-v2-q20",
+      "domain": "region",
+      "stem": "A ride-hailing company wants active-active in two Regions: riders served by the nearest Region, and a Region impairment shouldn't need manual DNS edits. Trips are stored in a DynamoDB global table. Which two decisions are needed? (Choose two.)",
+      "options": [
+        {
+          "text": "Route 53 latency-based records for each Region with health checks attached.",
+          "correct": true,
+          "why": "Latency routing sends riders to the nearest healthy Region, and health checks remove an impaired Region automatically."
+        },
+        {
+          "text": "Make every trip-mutating request idempotent on a client-generated request id, since retries can land in the other Region.",
+          "correct": true,
+          "why": "In active-active, a retry may hit a Region that hasn't seen the first attempt yet; idempotent writes make that safe."
+        },
+        {
+          "text": "Use ALB sticky sessions so a rider always returns to the same Region.",
+          "correct": false,
+          "why": "ALB stickiness is per load balancer inside one Region; it can't pin traffic across Regions."
+        },
+        {
+          "text": "Rely on global table condition expressions to prevent double-booking across Regions.",
+          "correct": false,
+          "why": "Conditions are checked against the local replica only; concurrent writes in two Regions resolve by last writer wins."
+        },
+        {
+          "text": "Run the single writer database in one Region and have the other Region forward writes to it over the backbone.",
+          "correct": false,
+          "why": "It's a valid active-passive write design, but it makes that Region a single point of failure for writes, which defeats the requirement."
+        }
+      ],
+      "explain": "Active-active needs automatic routing (latency or geo records with health checks) and writes that tolerate landing in either Region (idempotency plus a conflict strategy). Anything that assumes a single writer or local conditions quietly reintroduces a single point of failure or a race.",
+      "refs": [
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-how-route-53-chooses-records.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html"
+      ]
+    }
+  ]
+}

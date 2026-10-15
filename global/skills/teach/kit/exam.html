@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Exam</title>
+<!-- Exam runner (teach kit). `bin/learn serve` fills EXAM_DATA from evals/knowledge/<topic>/exams/vN.json.
+     Contract: global/skills/teach/kit/EXAMS.md. Checked by bin/check-exam --runner. -->
+<style>
+:root {
+  --bg: #f7f4ee; --surface: #fffdf8; --surface-2: #f0ece3; --border: #ddd6c8; --border-bright: #b9ae98;
+  --text: #22201b; --text-dim: #6b6458; --accent: #2f5d8a; --accent-dim: #dfe8f1;
+  --ok: #2e7d4f; --ok-dim: #e1f0e6; --risk: #b3402f; --risk-dim: #f6e2de; --warn: #9a6a12; --warn-dim: #f5ead2;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r: 10px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17161a; --surface: #1f1e23; --surface-2: #29282e; --border: #37353d; --border-bright: #57545e;
+    --text: #ebe8e1; --text-dim: #a29d93; --accent: #7fb0e0; --accent-dim: #22324a;
+    --ok: #6cc28f; --ok-dim: #1d3326; --risk: #e8846f; --risk-dim: #3d2420; --warn: #e0b45c; --warn-dim: #3a3020;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17161a; --surface: #1f1e23; --surface-2: #29282e; --border: #37353d; --border-bright: #57545e;
+  --text: #ebe8e1; --text-dim: #a29d93; --accent: #7fb0e0; --accent-dim: #22324a;
+  --ok: #6cc28f; --ok-dim: #1d3326; --risk: #e8846f; --risk-dim: #3d2420; --warn: #e0b45c; --warn-dim: #3a3020;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 var(--font); }
+main { max-width: 860px; margin: 0 auto; padding: 24px 16px 96px; display: grid; gap: 20px; }
+h1 { font-size: 1.6rem; line-height: 1.2; margin: 0; text-wrap: balance; }
+h2 { font-size: 1.15rem; margin: 0; }
+p { margin: 0; }
+a { color: var(--accent); }
+code { font: .9em var(--mono); background: var(--surface-2); padding: .05em .3em; border-radius: 4px; overflow-wrap: anywhere; }
+pre { margin: 0; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r); padding: 12px 14px; overflow-x: auto; font: 13.5px/1.5 var(--mono); }
+pre code { background: none; padding: 0; font-size: inherit; overflow-wrap: normal; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 20px; display: grid; gap: 14px; min-width: 0; }
+.dim { color: var(--text-dim); }
+.kicker { font: 600 12px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--text-dim); }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.spacer { flex: 1; }
+button { font: inherit; color: inherit; cursor: pointer; }
+.btn { border: 1px solid var(--border-bright); background: var(--surface); border-radius: 8px; padding: 9px 16px; min-height: 44px; }
+.btn:hover { border-color: var(--accent); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+.btn.flagged { background: var(--warn-dim); border-color: var(--warn); }
+.btn:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr)); gap: 10px; }
+.stat { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; }
+.stat b { display: block; font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+/* top bar */
+.bar { position: sticky; top: 0; z-index: 10; background: var(--bg); border-bottom: 1px solid var(--border); }
+.bar-in { max-width: 860px; margin: 0 auto; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.timer { font: 600 15px var(--mono); font-variant-numeric: tabular-nums; }
+.timer.low { color: var(--risk); }
+.progress { height: 4px; background: var(--surface-2); border-radius: 2px; overflow: hidden; flex-basis: 100%; }
+.progress > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+/* question */
+.stem { display: grid; gap: 10px; font-size: 1.02rem; }
+.choose { font-weight: 600; }
+.options { display: grid; gap: 10px; }
+.opt { display: grid; grid-template-columns: 2rem minmax(0, 1fr); gap: 10px; align-items: start; text-align: left; width: 100%;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 12px; min-height: 44px; }
+.opt .key { font: 600 14px var(--mono); width: 2rem; height: 2rem; display: grid; place-items: center; border: 1px solid var(--border-bright); border-radius: 50%; }
+.opt.multi .key { border-radius: 6px; }
+.opt[aria-checked="true"] { border-color: var(--accent); background: var(--accent-dim); }
+.opt[aria-checked="true"] .key { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.opt.is-correct { border-color: var(--ok); background: var(--ok-dim); }
+.opt.is-wrong { border-color: var(--risk); background: var(--risk-dim); }
+.opt .why { grid-column: 2; font-size: .92rem; color: var(--text-dim); }
+.explain { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; display: grid; gap: 8px; }
+.refs { font-size: .85rem; overflow-wrap: anywhere; }
+/* navigator */
+.nav-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(2.75rem, 1fr)); gap: 6px; }
+.nav-grid button { min-height: 44px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); font: 600 13px var(--mono); font-variant-numeric: tabular-nums; position: relative; }
+.nav-grid button.answered { background: var(--accent-dim); border-color: var(--accent); }
+.nav-grid button.flag::after { content: ""; position: absolute; top: 3px; right: 3px; width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.nav-grid button.current { outline: 2px solid var(--text); outline-offset: 1px; }
+.nav-grid button.ok { background: var(--ok-dim); border-color: var(--ok); }
+.nav-grid button.bad { background: var(--risk-dim); border-color: var(--risk); }
+/* results */
+.verdict { font-size: 1.4rem; font-weight: 700; }
+.verdict.pass { color: var(--ok); }
+.verdict.fail { color: var(--risk); }
+.dom { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.dom .meter { grid-column: 1 / -1; height: 8px; background: var(--surface-2); border-radius: 4px; overflow: hidden; }
+.dom .meter i { display: block; height: 100%; }
+.review-item { display: grid; gap: 12px; }
+.tag { display: inline-block; font: 600 12px var(--mono); padding: 2px 8px; border-radius: 999px; background: var(--surface-2); }
+.tag.ok { background: var(--ok-dim); color: var(--ok); }
+.tag.bad { background: var(--risk-dim); color: var(--risk); }
+.save { font-size: .9rem; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; }
+label.mode { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; border: 1px solid var(--border); border-radius: 8px; padding: 12px; cursor: pointer; }
+label.mode:has(input:checked) { border-color: var(--accent); background: var(--accent-dim); }
+</style>
+</head>
+<body>
+<div class="bar" id="bar" hidden>
+  <div class="bar-in">
+    <span class="kicker" id="bar-title"></span>
+    <span class="spacer"></span>
+    <span class="dim" id="bar-count"></span>
+    <span class="timer" id="timer" aria-live="off"></span>
+    <button class="btn" id="btn-grid" aria-expanded="false" aria-controls="grid-card">Questions</button>
+    <div class="progress" aria-hidden="true"><i id="progress"></i></div>
+  </div>
+</div>
+<main>
+  <section class="card" id="start">
+    <span class="kicker" id="s-kicker"></span>
+    <h1 id="s-title"></h1>
+    <p class="dim" id="s-desc"></p>
+    <div class="stats" id="s-stats"></div>
+    <fieldset>
+      <legend class="kicker" style="margin-bottom:8px">Mode</legend>
+      <label class="mode"><input type="radio" name="mode" value="exam" checked>
+        <span><b>Exam</b> <span class="dim">— timed, flag and revisit, answers only at the end. Like the real thing.</span></span></label>
+      <label class="mode"><input type="radio" name="mode" value="study">
+        <span><b>Study</b> <span class="dim">— no timer, check each answer as you go, with the reasoning for every option.</span></span></label>
+    </fieldset>
+    <p class="dim" id="s-resume" hidden></p>
+    <div class="row">
+      <button class="btn primary" id="btn-start">Start</button>
+      <button class="btn" id="btn-resume" hidden>Resume</button>
+      <span class="spacer"></span>
+      <a id="s-back" href="#" hidden>← back to the topic</a>
+    </div>
+  </section>
+
+  <section class="card" id="grid-card" hidden>
+    <div class="row"><h2>Questions</h2><span class="spacer"></span><span class="dim" id="grid-legend"></span></div>
+    <div class="nav-grid" id="grid"></div>
+    <div class="row"><span class="spacer"></span><button class="btn primary" id="btn-submit-2">Finish exam</button></div>
+  </section>
+
+  <section class="card" id="qcard" hidden>
+    <div class="row">
+      <span class="kicker" id="q-num"></span>
+      <span class="spacer"></span>
+      <span class="tag" id="q-domain" hidden></span>
+    </div>
+    <div class="stem" id="q-stem"></div>
+    <div class="options" id="q-options" role="group"></div>
+    <div class="explain" id="q-explain" hidden></div>
+    <div class="row">
+      <button class="btn" id="btn-prev">← Back</button>
+      <button class="btn" id="btn-flag" aria-pressed="false">Flag</button>
+      <button class="btn" id="btn-check" hidden>Check</button>
+      <span class="spacer"></span>
+      <button class="btn primary" id="btn-next">Next →</button>
+    </div>
+  </section>
+
+  <section id="results" hidden>
+    <div class="card" style="margin-bottom:20px">
+      <span class="kicker">Result</span>
+      <p class="verdict" id="r-verdict"></p>
+      <div class="stats" id="r-stats"></div>
+      <div id="r-domains" style="display:grid;gap:14px"></div>
+      <p class="save dim" id="r-save"></p>
+      <div class="row">
+        <button class="btn" id="btn-only-wrong" aria-pressed="true">Showing: mistakes + flagged</button>
+        <button class="btn" id="btn-retake">Take again</button>
+        <button class="btn primary" id="btn-save" hidden>Save again</button>
+        <span class="spacer"></span>
+        <a id="r-back" href="#" hidden>← back to the topic</a>
+      </div>
+    </div>
+    <div id="r-review" style="display:grid;gap:20px"></div>
+  </section>
+</main>
+
+<script type="application/json" id="exam-data">/*EXAM_DATA*/</script>
+<script>
+(() => {
+  'use strict';
+  const exam = JSON.parse(document.getElementById('exam-data').textContent);
+  const $ = (id) => document.getElementById(id);
+  const KEY = `gigabrain-exam:${exam.topic}:v${exam.variant}`;
+  const PENDING = `gigabrain-exam-pending:${exam.topic}:v${exam.variant}`;
+  // a saved attempt only resumes against the same questions and option counts
+  const FP = exam.questions.map(q => `${q.id}:${q.options.length}`).join('|');
+  const LETTERS = 'ABCDEFGH';
+  const qs = exam.questions;
+  const domains = Object.fromEntries((exam.domains || []).map(d => [d.id, d]));
+  const correctIdx = (q) => q.options.map((o, i) => (o.correct ? i : -1)).filter(i => i >= 0);
+  const isMulti = (q) => correctIdx(q).length > 1;
+  const store = {
+    get(k = KEY) { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch { return null; } },
+    set(v, k = KEY) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* storage blocked: progress is not kept */ } },
+    clear(k = KEY) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+  };
+
+  // --- tiny, safe text formatting: escape, then `code`, **bold**, paragraphs ---
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const inline = (s) => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  const paras = (s) => String(s).split(/\n{2,}/).map(p => `<p>${inline(p).replace(/\n/g, '<br>')}</p>`).join('');
+  const codeBlock = (q) => q.code ? `<pre><code>${esc(q.code)}</code></pre>` : '';
+
+  let st = null;          // {mode, order: [[optIdx...]...], answers: {qi: [optIdx]}, flags: [qi], checked: {qi:true}, idx, started, deadline, finished}
+  let timerId = null;
+
+  const shuffle = (n) => { const a = [...Array(n).keys()]; for (let i = n - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+  // ---------- start screen ----------
+  const back = location.protocol.startsWith('http') ? `/topic/${encodeURIComponent(exam.topic)}` : '';
+  document.title = `${exam.title} — exam`;
+  $('s-kicker').textContent = `${exam.topic} · variant ${exam.variant} of ${exam.of || 5}`;
+  $('s-title').textContent = exam.title;
+  $('s-desc').textContent = exam.description || '';
+  const nMulti = qs.filter(isMulti).length;
+  $('s-stats').innerHTML = [
+    ['Questions', qs.length], ['Time', `${exam.minutes} min`], ['Pass mark', exam.scaled ? `${Math.round(100 + 900 * exam.pass)} / 1000` : `${Math.round(exam.pass * 100)}%`],
+    ['Multiple response', nMulti],
+  ].map(([k, v]) => `<div class="stat"><span class="dim">${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+  if (back) { $('s-back').href = back; $('s-back').hidden = false; $('r-back').href = back; $('r-back').hidden = false; }
+  let saved = store.get();
+  if (saved && saved.fp !== FP) { store.clear(); saved = null; }    // the exam file changed since
+  if (saved && !saved.finished && saved.answers) {
+    const n = Object.keys(saved.answers).length;
+    $('s-resume').textContent = `An unfinished ${saved.mode} attempt is saved (${n} of ${qs.length} answered).`;
+    $('s-resume').hidden = false; $('btn-resume').hidden = false;
+  }
+
+  $('btn-start').onclick = () => {
+    const mode = document.querySelector('input[name=mode]:checked').value;
+    st = { fp: FP, mode, order: qs.map(q => shuffle(q.options.length)), answers: {}, flags: [], checked: {}, idx: 0, started: Date.now(),
+      deadline: mode === 'exam' ? Date.now() + exam.minutes * 60000 : null, finished: false };
+    begin();
+  };
+  $('btn-resume').onclick = () => { st = saved; begin(); };
+
+  function begin() {
+    $('start').hidden = true; $('results').hidden = true; $('bar').hidden = false; $('qcard').hidden = false;
+    $('bar-title').textContent = `${exam.topic} v${exam.variant} · ${st.mode}`;
+    $('btn-check').hidden = st.mode !== 'study';
+    $('grid-legend').textContent = st.mode === 'exam' ? 'blue = answered · dot = flagged' : 'green = right · red = wrong · dot = flagged';
+    clearInterval(timerId);
+    if (st.deadline) { tick(); timerId = setInterval(tick, 1000); } else { $('timer').textContent = ''; }
+    show(st.idx);
+  }
+
+  // keep the local server alive during a long exam (it stops after 2 h with no requests)
+  if (location.protocol.startsWith('http')) setInterval(() => { fetch('/health', { cache: 'no-store' }).catch(() => {}); }, 4 * 60000);
+
+  function tick() {
+    const left = Math.max(0, st.deadline - Date.now());
+    const m = Math.floor(left / 60000), s = Math.floor(left / 1000) % 60;
+    $('timer').textContent = `${m}:${String(s).padStart(2, '0')}`;
+    $('timer').classList.toggle('low', left < 5 * 60000);
+    if (left <= 0) finish(true);
+  }
+
+  // ---------- one question ----------
+  function show(i) {
+    st.idx = i; store.set(st);
+    const q = qs[i], multi = isMulti(q), picked = st.answers[i] || [];
+    const reveal = st.mode === 'study' && st.checked[i];
+    $('q-num').textContent = `Question ${i + 1} of ${qs.length}`;
+    $('q-domain').hidden = st.mode === 'exam' || !domains[q.domain];
+    $('q-domain').textContent = domains[q.domain]?.name || '';
+    $('q-stem').innerHTML = paras(q.stem) + codeBlock(q) + (multi ? `<p class="choose">Choose ${['', '', 'two', 'three', 'four'][correctIdx(q).length] || correctIdx(q).length}.</p>` : '');
+    const box = $('q-options');
+    box.setAttribute('role', multi ? 'group' : 'radiogroup');
+    box.setAttribute('aria-label', `Answers for question ${i + 1}`);
+    box.innerHTML = st.order[i].map((oi, pos) => {
+      const o = q.options[oi], on = picked.includes(oi);
+      let cls = 'opt' + (multi ? ' multi' : '');
+      if (reveal) cls += o.correct ? ' is-correct' : (on ? ' is-wrong' : '');
+      return `<button type="button" class="${cls}" role="${multi ? 'checkbox' : 'radio'}" aria-checked="${on}" data-oi="${oi}" ${reveal ? 'disabled' : ''}>
+        <span class="key">${LETTERS[pos]}</span><span>${inline(o.text)}</span>${reveal ? `<span class="why">${o.correct ? '✓ ' : ''}${inline(o.why || '')}</span>` : ''}</button>`;
+    }).join('');
+    box.querySelectorAll('.opt').forEach(b => b.onclick = () => pick(i, +b.dataset.oi));
+    $('q-explain').hidden = !reveal;
+    if (reveal) $('q-explain').innerHTML = explainHtml(q);
+    $('btn-prev').disabled = i === 0;
+    $('btn-next').textContent = i === qs.length - 1 ? 'Finish' : 'Next →';
+    const fl = st.flags.includes(i);
+    $('btn-flag').classList.toggle('flagged', fl); $('btn-flag').setAttribute('aria-pressed', fl);
+    $('btn-flag').textContent = fl ? 'Flagged' : 'Flag';
+    $('btn-check').disabled = reveal || !picked.length;
+    const done = Object.keys(st.answers).length;
+    $('bar-count').textContent = `${done}/${qs.length} answered`;
+    $('progress').style.width = `${(100 * done) / qs.length}%`;
+    renderGrid();
+  }
+
+  function explainHtml(q) {
+    const refs = (q.refs || []).filter(u => /^https:\/\//.test(u)).map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(u.replace(/^https?:\/\//, ''))}</a>`).join('<br>');
+    return paras(q.explain) + (refs ? `<p class="refs dim">${refs}</p>` : '');
+  }
+
+  function pick(i, oi) {
+    const q = qs[i];
+    if (st.mode === 'study' && st.checked[i]) return;
+    let a = st.answers[i] ? [...st.answers[i]] : [];
+    if (isMulti(q)) a = a.includes(oi) ? a.filter(x => x !== oi) : [...a, oi];
+    else a = [oi];
+    if (a.length) st.answers[i] = a; else delete st.answers[i];
+    show(i);
+  }
+
+  const right = (i) => { const a = (st.answers[i] || []).slice().sort(); const c = correctIdx(qs[i]); return a.length === c.length && a.every((x, k) => x === c[k]); };
+
+  function renderGrid() {
+    $('grid').innerHTML = qs.map((_, i) => {
+      let cls = st.answers[i] ? 'answered' : '';
+      if (st.mode === 'study' && st.checked[i]) cls = right(i) ? 'ok' : 'bad';
+      if (st.flags.includes(i)) cls += ' flag';
+      if (i === st.idx) cls += ' current';
+      return `<button type="button" class="${cls}" data-i="${i}" aria-label="Question ${i + 1}${st.answers[i] ? ', answered' : ''}${st.flags.includes(i) ? ', flagged' : ''}">${i + 1}</button>`;
+    }).join('');
+    $('grid').querySelectorAll('button').forEach(b => b.onclick = () => { show(+b.dataset.i); $('qcard').scrollIntoView({ block: 'start' }); });
+  }
+
+  $('btn-prev').onclick = () => st.idx > 0 && show(st.idx - 1);
+  $('btn-next').onclick = () => (st.idx < qs.length - 1 ? show(st.idx + 1) : finish(false));
+  $('btn-flag').onclick = () => { const i = st.idx; st.flags = st.flags.includes(i) ? st.flags.filter(x => x !== i) : [...st.flags, i]; show(i); };
+  $('btn-check').onclick = () => { st.checked[st.idx] = true; show(st.idx); };
+  $('btn-grid').onclick = () => { const open = $('grid-card').hidden; $('grid-card').hidden = !open; $('btn-grid').setAttribute('aria-expanded', open); };
+  $('btn-submit-2').onclick = () => finish(false);
+  document.addEventListener('keydown', (e) => {
+    if (!st || st.finished || $('qcard').hidden || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    if (e.key === 'ArrowRight') $('btn-next').click();
+    else if (e.key === 'ArrowLeft') $('btn-prev').click();
+    else if (e.key.toLowerCase() === 'f') $('btn-flag').click();
+    else if (/^[1-8]$/.test(e.key)) { const b = $('q-options').querySelectorAll('.opt')[+e.key - 1]; if (b && !b.disabled) b.click(); }
+  });
+
+  // ---------- results ----------
+  function finish(timeUp) {
+    if (!st || st.finished) return;
+    const unanswered = qs.length - Object.keys(st.answers).length;
+    if (!timeUp && unanswered && !confirm(`${unanswered} question(s) unanswered. Finish anyway?`)) return;
+    clearInterval(timerId);
+    st.finished = true; st.ended = Date.now(); store.set(st);
+    $('bar').hidden = true; $('qcard').hidden = true; $('grid-card').hidden = true; $('results').hidden = false;
+    const n = qs.length, correct = qs.filter((_, i) => right(i)).length, frac = correct / n;
+    const pass = frac >= exam.pass;
+    const secs = Math.round((st.ended - st.started) / 1000);
+    const scaled = Math.round(100 + 900 * frac);
+    $('r-verdict').textContent = `${pass ? 'Pass' : 'Not yet'}${timeUp ? ' (time ran out)' : ''}`;
+    $('r-verdict').className = 'verdict ' + (pass ? 'pass' : 'fail');
+    $('r-stats').innerHTML = [
+      ['Score', exam.scaled ? `${scaled} / 1000` : `${Math.round(frac * 100)}%`], ['Correct', `${correct} / ${n}`],
+      ['Pass mark', exam.scaled ? `${Math.round(100 + 900 * exam.pass)}` : `${Math.round(exam.pass * 100)}%`],
+      ['Time', `${Math.floor(secs / 60)} min ${secs % 60} s`],
+    ].map(([k, v]) => `<div class="stat"><span class="dim">${esc(k)}</span><b>${esc(v)}</b></div>`).join('');
+    const per = {};
+    qs.forEach((q, i) => { const d = q.domain || 'general'; per[d] = per[d] || [0, 0]; per[d][1]++; if (right(i)) per[d][0]++; });
+    $('r-domains').innerHTML = (exam.scaled ? '<p class="dim">Scaled score is a linear estimate; AWS uses a scaled model and 15 unscored questions, so treat it as a guide.</p>' : '') +
+      Object.entries(per).map(([d, [c, t]]) => {
+        const p = Math.round((100 * c) / t);
+        return `<div class="dom"><span>${esc(domains[d]?.name || d)}</span><b>${c}/${t}</b><div class="meter"><i style="width:${p}%;background:var(${p >= exam.pass * 100 ? '--ok' : '--risk'})"></i></div></div>`;
+      }).join('');
+    renderReview(true);
+    const result = {
+      topic: exam.topic, variant: exam.variant, mode: st.mode, finished: new Date(st.ended).toISOString(), seconds: secs, time_up: !!timeUp,
+      correct, total: n, score: Math.round(frac * 1000) / 1000, pass,
+      domains: Object.fromEntries(Object.entries(per).map(([d, [c, t]]) => [d, [c, t]])),
+      misses: qs.map((q, i) => ({ i, q })).filter(({ i }) => !right(i)).map(({ i, q }) => ({ id: q.id, domain: q.domain, picked: st.answers[i] || [], correct: correctIdx(q) })),
+      flagged: st.flags.map(i => qs[i].id),
+    };
+    store.set(result, PENDING);     // kept until the log has it
+    save(result);
+    window.scrollTo(0, 0);
+  }
+
+  async function save(result) {
+    const el = $('r-save'), again = $('btn-save');
+    if (!location.protocol.startsWith('http')) { el.textContent = 'Not saved: open the exam with `bin/learn exam` so results reach your log.'; return; }
+    try {
+      const r = await fetch('/api/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) });
+      if (r.ok) store.clear(PENDING);
+      el.textContent = r.ok ? 'Saved to your exam log (me/exam-log.jsonl). Claude reads it to plan what you study next.' : `Not saved (server said ${r.status}).`;
+      document.body.dataset.saved = r.ok ? 'yes' : 'no';
+      again.hidden = r.ok;
+    } catch {
+      el.textContent = 'Not saved yet: the local server is not running. Run `bin/learn serve`, then press Save again (the result is kept in this browser).';
+      document.body.dataset.saved = 'no'; again.hidden = false;
+    }
+  }
+  $('btn-save').onclick = () => { const p = store.get(PENDING); if (p) save(p); };
+  // a result that never reached the log (server was down) is sent again on the next visit
+  { const p = store.get(PENDING); if (p && location.protocol.startsWith('http')) fetch('/api/result', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) }).then(r => { if (r.ok) store.clear(PENDING); }).catch(() => {}); }
+
+  let onlyWrong = true;
+  function renderReview(reset) {
+    if (reset) onlyWrong = true;
+    $('btn-only-wrong').textContent = onlyWrong ? 'Showing: mistakes + flagged' : 'Showing: all questions';
+    $('btn-only-wrong').setAttribute('aria-pressed', onlyWrong);
+    $('r-review').innerHTML = qs.map((q, i) => {
+      const ok = right(i), fl = st.flags.includes(i);
+      if (onlyWrong && ok && !fl) return '';
+      const picked = st.answers[i] || [];
+      const opts = q.options.map((o, oi) => {
+        const on = picked.includes(oi);
+        const cls = 'opt' + (isMulti(q) ? ' multi' : '') + (o.correct ? ' is-correct' : on ? ' is-wrong' : '');
+        return `<div class="${cls}" aria-checked="${on}"><span class="key">${o.correct ? '✓' : on ? '✗' : ''}</span><span>${inline(o.text)}${on ? ' <span class="dim">(your pick)</span>' : ''}</span><span class="why">${inline(o.why || '')}</span></div>`;
+      }).join('');
+      return `<article class="card review-item"><div class="row"><span class="kicker">Question ${i + 1}</span><span class="spacer"></span>
+        ${fl ? '<span class="tag">flagged</span>' : ''}<span class="tag ${ok ? 'ok' : 'bad'}">${ok ? 'right' : picked.length ? 'wrong' : 'unanswered'}</span>
+        <span class="tag">${esc(domains[q.domain]?.name || q.domain || '')}</span></div>
+        <div class="stem">${paras(q.stem)}${codeBlock(q)}</div><div class="options">${opts}</div><div class="explain">${explainHtml(q)}</div></article>`;
+    }).join('') || '<p class="card">No mistakes and nothing flagged. Use “Showing: all questions” to read every explanation.</p>';
+  }
+  $('btn-only-wrong').onclick = () => { onlyWrong = !onlyWrong; renderReview(false); };
+  $('btn-retake').onclick = () => { store.clear(); location.reload(); };
+})();
+</script>
+</body>
+</html>

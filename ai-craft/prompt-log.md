@@ -54,9 +54,9 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "QA can't update the external content, began when I started wrapping the
   returned URL with the CDN … for a 30 minute video admin panel does not show anything,
   AWS says key not found. diagnose, analyze, plan and resolve"
-- **After:** "SDQA, submissions 44/46: PUT returns 500 since the CDN wrapping (expected 200).
+- **After:** "QA, submissions 44/46: PUT returns 500 since the CDN wrapping (expected 200).
   A 30-min upload opened in admin right after submit shows NoSuchKey; a 20-s one plays.
-  I suspect the signed URL. Access ready: SSO fresh, VPN on. Done when both work on SDQA.
+  I suspect the signed URL. Access ready: SSO fresh, VPN on. Done when both work on QA.
   Split it: logs in background, admin fix in a worktree."
 - **Why:** "what changed" was the best part and found bug 1 fast. IDs, the exact error and
   "right after submit" would have removed about 10 tool calls of searching, and stating
@@ -133,7 +133,7 @@ The goal is to *see* your own patterns change over the months.
 
 ## 2026-10-05: "new channel should be isPublished:true out of the box" (clear, missing reach)
 - **Before:** "help me fix on more thing. when user creates his own channel via my-channel endpoint, it should be isPublished:true out of the box"
-- **After:** "New creator channels start isPublished:true. Existing unpublished channels: backfill yes/no (local only; SDQA ask first). Empty channels in public lists: OK / hide until first lesson. Done when tsc + eslint are clean."
+- **After:** "New creator channels start isPublished:true. Existing unpublished channels: backfill yes/no (local only; QA ask first). Empty channels in public lists: OK / hide until first lesson. Done when tsc + eslint are clean."
 - **Why:** the change was one line and needed no questions. But a default flip always raises two more decisions: rows that already exist, and what becomes visible. Claude had to hand both back as open questions at the end.
 
 ## 2026-10-06: "generate a new nestjs project … step by step" (rich goal, three tasks, no done-line)

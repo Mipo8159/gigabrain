@@ -1,0 +1,338 @@
+#!/usr/bin/env python3
+"""Check exam variants against global/skills/teach/kit/EXAMS.md.
+
+  bin/check-exam <topic>            check evals/knowledge/<topic>/exams/v*.json (all variants + cross-variant repeats)
+  bin/check-exam <file.json> ...    check these files (repeats are checked against their sibling variants too)
+  bin/check-exam --all              every topic that has an exams/ directory
+  bin/check-exam --runner           drive exam.html in headless Chromium through bin/learn serve:
+                                    answer, flag, finish, result saved to a temp log, no phone overflow, light + dark
+
+Exit 0 = every check passed.
+"""
+import difflib
+import json
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+KNOW = ROOT / "evals" / "knowledge"
+AWS = "aws-associate"
+AWS_DOMAINS = {"secure": .30, "resilient": .26, "performance": .24, "cost": .20}
+# "of the above" in any case; letter references only as capitals ("answer a health check" is fine)
+BANNED = re.compile(r"(?i:\b(all|none) of the above\b)|\bboth [A-F] and [A-F]\b|\b[Oo]ption [A-F]\b|\b[Aa]nswer [A-F]\b")
+# judged on the stem's last sentence, where the question is asked
+DEFINITION = re.compile(r"^\s*(what is|what are|which (aws )?service is|which service (does|provides)|define|what does \S+ stand for)\b"
+                        r"|\bwhich (aws )?service is (this|that|it|described)\b", re.I)
+WHICH_IS_THIS = re.compile(r"\bwhich (aws )?service is (this|that|it|described)\b", re.I)
+CHOOSE = {2: "(Choose two.)", 3: "(Choose three.)"}
+
+
+def norm(s):
+    return re.sub(r"[^a-z0-9 ]+", "", s.lower())[:240]
+
+
+def check_variant(path, data, problems):
+    p = lambda msg: problems.append(f"{path.relative_to(ROOT) if path.is_relative_to(ROOT) else path}: {msg}")
+    topic = path.parent.parent.name
+    aws = topic == AWS
+    for k in ("topic", "variant", "title", "minutes", "pass", "domains", "questions"):
+        if k not in data:
+            p(f"missing key '{k}'")
+            return
+    if data["topic"] != topic:
+        p(f"topic '{data['topic']}' != directory '{topic}'")
+    if f"v{data['variant']}.json" != path.name:
+        p(f"variant {data['variant']} does not match file name")
+    qs, doms = data["questions"], data["domains"]
+    want = (65, 130, .72, True) if aws else (20, 30, .7, False)
+    got = (len(qs), data["minutes"], data["pass"], bool(data.get("scaled")))
+    if got != want:
+        p(f"(questions, minutes, pass, scaled) = {got}, want {want}")
+    dom_ids = {d.get("id"): d.get("weight", 0) for d in doms}
+    if aws:
+        if dom_ids != AWS_DOMAINS:
+            p(f"domains must be exactly {AWS_DOMAINS}")
+    else:
+        if not 3 <= len(doms) <= 6:
+            p(f"{len(doms)} domains (want 3-6)")
+        if abs(sum(dom_ids.values()) - 1) > .01:
+            p(f"domain weights sum to {sum(dom_ids.values()):.2f}")
+    count = {d: 0 for d in dom_ids}
+    ids, multi, longest_right, singles, defs = set(), 0, 0, 0, 0
+    for n, q in enumerate(qs, 1):
+        qid = q.get("id", f"#{n}")
+        w = lambda msg: p(f"{qid}: {msg}")
+        if qid in ids:
+            w("duplicate id")
+        ids.add(qid)
+        if q.get("domain") not in dom_ids:
+            w(f"domain '{q.get('domain')}' not declared")
+        else:
+            count[q["domain"]] += 1
+        stem, opts = q.get("stem", ""), q.get("options", [])
+        if len(stem) < 60:
+            w("stem shorter than 60 characters")
+        sentences = [x for x in re.split(r"(?<=[.?!])\s+", re.sub(r"\((Choose \w+\.)\)", "", stem).strip()) if x]
+        # a definition question: a one-sentence stem asking "what is X", or a closing "which service is this?"
+        if sentences and (DEFINITION.search(sentences[-1]) and (len(sentences) == 1 or WHICH_IS_THIS.search(sentences[-1]))):
+            defs += 1
+        right = [o for o in opts if o.get("correct")]
+        if len(right) == 1:
+            singles += 1
+            if len(opts) != 4:
+                w(f"single answer needs exactly 4 options, has {len(opts)}")
+            lens = [len(o.get("text", "")) for o in opts]
+            if len(right[0].get("text", "")) == max(lens) and lens.count(max(lens)) == 1:
+                longest_right += 1
+        elif len(right) in (2, 3):
+            multi += 1
+            if not 5 <= len(opts) <= 6:
+                w(f"multiple response needs 5-6 options, has {len(opts)}")
+            if not stem.rstrip().endswith(CHOOSE[len(right)]):
+                w(f"{len(right)} correct options but the stem doesn't end with '{CHOOSE[len(right)]}'")
+        else:
+            w(f"{len(right)} correct options (want 1, or 2-3 for multiple response)")
+        if len({norm(o.get('text', '')) for o in opts}) != len(opts):
+            w("two options have the same text")
+        for i, o in enumerate(opts):
+            if len(o.get("why", "")) < 20:
+                w(f"option {i + 1} has no 'why' (20+ characters)")
+            if BANNED.search(o.get("text", "")):
+                w(f"option {i + 1} uses a banned form ('all/none of the above', a letter reference)")
+            if not o.get("text", "").strip():
+                w(f"option {i + 1} is empty")
+        if len(q.get("explain", "")) < 60:
+            w("explain shorter than 60 characters")
+        if aws and not q.get("refs"):
+            w("aws-associate questions need 1+ refs")
+        for r in q.get("refs", []):
+            if not r.startswith("https://"):
+                w(f"ref is not an https URL: {r[:60]}")
+        if q.get("code") and len(q["code"].splitlines()) > 25:
+            w("code snippet over 25 lines")
+    for d, c in count.items():
+        if aws:
+            target = 65 * AWS_DOMAINS.get(d, 0)
+            if abs(c - target) > 2:
+                p(f"domain {d}: {c} questions, want {target:.0f} ±2")
+        elif c < 2:
+            p(f"domain {d}: {c} questions (want 2+)")
+    lo, hi = (6, 12) if aws else (0, 4)
+    if not lo <= multi <= hi:
+        p(f"{multi} multiple-response questions (want {lo}-{hi})")
+    if singles and longest_right / singles > .4:
+        p(f"correct option is the longest in {longest_right}/{singles} single-answer questions (max 40%)")
+    if qs and defs / len(qs) > .2:
+        p(f"{defs} definition-style stems (max 20%)")
+
+
+def check_files(files):
+    problems, stems = [], []
+    seen_dirs = set()
+    for f in files:
+        f = pathlib.Path(f).resolve()
+        try:
+            data = json.loads(f.read_text())
+        except (OSError, ValueError) as e:
+            problems.append(f"{f}: not valid JSON ({e})")
+            continue
+        check_variant(f, data, problems)
+        seen_dirs.add(f.parent)
+    # repeats across every variant in the touched exam directories
+    for d in seen_dirs:
+        for f in sorted(d.glob("v*.json")):
+            try:
+                for q in json.loads(f.read_text()).get("questions", []):
+                    stems.append((f"{f.parent.parent.name}/{f.name}:{q.get('id')}", norm(q.get("stem", ""))))
+            except (OSError, ValueError):
+                pass
+    for i in range(len(stems)):
+        for j in range(i + 1, len(stems)):
+            a, b = stems[i][1], stems[j][1]
+            if a and b and abs(len(a) - len(b)) < 80 and difflib.SequenceMatcher(None, a, b).quick_ratio() > .85 \
+                    and difflib.SequenceMatcher(None, a, b).ratio() > .85:
+                problems.append(f"near-identical stems: {stems[i][0]} ~ {stems[j][0]}")
+    return problems
+
+
+RUNNER_JS = r"""
+const path = require('node:path'), os = require('node:os');
+const { createRequire } = require('node:module');
+const { chromium } = createRequire(path.join(os.homedir(), '.cache', 'gigabrain', 'render', 'package.json'))('playwright');
+const base = process.argv[2];
+const problems = [];
+const data = (page) => page.evaluate(() => JSON.parse(document.getElementById('exam-data').textContent));
+// answer question i: the right option(s) when wantRight, else one wrong option
+async function answer(page, q, wantRight) {
+  const right = q.options.map((o, k) => o.correct ? k : -1).filter(k => k >= 0);
+  const picks = wantRight ? right : [q.options.findIndex(o => !o.correct)];
+  for (const k of picks) await page.click(`#q-options .opt[data-oi="${k}"]`);
+}
+(async () => {
+  const browser = await chromium.launch();
+  for (const [vp, scheme] of [[{ width: 1280, height: 900 }, 'light'], [{ width: 390, height: 844 }, 'dark']]) {
+    const page = await browser.newPage({ viewport: vp, colorScheme: scheme });
+    const errors = []; page.on('pageerror', e => errors.push(String(e))); page.on('console', m => m.type() === 'error' && errors.push(m.text()));
+    page.on('dialog', d => d.accept());
+    await page.goto(base + '/exam/zz-check/1');
+    const ex = await data(page);
+    if (!ex.questions[0].stem.includes('<!--<script>')) problems.push('fixture payload missing from the rendered data');
+    await page.click('#btn-start');
+    let expected = 0;
+    for (let i = 0; i < ex.questions.length; i++) {
+      const wantRight = i % 2 === 0 || i === 3;          // q4 is the multi-response one: answer it right
+      await answer(page, ex.questions[i], wantRight);
+      if (wantRight) expected++;
+      if (i === 1) await page.click('#btn-flag');
+      if (i === 2 && scheme === 'light') {                // resume after a reload keeps answers
+        await page.reload(); await page.click('#btn-resume');
+        const c = await page.textContent('#bar-count');
+        if (!c.startsWith('3/')) problems.push(`resume after reload shows "${c}", want 3 answered`);
+      }
+      if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) problems.push(`${scheme} ${vp.width}px: overflow on question ${i + 1}`);
+      await page.click('#btn-next');                    // on the last question this is Finish
+    }
+    await page.waitForSelector('body[data-saved]', { timeout: 5000 }).catch(() => problems.push(`${scheme}: result never saved`));
+    if (await page.evaluate(() => document.body.dataset.saved) !== 'yes') problems.push(`${scheme}: result not saved`);
+    const stat = await page.textContent('#r-stats');
+    if (!stat.includes(`${expected} / ${ex.questions.length}`)) problems.push(`${scheme}: score shows "${stat}", want ${expected} / ${ex.questions.length}`);
+    if (!(await page.locator('#r-review article').count())) problems.push(`${scheme}: review shows no questions`);
+    if (await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)) problems.push(`${scheme} ${vp.width}px: overflow on results`);
+    console.log(`EXPECT ${scheme} ${expected}`);
+    // study mode explains per question
+    await page.click('#btn-retake'); await page.check('input[value=study]'); await page.click('#btn-start');
+    await page.locator('#q-options .opt').first().click(); await page.click('#btn-check');
+    if (!(await page.isVisible('#q-explain'))) problems.push(`${scheme}: study mode Check shows no explanation`);
+    await page.goto(base + '/topic/zz-check');
+    if (!(await page.locator('a[href^="/exam/zz-check/"]').count())) problems.push('topic page lists no exam links');
+    if (errors.length) problems.push(`${scheme}: page errors: ${errors.slice(0, 3).join(' | ')}`);
+    await page.close();
+  }
+  // timer expiry finishes and saves by itself
+  const page = await browser.newPage();
+  await page.goto(base + '/exam/zz-check/2'); await page.click('#btn-start');
+  await page.waitForSelector('#results:not([hidden])', { timeout: 8000 }).catch(() => problems.push('timer expiry did not finish the exam'));
+  if (!/time ran out/.test(await page.textContent('#r-verdict'))) problems.push('timer expiry verdict missing');
+  await page.waitForSelector('body[data-saved="yes"]', { timeout: 5000 }).catch(() => problems.push('timed-out result not saved'));
+  await browser.close();
+  console.log(problems.length ? problems.map(p => '  ✗ ' + p).join('\n') : '  ✓ runner: scoring, multi-response, flag, resume, timer expiry, save, review, study mode, topic page, 390px dark');
+  process.exit(problems.length ? 1 : 0);
+})();
+"""
+
+
+def fixture_exam(variant):
+    def q(n, dom, multi=False):
+        opts = [{"text": f"Option {k} for question {n}, a plausible design choice", "correct": k == 0 or (multi and k == 1),
+                 "why": "Because the fixture says so, at enough length."} for k in range(5 if multi else 4)]
+        stem = f"Fixture scenario {n}: a service in two regions sees duplicate events after a failover. What should change?"
+        if n == 1:   # text that once broke the data block: must render as text, the runner must still run
+            stem += " A comment field held <!--<script> and </script> literally."
+        return {"id": f"zz-v{variant}-q{n:02d}", "domain": dom, "stem": stem + (" (Choose two.)" if multi else ""),
+                "code": "consumer.on('message', handle)" if n == 2 else "", "options": opts,
+                "explain": "The fixture explanation is long enough to pass the sixty character rule easily.",
+                "refs": ["https://example.com/doc"]}
+    return {"topic": "zz-check", "variant": variant, "of": 5, "title": "Runner fixture", "minutes": 30, "pass": .7, "scaled": False,
+            "domains": [{"id": "a", "name": "Domain A", "weight": .5}, {"id": "b", "name": "Domain B", "weight": .5}],
+            "questions": [q(n, "a" if n % 2 else "b", multi=(n == 4)) for n in range(1, 7)]}
+
+
+def forged_requests(port, rows):
+    """Another site (Origin) or a rebinding name (Host) must get 403; a malformed row must be refused."""
+    import http.client
+    bad = []
+    good = dict(rows[0]) if rows else {}
+    cases = [("POST", "/api/result", {"Origin": "http://evil.example"}, good, 403, "foreign Origin POST"),
+             ("GET", "/exam/zz-check/1", {"Host": f"evil.example:{port}"}, None, 403, "rebinding Host GET"),
+             ("POST", "/api/result", {}, {**good, "score": "x"}, 400, "malformed score"),
+             ("POST", "/api/result", {}, {**good, "variant": True}, 400, "boolean variant")]
+    for method, path, headers, body, want, name in cases:
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        data = json.dumps(body).encode() if body is not None else None
+        c.request(method, path, body=data, headers={"Content-Type": "application/json", **headers})
+        got = c.getresponse().status
+        c.close()
+        if got != want:
+            bad.append(f"{name}: got {got}, want {want}")
+    return bad
+
+
+def runner():
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        know = tmp / "knowledge" / "zz-check" / "exams"
+        know.mkdir(parents=True)
+        (know / "v1.json").write_text(json.dumps(fixture_exam(1)))
+        timed = fixture_exam(2)
+        timed["minutes"] = 0.04          # ~2.4 s: the timer must finish and save on its own
+        (know / "v2.json").write_text(json.dumps(timed))
+        log = tmp / "exam-log.jsonl"
+        env = {**os.environ, "GIGABRAIN_KNOWLEDGE": str(tmp / "knowledge"), "GIGABRAIN_EXAM_LOG": str(log),
+               "GIGABRAIN_LEARN_CACHE": str(tmp / "cache"), "GIGABRAIN_LEARN_PORT": "0", "GIGABRAIN_SERVE_IDLE": "120"}
+        srv = subprocess.Popen([sys.executable, str(ROOT / "bin" / "learn"), "serve", "--print-port"], env=env,
+                               stdout=subprocess.PIPE, text=True)
+        try:
+            port = int(srv.stdout.readline().strip())
+            js = tmp / "runner.js"
+            js.write_text(RUNNER_JS)
+            r = subprocess.run(["node", str(js), f"http://127.0.0.1:{port}"], capture_output=True, text=True, timeout=180)
+            out = [l for l in r.stdout.splitlines() if not l.startswith("EXPECT ")]
+            print("\n".join(out).rstrip() or r.stderr.rstrip())
+            want = [int(l.split()[-1]) for l in r.stdout.splitlines() if l.startswith("EXPECT ")]
+            rows = [json.loads(l) for l in log.read_text().splitlines()] if log.exists() else []
+            bad = []
+            v1 = [x for x in rows if x.get("variant") == 1]
+            if [x.get("correct") for x in v1] != want:
+                bad.append(f"logged correct counts {[x.get('correct') for x in v1]}, the browser answered {want} right")
+            if not any(x.get("variant") == 2 and x.get("time_up") for x in rows):
+                bad.append("no logged time_up result for the timed variant")
+            bad += forged_requests(port, rows)
+            for b in bad:
+                print(f"  ✗ {b}")
+            return 0 if r.returncode == 0 and not bad else 1
+        finally:
+            srv.terminate()
+            srv.wait(timeout=5)
+
+
+def main(argv):
+    if not argv:
+        print(__doc__)
+        return 2
+    if argv[0] == "--runner":
+        return runner()
+    if argv[0] == "--all":
+        files = sorted(KNOW.glob("*/exams/v*.json"))
+    elif argv[0].endswith(".json"):
+        files = argv
+    else:
+        files = sorted((KNOW / argv[0].replace("_", "-") / "exams").glob("v*.json"))
+    if not files:
+        print("no exam files found")
+        return 1
+    problems = check_files(files)
+    for x in problems:
+        print(f"  ✗ {x}")
+    if argv[0] == "--all" or not argv[0].endswith(".json"):
+        for d in sorted({pathlib.Path(f).parent for f in files}):
+            names = sorted(x.name for x in d.glob("v*.json"))
+            if names != [f"v{i}.json" for i in range(1, 6)]:
+                problems.append(f"{d.parent.name}: want exactly v1..v5.json, have {names}")
+                print(f"  ✗ {problems[-1]}")
+
+    def count(f):
+        try:
+            return len(json.loads(pathlib.Path(f).read_text()).get("questions", []))
+        except (OSError, ValueError, AttributeError):
+            return 0
+    qn = sum(count(f) for f in files)
+    print(f"check-exam: {len(files)} variant(s), {qn} questions, {len(problems)} problem(s)")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

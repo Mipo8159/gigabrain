@@ -1,6 +1,6 @@
 ---
 name: node-test-takes-globs-not-dirs
-description: On Node 26, `node --test test/` treats the directory as one test file and fails with a single anonymous error; use bare `node --test` (auto-discovers) or a glob.
+description: On Node 24 and 26, `node --test test/` treats the directory as one test file and fails with a single anonymous error; use bare `node --test` (auto-discovers) or a glob.
 metadata:
   type: feedback
 ---
@@ -18,5 +18,8 @@ with no stack, on Node v26.5.0 (2026-10-12). Bare `node --test` discovers
 
 **How to apply:** in package.json use `node --test` or
 `node --test 'test/**/*.test.js'`.
+
+Recurred 2026-10-12 in freshly generated practice repos, with this entry
+already present: put the safe script in templates so it is never written wrong.
 
 **Signal:** `node:test` output with a lone `✖ test` and no assertion message.

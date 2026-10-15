@@ -1,0 +1,666 @@
+{
+  "topic": "nestjs",
+  "variant": 5,
+  "of": 5,
+  "title": "NestJS at scale — variant 5",
+  "description": "Airline, pharmacy, lending, social and logistics: source-level boundaries, singleton state races, forRoot/forFeature, context IDs, serialization leaks, adapter-neutral filters, retry topics, aggregate commits, shutdown hook order and SWC cycles.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "modules",
+      "name": "Module boundaries, DI and scopes",
+      "weight": 0.25
+    },
+    {
+      "id": "pipeline",
+      "name": "Request pipeline and cross-cutting concerns",
+      "weight": 0.2
+    },
+    {
+      "id": "messaging",
+      "name": "Microservices, transports and CQRS",
+      "weight": 0.2
+    },
+    {
+      "id": "operations",
+      "name": "Config, secrets, lifecycle and shutdown",
+      "weight": 0.15
+    },
+    {
+      "id": "seams",
+      "name": "Testing seams, hexagonal structure and builds",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "nestjs-v5-q01",
+      "domain": "modules",
+      "stem": "An airline monolith has 12 teams and 60 Nest modules. Code review keeps finding imports like `import { FareCalculator } from '../../pricing/internal/fare-calculator'` followed by `new FareCalculator(...)`, which bypass Pricing's exported facade and its caching. Nest's `exports` didn't stop it. How should the team enforce module boundaries?",
+      "options": [
+        {
+          "text": "Mark internal providers `@Injectable({ scope: Scope.TRANSIENT })` so they can't be shared",
+          "correct": false,
+          "why": "Scope controls instance sharing inside DI; a direct `new` from another folder ignores DI entirely."
+        },
+        {
+          "text": "A public `index.ts` per module, plus a lint rule banning deep imports",
+          "correct": true,
+          "why": "Nest's `exports` only govern DI; source-level imports need a static check, and a lint rule fails the build on any deep import."
+        },
+        {
+          "text": "Move every module into a separate repository so internals are physically unreachable",
+          "correct": false,
+          "why": "It enforces boundaries, but with cross-repo releases and versioning for 60 modules, a heavy price for a problem a lint rule solves."
+        },
+        {
+          "text": "Rely on code review with a checklist item for deep imports",
+          "correct": false,
+          "why": "That is what is failing today; manual review doesn't scale to 12 teams."
+        }
+      ],
+      "explain": "Nest module exports are runtime DI encapsulation, not source encapsulation. TypeScript can still import any file, so enforce boundaries with a public entry point per module and a lint rule in CI.",
+      "refs": [
+        "https://docs.nestjs.com/modules"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q02",
+      "domain": "modules",
+      "stem": "A social media API has a singleton `FeedRankingService`. To avoid passing the viewer everywhere, a guard calls `feedRanking.setViewer(user)`, which stores `this.viewer`, and the service reads it later in `rank()`. In load tests at 3,000 rps, about 1 in 400 feeds is ranked for a different user. What should change?",
+      "options": [
+        {
+          "text": "Keep it stateless: pass the viewer as an argument or use AsyncLocalStorage",
+          "correct": true,
+          "why": "Each request carries its own viewer, so concurrent requests can't overwrite each other."
+        },
+        {
+          "text": "Make `FeedRankingService` request-scoped so each request has its own instance",
+          "correct": false,
+          "why": "It is correct, but the scope bubbles through the feed graph and rebuilds it on every request at 3,000 rps."
+        },
+        {
+          "text": "Wrap `setViewer` and `rank` in a mutex so only one request uses the service at a time",
+          "correct": false,
+          "why": "It serialises all feed ranking in each process, which collapses throughput."
+        },
+        {
+          "text": "Make `FeedRankingService` `Scope.TRANSIENT` so each injection site gets its own copy",
+          "correct": false,
+          "why": "Transient copies are per consumer and shared across all requests through that consumer, so the race remains."
+        }
+      ],
+      "explain": "A singleton serves many concurrent requests on one event loop; any per-request field on it is a race across `await` points. Keep singletons stateless and carry request data in arguments or async context.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/injection-scopes",
+        "https://docs.nestjs.com/recipes/async-local-storage"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q03",
+      "domain": "modules",
+      "stem": "A travel-booking platform integrates with 14 partner airlines. Every partner client shares connection pooling, retries and telemetry settings, while each feature module needs only the two or three partners it books with, each with its own base URL and credentials. How should the integration module be shaped?",
+      "options": [
+        {
+          "text": "One `PartnersModule.register()` that builds all 14 clients, imported by every feature module",
+          "correct": false,
+          "why": "Each import builds all 14 clients again, and every module gets access to partners it should not call."
+        },
+        {
+          "text": "A `@Global()` module that exposes a `getClient(partnerCode)` method",
+          "correct": false,
+          "why": "It works, but hides which feature uses which partner and moves wiring errors from bootstrap to runtime lookups."
+        },
+        {
+          "text": "`forRoot()` once for shared settings, `forFeature(['LH', 'BA'])` per module",
+          "correct": true,
+          "why": "Shared infrastructure is configured once, and each module's imports state exactly which partner clients it uses."
+        },
+        {
+          "text": "Have each feature module create its own HTTP clients with shared defaults copied in",
+          "correct": false,
+          "why": "It works, but duplicates pooling and retry setup in many places, and the copies drift."
+        }
+      ],
+      "explain": "The `forRoot` / `forFeature` convention splits configuration that is set once per app from what each module needs. It keeps shared resources single and makes per-module dependencies visible in imports.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/dynamic-modules#community-guidelines"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q04",
+      "domain": "modules",
+      "stem": "A pharmacy platform's API and its read-heavy `SearchModule` share one Nest codebase and one root `AppModule`. Search traffic is 15 times the rest and needs different scaling and a different memory profile, but the team doesn't want two repositories. Today a `SEARCH_ONLY=true` env flag skips some controllers at runtime. What is the cleaner structure?",
+      "options": [
+        {
+          "text": "Keep one root module and add more env flags to skip providers in search pods",
+          "correct": false,
+          "why": "Flags multiply, every pod still loads every module's code and providers, and a wrong flag ships the wrong surface."
+        },
+        {
+          "text": "Build search as a hybrid microservice connected to the main app",
+          "correct": false,
+          "why": "Hybrid means both run in the same process, so they still scale together."
+        },
+        {
+          "text": "Split the repository so search can deploy independently",
+          "correct": false,
+          "why": "It achieves independent deploys, but at the cost of cross-repo changes for shared code, which the team wants to avoid."
+        },
+        {
+          "text": "Two entry points, each with its own root module",
+          "correct": true,
+          "why": "Each deployable boots only its own module tree from the same codebase, so they scale and fail independently."
+        }
+      ],
+      "explain": "A root module defines a deployable. One codebase can have several entry points, each with its own root module, which is cleaner than runtime flags that prune a shared tree.",
+      "refs": [
+        "https://docs.nestjs.com/modules",
+        "https://docs.nestjs.com/cli/monorepo"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q05",
+      "domain": "modules",
+      "stem": "A logistics API has a request-scoped `UnitOfWork` that opens a transaction lazily. A singleton `DispatchService` calls `await this.moduleRef.resolve(UnitOfWork)` once in `assignDriver()` and again in a helper it calls, expecting both to join one transaction. In production the driver assignment and the route update are committed separately, and a failure between them leaves trucks with no route. What is the fix?",
+      "options": [
+        {
+          "text": "Use `moduleRef.get(UnitOfWork)` instead of `resolve()`",
+          "correct": false,
+          "why": "`get()` cannot fetch scoped providers at all; it throws."
+        },
+        {
+          "text": "Pass the request's context ID to both `resolve()` calls",
+          "correct": true,
+          "why": "`resolve()` without a context ID builds a new subtree each time; sharing the request's context ID returns the same instance."
+        },
+        {
+          "text": "Make `UnitOfWork` a singleton so both calls get the same object",
+          "correct": false,
+          "why": "Both calls would then share one transaction for every concurrent request in the process."
+        },
+        {
+          "text": "Make the helper open its own transaction and retry on failure",
+          "correct": false,
+          "why": "Two transactions are the bug; retries don't make the pair atomic."
+        }
+      ],
+      "explain": "`ModuleRef.resolve()` returns a fresh instance from its own DI subtree unless you pass a context ID. To share a scoped instance within a request, resolve with that request's context ID, or better, pass the unit of work explicitly.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/module-ref#resolving-scoped-providers"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q06",
+      "domain": "pipeline",
+      "stem": "A pharmacy API exposes `GET /prescriptions/:id`, where IDs are UUIDs. A scanner bot sends 20,000 requests an hour with IDs like `123` and `../etc`; each one reaches Postgres, which raises `invalid input syntax for type uuid`, and the API returns 500 and pages on-call. What is the right change?",
+      "options": [
+        {
+          "text": "Catch the Postgres error in the repository and convert it to a 404",
+          "correct": false,
+          "why": "It stops the pages, but every junk request still costs a database round trip."
+        },
+        {
+          "text": "Rate-limit the bot's IP at the load balancer",
+          "correct": false,
+          "why": "Useful against this bot, but the next client with a malformed ID still gets a 500."
+        },
+        {
+          "text": "Bind `ParseUUIDPipe` to the `id` parameter",
+          "correct": true,
+          "why": "Malformed IDs are rejected with 400 before the handler runs, so the database never sees them."
+        },
+        {
+          "text": "Add a global exception filter that maps every database error to 400",
+          "correct": false,
+          "why": "It hides genuine server faults such as connection failures behind client errors."
+        }
+      ],
+      "explain": "Validate input at the edge with pipes so bad input becomes a 400 before it reaches I/O. Errors that reach the database should be server faults, not client mistakes.",
+      "refs": [
+        "https://docs.nestjs.com/pipes#built-in-pipes"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q07",
+      "domain": "pipeline",
+      "stem": "A social app uses a global `ClassSerializerInterceptor`, and `UserEntity` has `@Exclude()` on `email` and `phone`. For speed, a developer rewrote the followers endpoint to `return this.dataSource.query('SELECT * FROM users WHERE ...')`. A researcher reports that the endpoint now exposes private emails. Why, and what is the fix?",
+      "options": [
+        {
+          "text": "The interceptor skips raw SQL results; add `@SerializeOptions({ strategy: 'excludeAll' })` to the handler",
+          "correct": false,
+          "why": "Options change how class-transformer treats class instances; the raw rows are still plain objects, so `@Exclude()` never applies."
+        },
+        {
+          "text": "Map the rows to response DTO instances before returning them",
+          "correct": true,
+          "why": "Once the result is an instance of a decorated class, the interceptor applies `@Exclude()` again."
+        },
+        {
+          "text": "The interceptor runs before the handler; move it to the controller level",
+          "correct": false,
+          "why": "Interceptors wrap the handler at any level; scope does not change whether plain objects are transformed."
+        },
+        {
+          "text": "Select only safe columns in this SQL query",
+          "correct": false,
+          "why": "It fixes this endpoint, but the next raw query leaks again because nothing in the response path enforces the rules."
+        }
+      ],
+      "explain": "Serialization decorators live on classes, so they only apply to instances of those classes. Return response DTO instances, not raw rows or spread objects, and make that the convention.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/serialization"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q08",
+      "domain": "pipeline",
+      "stem": "A fleet-tracking API has a global auth guard that skips routes where `@Public()` metadata is true. `StatusController` is marked `@Public()` at class level, but one of its methods, `GET /status/internal`, must require auth and is marked `@Public(false)`. Which metadata lookup makes the method-level value win?",
+      "options": [
+        {
+          "text": "`reflector.get(IS_PUBLIC, context.getClass())` and ignore the handler",
+          "correct": false,
+          "why": "It reads only the class metadata, so the method's `false` is ignored and the internal route stays public."
+        },
+        {
+          "text": "`reflector.getAllAndMerge(IS_PUBLIC, [context.getClass(), context.getHandler()])`",
+          "correct": false,
+          "why": "Merge combines values from both targets instead of letting one win, so the guard gets a list rather than a clear decision."
+        },
+        {
+          "text": "`reflector.getAllAndOverride(IS_PUBLIC, [handler, class])`",
+          "correct": true,
+          "why": "It returns the first defined value in the list, so the handler's `false` overrides the class's `true`."
+        },
+        {
+          "text": "Check `request.url` against a list of internal paths inside the guard",
+          "correct": false,
+          "why": "It works today, but security now depends on a path list that drifts away from the handlers."
+        }
+      ],
+      "explain": "When metadata can be set at both class and handler level, decide which wins. `getAllAndOverride` with the handler first gives method-over-class precedence, which is what most security flags need.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/execution-context#reflection-and-metadata"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q09",
+      "domain": "pipeline",
+      "stem": "A lending API moves from Express to the Fastify adapter. Its global error filter does `response.status(code).json(body)`. After the switch, any thrown error produces a crash inside the filter and a bare 500 with no body. The team wants the filter to keep working if they ever change adapters again. What should the filter do?",
+      "options": [
+        {
+          "text": "Use `response.code(code).send(body)`, the Fastify reply API",
+          "correct": false,
+          "why": "It works on Fastify but ties the filter to Fastify, so the next adapter change breaks it again."
+        },
+        {
+          "text": "Inject `HttpAdapterHost` and call `httpAdapter.reply(response, body, code)`",
+          "correct": true,
+          "why": "The adapter performs the write, so the same filter works on Express and Fastify."
+        },
+        {
+          "text": "Re-throw the error so Nest's default handler formats it",
+          "correct": false,
+          "why": "Only one filter handles an error; re-throwing from a filter doesn't reach another filter and loses the custom body."
+        },
+        {
+          "text": "Register an Express compatibility middleware on Fastify so `res.json` exists",
+          "correct": false,
+          "why": "Middleware on Fastify receives raw Node objects; it doesn't add Express methods to the reply used by filters."
+        }
+      ],
+      "explain": "Code that touches raw `req`/`res` is adapter-specific. Shared enhancers should go through `HttpAdapterHost` so they don't break when the HTTP adapter changes.",
+      "refs": [
+        "https://docs.nestjs.com/exception-filters#catch-everything",
+        "https://docs.nestjs.com/techniques/performance"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q10",
+      "domain": "messaging",
+      "stem": "A logistics company's notification consumer handles `delivery.updated` from Kafka and calls partner webhooks. When one partner's endpoint was down for 10 minutes, the handler retried in place with a 30 s sleep, and all notifications on those partitions, for every partner, were delayed by 40 minutes. Per-shipment order doesn't matter for notifications. What retry design fits?",
+      "options": [
+        {
+          "text": "Retry in place, but cap at 3 attempts with shorter sleeps",
+          "correct": false,
+          "why": "Shorter blocking still stalls healthy partners behind the failing one, and three quick attempts may not outlast a 10-minute outage."
+        },
+        {
+          "text": "Add partitions so a stalled partition holds fewer messages",
+          "correct": false,
+          "why": "It reduces the blast radius per partition, but any partition with a message for the broken partner still stalls."
+        },
+        {
+          "text": "Non-blocking retry topics with delays, then a dead-letter topic",
+          "correct": true,
+          "why": "Healthy messages keep flowing while failures wait their turn elsewhere; ordering is not needed, so nothing is lost by moving on."
+        },
+        {
+          "text": "Commit and drop failed notifications after one attempt",
+          "correct": false,
+          "why": "It keeps throughput, but customers silently miss notifications whenever a partner is briefly down."
+        }
+      ],
+      "explain": "Blocking retries keep order but stall everything behind a failure. When order doesn't matter, use non-blocking retries: retry topics with delays, then a dead-letter topic.",
+      "refs": [
+        "https://docs.nestjs.com/microservices/kafka"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q11",
+      "domain": "messaging",
+      "stem": "A fleet-tracking service runs HTTP and a Kafka microservice in one hybrid app on 12 pods. A burst of GPS events pins CPU on the consumers, HTTP p99 climbs from 80 ms to 2 s, and the CPU-based autoscaler adds pods up to 40, while the topic has 24 partitions. What should change?",
+      "options": [
+        {
+          "text": "Raise the autoscaler's CPU target so it scales less aggressively",
+          "correct": false,
+          "why": "It limits pod count, but HTTP and consumers still compete for the same CPU during bursts."
+        },
+        {
+          "text": "Lower the Kafka consumer's `maxBytes` so each poll does less work",
+          "correct": false,
+          "why": "It smooths bursts slightly, but the consumers still share CPU and scaling with HTTP."
+        },
+        {
+          "text": "Move HTTP to Fastify for more headroom",
+          "correct": false,
+          "why": "A faster adapter doesn't stop CPU-bound consumers from starving the event loop."
+        },
+        {
+          "text": "Split API and consumers into two deployments; scale workers on lag",
+          "correct": true,
+          "why": "Bursts no longer hurt HTTP, and consumer pods scale on the signal that matters, never beyond what partitions can feed."
+        }
+      ],
+      "explain": "Hybrid apps are convenient, but they tie the scaling and failure of two workloads together. Split them when their load profiles differ, and scale consumers on lag, capped at the partition count.",
+      "refs": [
+        "https://docs.nestjs.com/faq/hybrid-application",
+        "https://docs.nestjs.com/microservices/kafka"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q12",
+      "domain": "messaging",
+      "stem": "A lending platform uses `@nestjs/cqrs` aggregates. In `ApproveLoanHandler`, the code calls `loan.approve()`, then `loan.commit()`, then saves the loan in a database transaction. When the save fails on a version conflict, downstream services still receive `LoanApproved` and start disbursing money. What is the fix?",
+      "code": "async execute({ loanId }: ApproveLoan) {\n  const loan = this.publisher.mergeObjectContext(\n    await this.loans.findById(loanId),\n  );\n  loan.approve();          // records LoanApproved\n  loan.commit();           // publishes pending events\n  await this.loans.save(loan); // may throw on version conflict\n}",
+      "options": [
+        {
+          "text": "Catch the save error and publish a `LoanApprovalReverted` event",
+          "correct": false,
+          "why": "Compensating after the fact means disbursement may already be under way."
+        },
+        {
+          "text": "Call `commit()` after the save succeeds, or use an outbox",
+          "correct": true,
+          "why": "`commit()` publishes the aggregate's pending events, so it must follow a successful save; an outbox also makes it crash-safe."
+        },
+        {
+          "text": "Make the event handlers check the loan's status in the database before acting",
+          "correct": false,
+          "why": "It helps in-process, but remote services consuming the event have no reliable view of a write that never happened."
+        },
+        {
+          "text": "Call `loan.uncommit()` in a `finally` block",
+          "correct": false,
+          "why": "Clearing uncommitted events after `commit()` has published them does nothing."
+        }
+      ],
+      "explain": "Publish domain events only after the state they describe is durable. With `AggregateRoot`, call `commit()` after a successful save, and prefer an outbox so the event and the state are written atomically.",
+      "refs": [
+        "https://docs.nestjs.com/recipes/cqrs#events"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q13",
+      "domain": "messaging",
+      "stem": "A social platform's request passes through an HTTP API, then a Kafka event, then two consumer services. Incident reviews keep stalling because logs from the consumers cannot be tied back to the original request: the correlation ID set in HTTP middleware is lost at the Kafka hop. How should the correlation ID travel?",
+      "options": [
+        {
+          "text": "Put it in the message payload as a `correlationId` field of every event type",
+          "correct": false,
+          "why": "It works, but mixes transport metadata into every business schema, and each new event type must remember to add it."
+        },
+        {
+          "text": "Generate a fresh ID in each consumer and log both IDs",
+          "correct": false,
+          "why": "A new ID per hop is exactly what breaks the trail; nothing links it to the HTTP request."
+        },
+        {
+          "text": "Kafka headers, restored into async context by a consumer interceptor",
+          "correct": true,
+          "why": "Headers carry metadata without touching schemas, and interceptors run for microservice handlers, so every log line downstream can include it."
+        },
+        {
+          "text": "Store the ID in Redis keyed by entity ID and look it up in consumers",
+          "correct": false,
+          "why": "It adds a network call per message, and concurrent requests for the same entity overwrite each other's IDs."
+        }
+      ],
+      "explain": "Cross-cutting context such as correlation and trace IDs belongs in message headers. Write it at the producer, restore it into async-local context at the consumer, and let the logger read it from there.",
+      "refs": [
+        "https://docs.nestjs.com/microservices/kafka",
+        "https://docs.nestjs.com/recipes/async-local-storage"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q14",
+      "domain": "operations",
+      "stem": "On SIGTERM, a pharmacy API (with `enableShutdownHooks()`) closes its Postgres pool in `beforeApplicationShutdown`. During every rollout, a handful of in-flight requests fail with 'Cannot use a pool after calling end'. Which hook should close the pool?",
+      "options": [
+        {
+          "text": "`onModuleDestroy`, because it runs first",
+          "correct": false,
+          "why": "It runs even earlier, before the HTTP server stops accepting work, so more requests would fail."
+        },
+        {
+          "text": "`onApplicationShutdown`",
+          "correct": true,
+          "why": "Nest closes HTTP connections after `beforeApplicationShutdown` completes; closing the pool in the last hook lets in-flight requests finish."
+        },
+        {
+          "text": "Keep `beforeApplicationShutdown` but add a 5-second sleep before closing",
+          "correct": false,
+          "why": "It reduces failures with a guess, and slow requests still fail while every shutdown takes 5 s longer."
+        },
+        {
+          "text": "Don't close the pool; let the process exit drop the connections",
+          "correct": false,
+          "why": "Postgres sees abrupt disconnects and may hold the backends until timeouts; it is not graceful."
+        }
+      ],
+      "explain": "Shutdown order in Nest: `onModuleDestroy`, then `beforeApplicationShutdown`, then the server's connections close, then `onApplicationShutdown`. Release resources that requests use in the last hook.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/lifecycle-events#application-shutdown"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q15",
+      "domain": "operations",
+      "stem": "A fintech startup commits `.env.production` with database and payment-provider secrets so new pods pick them up, and loads it with `ConfigModule.forRoot({ envFilePath: '.env.production' })`. An auditor flags it, and the company now has to pass SOC 2. Which setup should replace it?",
+      "options": [
+        {
+          "text": "Encrypt `.env.production` in the repository with a key stored in CI",
+          "correct": false,
+          "why": "It improves on plaintext, but secrets still live in git history and rotate only through commits."
+        },
+        {
+          "text": "Keep the file but add it to `.gitignore` and copy it to servers by hand",
+          "correct": false,
+          "why": "It leaves the repository, but manual copies drift between pods and nobody can audit who changed what."
+        },
+        {
+          "text": "Secrets from a manager at deploy time, `ignoreEnvFile: true`, validated at boot",
+          "correct": true,
+          "why": "Secrets never touch the repository, access is audited by the manager, and boot validation catches anything missing."
+        },
+        {
+          "text": "Hard-code the secrets in a TypeScript config module that's excluded from logs",
+          "correct": false,
+          "why": "Secrets are still in the source code and the built image."
+        }
+      ],
+      "explain": "Secrets belong in a secret manager, delivered at deploy or boot time, never in the repository or image. Configure Nest to read only the environment in production and validate it.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/configuration"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q16",
+      "domain": "operations",
+      "stem": "A logistics API runs 80 pods and ships logs to a central store. It uses Nest's default `ConsoleLogger`. Ops reports that multi-line stack traces are split into separate events, logs can't be filtered by tenant or request ID, and the first lines of each boot are in a different format. What should the team set up?",
+      "options": [
+        {
+          "text": "A JSON logger (`nestjs-pino`) via `useLogger()` and `bufferLogs`",
+          "correct": true,
+          "why": "Structured logs keep fields such as request ID together, and buffering formats boot-time lines with the same logger."
+        },
+        {
+          "text": "Keep `ConsoleLogger` and pipe stdout through a regex-based parser in the log agent",
+          "correct": false,
+          "why": "It can work, but regexes break on multi-line traces and new fields, and every format change breaks parsing."
+        },
+        {
+          "text": "Write logs to files on each pod and collect them nightly",
+          "correct": false,
+          "why": "It delays visibility by a day and loses logs from pods that die before collection."
+        },
+        {
+          "text": "Increase the log level to `verbose` so traces include more context",
+          "correct": false,
+          "why": "More lines in the same unstructured format make the problem bigger, not smaller."
+        }
+      ],
+      "explain": "Production logs should be structured (JSON) and carry correlation fields. In Nest, install a structured logger with `bufferLogs` so even bootstrap messages go through it.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/logger"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q17",
+      "domain": "seams",
+      "stem": "A pharmacy order service publishes events through a `ClientKafka` registered with `ClientsModule.register([{ name: 'EVENTS', transport: Transport.KAFKA, ... }])`. Its e2e tests need no broker in CI, but must assert which events were published. What is the cleanest seam?",
+      "options": [
+        {
+          "text": "Run an embedded Kafka broker in each CI job",
+          "correct": false,
+          "why": "It tests real publishing, but adds startup time and flakiness, which the brief excludes."
+        },
+        {
+          "text": "`overrideProvider('EVENTS')` with a fake that records `emit()`",
+          "correct": true,
+          "why": "The client is injected by its token, so overriding it swaps the transport for an in-memory recorder that tests can assert on."
+        },
+        {
+          "text": "Mock `kafkajs` with a module-level Jest mock",
+          "correct": false,
+          "why": "It works, but couples the tests to the internal library Nest uses, so a transport upgrade breaks them."
+        },
+        {
+          "text": "Switch the transport to TCP in tests via an env flag",
+          "correct": false,
+          "why": "Tests then need a TCP server to receive events, and production code carries a test-only branch."
+        }
+      ],
+      "explain": "Microservice clients are providers with tokens, so they are test seams like any other. Override the token with a recorder to assert on messages without a broker.",
+      "refs": [
+        "https://docs.nestjs.com/microservices/basics#client",
+        "https://docs.nestjs.com/fundamentals/testing"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q18",
+      "domain": "seams",
+      "stem": "A social app's integration test for graceful shutdown calls `await app.close()` and asserts that the Kafka producer was flushed. It passes. In production, events emitted in the last second before a rollout are lost, and logs show no shutdown hook output. Which test would have caught it?",
+      "options": [
+        {
+          "text": "A unit test that calls the hook method directly",
+          "correct": false,
+          "why": "It proves the method flushes, not that anything calls it on SIGTERM."
+        },
+        {
+          "text": "Calling `app.close()` twice to check the hook is idempotent",
+          "correct": false,
+          "why": "`close()` always runs the hooks, so the test still never exercises signal handling."
+        },
+        {
+          "text": "A test that mocks `process.on('SIGTERM')` and invokes the handler",
+          "correct": false,
+          "why": "It assumes a handler was registered; with no `enableShutdownHooks()` there is nothing to invoke, and the mock may hide that."
+        },
+        {
+          "text": "Spawn the built `main.js`, send SIGTERM, assert the flush",
+          "correct": true,
+          "why": "It goes through the real entry point and the real signal path, so a missing `enableShutdownHooks()` fails the test."
+        }
+      ],
+      "explain": "`app.close()` runs shutdown hooks whether or not signal handling is enabled, so it gives false confidence. Test shutdown the way production triggers it: a real process and a real signal.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/lifecycle-events#application-shutdown"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q19",
+      "domain": "seams",
+      "stem": "A fintech team applies ports and adapters. Their domain `Loan` class carries TypeORM decorators (`@Entity`, `@Column`, `@ManyToOne`) and is returned straight from the repository adapter. Domain unit tests need a database connection to construct loans, and a column rename recently forced edits to 40 domain files. Where should the ORM mapping live?",
+      "options": [
+        {
+          "text": "Keep the decorators but generate migrations automatically on every change",
+          "correct": false,
+          "why": "Migrations address schema changes, not the coupling of domain logic to ORM types."
+        },
+        {
+          "text": "Make every domain field `public` so tests can build loans without the ORM",
+          "correct": false,
+          "why": "It removes encapsulation and still leaves the domain importing TypeORM."
+        },
+        {
+          "text": "In the adapter: an ORM entity plus a mapper to a plain `Loan`",
+          "correct": true,
+          "why": "The domain becomes plain TypeScript that tests can build freely, and persistence changes stay in the adapter."
+        },
+        {
+          "text": "Replace TypeORM with Prisma, whose generated types don't use decorators",
+          "correct": false,
+          "why": "It changes the ORM but tempts the same mistake: returning persistence types straight into the domain."
+        }
+      ],
+      "explain": "In hexagonal code, persistence models belong to adapters. Map between ORM entities and domain objects at the repository boundary so the domain stays free of infrastructure types.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/database"
+      ]
+    },
+    {
+      "id": "nestjs-v5-q20",
+      "domain": "seams",
+      "stem": "To speed up builds, a lending platform switches from `tsc` to the Nest CLI's SWC builder (`nest start -b swc`). Most services start fine, but two that use `forwardRef` between providers now crash at boot with `ReferenceError: Cannot access 'LoansService' before initialization`. What is the fix?",
+      "options": [
+        {
+          "text": "Move the two cyclic services into one file so there is no circular import between files",
+          "correct": false,
+          "why": "It starts, but merges unrelated services to satisfy the compiler and leaves the provider cycle in place."
+        },
+        {
+          "text": "Type the circular parameters as `WrapperType<LoansService>`",
+          "correct": true,
+          "why": "SWC emits the parameter type eagerly; a wrapper type keeps the emitted metadata from touching the class before its module has initialised."
+        },
+        {
+          "text": "Remove `forwardRef` now that SWC handles cycles",
+          "correct": false,
+          "why": "Removing it makes the provider cycle fail in DI regardless of the compiler."
+        },
+        {
+          "text": "Switch the build to esbuild, which handles cycles better",
+          "correct": false,
+          "why": "esbuild drops decorator metadata entirely, which breaks DI everywhere, not only in the cycles."
+        }
+      ],
+      "explain": "SWC emits decorator metadata like `tsc`, but evaluates it in a way that exposes circular imports. Wrap circular parameter types (or ORM relation types) so the metadata doesn't reference a class before its module is ready, and treat cycles as debt.",
+      "refs": [
+        "https://docs.nestjs.com/recipes/swc#common-pitfalls"
+      ]
+    }
+  ]
+}

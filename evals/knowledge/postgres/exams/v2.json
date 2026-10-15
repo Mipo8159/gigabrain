@@ -1,0 +1,678 @@
+{
+  "topic": "postgres",
+  "variant": 2,
+  "of": 5,
+  "title": "Postgres at scale — variant 2",
+  "description": "Queues, invoices and marketplaces: claiming work safely, hot rows, online constraints and renames, JSONB and expression indexes, PgBouncer limits, reporting replicas, upgrades and multi-region homing.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "concurrency",
+      "name": "MVCC, isolation, locking and upserts",
+      "weight": 0.25
+    },
+    {
+      "id": "migrations",
+      "name": "Schema changes on big tables without downtime",
+      "weight": 0.15
+    },
+    {
+      "id": "indexing",
+      "name": "Indexing and query shape at scale",
+      "weight": 0.15
+    },
+    {
+      "id": "pooling",
+      "name": "Connections and pooling",
+      "weight": 0.15
+    },
+    {
+      "id": "replication",
+      "name": "Replication, replicas and failover",
+      "weight": 0.15
+    },
+    {
+      "id": "maintenance",
+      "name": "Vacuum, bloat, wraparound and partitioning",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "postgres-v2-q01",
+      "domain": "concurrency",
+      "stem": "A video-transcoding service uses a Postgres `jobs` table as its queue. Twelve worker pods each run the claim query below in a loop. Some videos are transcoded two or three times, which doubles GPU cost on busy days. Which claim query should they use?",
+      "code": "UPDATE jobs SET status = 'running', worker = $1\nWHERE id IN (\n  SELECT id FROM jobs\n  WHERE status = 'pending'\n  ORDER BY id\n  LIMIT 10\n)\nRETURNING *;",
+      "options": [
+        {
+          "text": "Keep the query but run it at `SERIALIZABLE`, and retry on 40001.",
+          "correct": false,
+          "why": "It would stop double claims, but all 12 workers race for the same first 10 rows, so most attempts abort and throughput collapses as workers are added."
+        },
+        {
+          "text": "Add `FOR UPDATE SKIP LOCKED` to the subquery, so each worker locks its batch and skips rows another worker already locked.",
+          "correct": true,
+          "why": "The subquery now takes row locks; concurrent workers skip locked rows instead of waiting or re-reading them, so each job is claimed once and workers do not queue."
+        },
+        {
+          "text": "Add `FOR UPDATE` (without SKIP LOCKED) to the subquery so that a second worker waits for the first worker's batch and then re-checks the status.",
+          "correct": false,
+          "why": "It is correct but serialises the workers: all of them block on the same 10 rows, so 12 pods do roughly the work of one."
+        },
+        {
+          "text": "Run the claim inside an explicit BEGIN/COMMIT on one checked-out client instead of autocommit.",
+          "correct": false,
+          "why": "Tempting because 'it is not in a transaction' is a common bug, but the statement is already atomic; the subquery still takes no row locks, so two workers still select the same ids."
+        }
+      ],
+      "explain": "A subquery without a locking clause takes no locks, so concurrent workers pick the same rows. For queue tables, lock the candidate rows in the same statement with FOR UPDATE SKIP LOCKED: correctness from the lock, throughput from skipping.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-select.html#SQL-FOR-UPDATE-SHARE"
+      ]
+    },
+    {
+      "id": "postgres-v2-q02",
+      "domain": "concurrency",
+      "stem": "A B2B invoicing platform serves 8,000 companies. Tax law in several countries requires each company's invoice numbers to be strictly sequential with no gaps. The current code uses one Postgres sequence per company, and auditors found gaps after failed payments rolled back. Invoices per company peak at about 5 per second. Which design meets the rule?",
+      "options": [
+        {
+          "text": "Keep the sequences but create them with `CACHE 1` so no numbers are pre-allocated.",
+          "correct": false,
+          "why": "Caching causes some gaps, but nextval() is never rolled back by design, so any aborted transaction still burns a number."
+        },
+        {
+          "text": "Compute `max(number) + 1` for the company inside the invoice transaction.",
+          "correct": false,
+          "why": "Under READ COMMITTED two concurrent invoices read the same max and collide; a unique constraint then turns one into an error, not a number."
+        },
+        {
+          "text": "Keep a `next_number` per company and take it with `UPDATE counters SET next_number = next_number + 1 WHERE company_id = $1 RETURNING next_number - 1` in the invoice transaction.",
+          "correct": true,
+          "why": "The row lock serialises invoices per company and rolls back with the transaction, so no number is consumed by a failed invoice; 5/s per company is far below what one row lock can sustain."
+        },
+        {
+          "text": "Assign numbers in a nightly batch job once the day's invoices are final, ordering by creation time and numbering each company's invoices consecutively from its last number, so no aborted transaction can ever consume a number.",
+          "correct": false,
+          "why": "Gapless, but invoices would leave without a legal number all day, which the tax rule does not allow."
+        }
+      ],
+      "explain": "Sequences are designed to be non-transactional so they never block; gaps are the price. When the business needs gapless numbering, use a counter row locked inside the same transaction, and scope it (per company) so the serialisation stays small.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/functions-sequence.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q03",
+      "domain": "concurrency",
+      "stem": "A recipe site's import worker attaches tags to recipes. It processes about 400 recipes per second across 6 workers, and tags repeat often. Sometimes the worker crashes with `TypeError: Cannot read properties of undefined (reading 'id')`. Which version of the query should replace it?",
+      "code": "const { rows } = await db.query(\n  `INSERT INTO tags (name) VALUES ($1)\n   ON CONFLICT (name) DO NOTHING\n   RETURNING id`, [name]);\nreturn rows[0].id;",
+      "options": [
+        {
+          "text": "`ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id`, which returns the existing row's id on a conflict.",
+          "correct": true,
+          "why": "DO UPDATE always produces a row for RETURNING, at the cost of a new row version on every hit, which is acceptable for a small tags table."
+        },
+        {
+          "text": "Wrap the call in a `SERIALIZABLE` transaction with a 40001 retry, so the conflicting insert is retried until it sees the existing tag.",
+          "correct": false,
+          "why": "The insert does not fail; it does nothing and returns zero rows. Isolation level does not change what RETURNING emits."
+        },
+        {
+          "text": "`MERGE INTO tags USING (VALUES ($1)) … WHEN NOT MATCHED THEN INSERT … RETURNING id`.",
+          "correct": false,
+          "why": "MERGE gets RETURNING in PG17, but under concurrent inserts of the same name it raises unique violations, because MERGE does not try to avoid them."
+        },
+        {
+          "text": "First `SELECT id FROM tags WHERE name = $1`, and insert only when nothing was found.",
+          "correct": false,
+          "why": "Two workers can both miss and both insert; one then fails with 23505, and the race is back at 400 recipes/s."
+        }
+      ],
+      "explain": "RETURNING only returns rows the statement inserted or updated, so DO NOTHING returns nothing for existing keys. For get-or-create, use DO UPDATE with a no-op set, or insert-then-select in one CTE. For concurrent upserts prefer INSERT … ON CONFLICT over MERGE.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-insert.html#SQL-ON-CONFLICT"
+      ]
+    },
+    {
+      "id": "postgres-v2-q04",
+      "domain": "concurrency",
+      "stem": "During a sale, a shop's checkout transaction also runs `UPDATE shop_stats SET orders_today = orders_today + 1 WHERE shop_id = $1`. Large shops take 3,000 orders per second, and their checkout p99 went from 40 ms to 1.8 s, with pg_stat_activity full of sessions waiting on `transactionid` locks. The dashboard can be 10 seconds stale. Which change removes the bottleneck?",
+      "options": [
+        {
+          "text": "Move the counter update to `SERIALIZABLE` so increments do not block each other.",
+          "correct": false,
+          "why": "Concurrent updates of the same row then fail with 40001 instead of waiting, so checkout errors replace checkout latency."
+        },
+        {
+          "text": "Insert one row per order into an `order_counts` log (or into N rows chosen at random), and roll them up into `shop_stats` every few seconds.",
+          "correct": true,
+          "why": "Checkouts no longer contend on one row lock held until each commit; the 10 s staleness budget absorbs the rollup delay."
+        },
+        {
+          "text": "Move `orders_today` into an unlogged table so the counter update skips WAL entirely and each increment finishes much faster under the 3,000/s load.",
+          "correct": false,
+          "why": "It skips WAL, but the row lock is still held until each checkout commits, so 3,000 transactions per second still queue on one row, and the data is wiped after a crash."
+        },
+        {
+          "text": "Add an index on `shop_stats(shop_id)` so the counter update finds its row faster.",
+          "correct": false,
+          "why": "Finding the row is not the cost; the wait is for the lock that the previous checkout holds until it commits."
+        }
+      ],
+      "explain": "A single row updated in every transaction serialises those transactions, because the row lock lasts until commit. Spread hot counters across rows or append deltas and aggregate later, using whatever staleness the business allows.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/explicit-locking.html#LOCKING-ROWS"
+      ]
+    },
+    {
+      "id": "postgres-v2-q05",
+      "domain": "concurrency",
+      "stem": "A marketplace runs order placement at `SERIALIZABLE` with a correct whole-transaction retry. At peak, 15% of attempts fail with 40001 and the retries add load. EXPLAIN shows the inventory check does a sequential scan of `listings`. Which three changes should reduce serialization failures? (Choose three.)",
+      "options": [
+        {
+          "text": "Add an index so the inventory check uses an index scan instead of a sequential scan of `listings`.",
+          "correct": true,
+          "why": "A sequential scan takes a predicate lock on the whole relation, so any concurrent write to listings looks like a conflict; an index scan locks only the pages it reads."
+        },
+        {
+          "text": "Declare read-only transactions (catalog browsing, price quotes) as `READ ONLY`.",
+          "correct": true,
+          "why": "The docs recommend it: read-only serializable transactions can release predicate locks early and are less likely to cause failures."
+        },
+        {
+          "text": "Keep transactions short: do the fraud-score HTTP call before BEGIN, not inside the transaction.",
+          "correct": true,
+          "why": "A long transaction overlaps with more concurrent writers, so its read/write dependencies are more likely to form a dangerous cycle."
+        },
+        {
+          "text": "Add `SELECT … FOR UPDATE` to every read in the transaction.",
+          "correct": false,
+          "why": "Tempting as extra safety, but the docs advise removing explicit locks once SERIALIZABLE protects you; they add blocking and deadlocks without reducing 40001."
+        },
+        {
+          "text": "Add `DEFERRABLE` to the write transactions.",
+          "correct": false,
+          "why": "DEFERRABLE only has an effect on SERIALIZABLE READ ONLY transactions; it does nothing for writers."
+        },
+        {
+          "text": "Raise `deadlock_timeout` so conflicts have more time to resolve.",
+          "correct": false,
+          "why": "deadlock_timeout controls deadlock detection on lock waits; serialization failures come from SSI dependency tracking and are unaffected."
+        }
+      ],
+      "explain": "SSI aborts transactions whose read and write sets form a dangerous cycle, so failures scale with how much each transaction reads, for how long, and how coarsely. Short transactions, READ ONLY declarations and index scans (finer predicate locks) all shrink that footprint.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/transaction-iso.html#XACT-SERIALIZABLE"
+      ]
+    },
+    {
+      "id": "postgres-v2-q06",
+      "domain": "migrations",
+      "stem": "A payments company must add `FOREIGN KEY (merchant_id) REFERENCES merchants(id)` to `payments`, which has 300M rows and 4k writes/s. A plain `ADD CONSTRAINT` would scan the whole table while blocking writes for about 20 minutes. All existing rows are believed valid. Which approach adds the constraint without blocking writes for that long?",
+      "options": [
+        {
+          "text": "Add it as `NOT VALID` (a brief lock; new writes are checked at once), then run `ALTER TABLE payments VALIDATE CONSTRAINT …` separately.",
+          "correct": true,
+          "why": "VALIDATE scans existing rows under a weaker lock that does not block reads or writes on payments, so the long part runs online."
+        },
+        {
+          "text": "Add the constraint inside a transaction with `SET LOCAL lock_timeout = '2s'` so that it cannot queue traffic, and retry it until it gets the lock.",
+          "correct": false,
+          "why": "lock_timeout protects the wait, but once the lock is granted the full validation scan still runs while holding it, blocking writes for the whole scan."
+        },
+        {
+          "text": "Enforce the rule with a trigger that checks merchants on every insert.",
+          "correct": false,
+          "why": "It covers new rows only, adds code to maintain, and under READ COMMITTED it can miss a merchant deleted concurrently; a real FK handles that locking for you."
+        },
+        {
+          "text": "Create an index on payments.merchant_id first, since that is what makes the scan slow.",
+          "correct": false,
+          "why": "Useful for deletes on merchants later, but validation of existing rows must still check each payment against merchants."
+        }
+      ],
+      "explain": "Split constraint creation into a cheap 'enforce from now on' step (NOT VALID) and an online 'check the past' step (VALIDATE CONSTRAINT). The same pattern works for CHECK constraints. Always pair the first step with a short lock_timeout.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-altertable.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q07",
+      "domain": "migrations",
+      "stem": "On Postgres 17, an HR platform must make `employees.country_code` NOT NULL. The table has 120M rows, and every row was backfilled last week. `ALTER TABLE … ALTER COLUMN country_code SET NOT NULL` would scan the table under ACCESS EXCLUSIVE for about 6 minutes, and payroll runs continuously. Which sequence does it online?",
+      "options": [
+        {
+          "text": "Upgrade to Postgres 18 first, because only 18 can add NOT NULL without a full-table lock.",
+          "correct": false,
+          "why": "PG18 adds `NOT NULL … NOT VALID`, but 17 already has a safe path, so a major upgrade is a much bigger change than this needs."
+        },
+        {
+          "text": "Add `CHECK (country_code IS NOT NULL) NOT VALID`, validate it, then run `SET NOT NULL` (which uses the valid check and skips the scan), then drop the check.",
+          "correct": true,
+          "why": "Validation runs under a lock that allows reads and writes; SET NOT NULL then sees a valid proof and only needs a brief lock."
+        },
+        {
+          "text": "Run `SET NOT NULL` with `lock_timeout = '2s'` and retry until it succeeds.",
+          "correct": false,
+          "why": "It avoids the queue while waiting, but once granted the 6-minute scan still runs under ACCESS EXCLUSIVE."
+        },
+        {
+          "text": "Add a `DEFAULT 'XX'` to the column so new rows never insert NULL, which makes the NOT NULL constraint unnecessary for the application code.",
+          "correct": false,
+          "why": "A default does not stop an explicit NULL from being written, and it leaves the schema without the guarantee payroll relies on."
+        }
+      ],
+      "explain": "Expensive DDL often has a cheaper two-step version: prove the invariant online with a NOT VALID constraint plus VALIDATE, then let the cheap DDL rely on that proof. Know which version you are on: PG18 can do NOT NULL NOT VALID directly.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-altertable.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q08",
+      "domain": "migrations",
+      "stem": "A logistics company wants to rename `parcels.weight` to `weight_grams`. Deploys roll 40 pods over about 15 minutes, so old and new app versions run side by side, and a nightly job outside the main app also reads the column. Which plan avoids errors during the rollout?",
+      "options": [
+        {
+          "text": "Run `ALTER TABLE parcels RENAME COLUMN weight TO weight_grams` in the same deploy as the code change.",
+          "correct": false,
+          "why": "The rename is instant, but for 15 minutes old pods query a column that no longer exists (or new pods query one that does not exist yet)."
+        },
+        {
+          "text": "Rename the column and create a view named `parcels` that exposes both names.",
+          "correct": false,
+          "why": "The view needs a new table name and an INSTEAD OF trigger or auto-updatable rules for writes, so it is a larger, riskier change than the rename itself."
+        },
+        {
+          "text": "Expand and contract: add `weight_grams`, write both, backfill, move reads, then drop `weight` once no code reads it.",
+          "correct": true,
+          "why": "Each step is compatible with both app versions that can be live at the same time, including the nightly job."
+        },
+        {
+          "text": "Do the rename during a short maintenance window with all pods scaled to zero, and update the nightly job in the same window.",
+          "correct": false,
+          "why": "It works, but it costs a planned outage for a change that the expand-and-contract pattern makes online."
+        }
+      ],
+      "explain": "With rolling deploys, every schema change must work with both the old and new code. Renames and type changes become expand (add new), migrate (dual write, backfill, move readers), contract (remove old) across several deploys.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-altertable.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q09",
+      "domain": "indexing",
+      "stem": "A dating app logs users in with `WHERE lower(email) = lower($1)`. There is a unique B-tree index on `email`, yet EXPLAIN shows a sequential scan over 70M users and login p95 is 900 ms. Two accounts differing only in case must also be prevented. Which change fixes both problems?",
+      "options": [
+        {
+          "text": "Create a unique index on `lower(email)` (concurrently), keep the query as written, and drop the old index once it is no longer needed.",
+          "correct": true,
+          "why": "The expression in the index matches the expression in the WHERE, so the planner can use it, and uniqueness on lower(email) blocks case-only duplicates."
+        },
+        {
+          "text": "Change the query to `WHERE email ILIKE $1` so that it can still use the existing B-tree index on `email` while matching any letter case.",
+          "correct": false,
+          "why": "A plain B-tree cannot serve ILIKE in general, and the existing index still allows two emails that differ only in case."
+        },
+        {
+          "text": "Add a hash index on `email`.",
+          "correct": false,
+          "why": "Hash indexes only support equality on the exact stored value, so `lower(email)` still cannot use it, and they cannot enforce uniqueness."
+        },
+        {
+          "text": "Normalise emails to lower case in the app on write.",
+          "correct": false,
+          "why": "It helps future rows, but the query still wraps the column in lower(), so it stays a sequential scan, and existing mixed-case rows remain."
+        }
+      ],
+      "explain": "An index is used only when the query's expression matches the indexed expression. Wrapping a column in a function needs an expression index on that same function (or a citext column). A unique expression index enforces the normalised rule too.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/indexes-expressional.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q10",
+      "domain": "indexing",
+      "stem": "A support desk has 200M tickets, 0.5% of them open. To speed the agent queue the team added `CREATE INDEX tickets_open ON tickets (team_id, created_at) WHERE status = 'open'`. psql shows an index scan, but in production (node-postgres, parameterised queries) the endpoint still does a large scan once the plan cache switches to a generic plan. Which change makes production use the index?",
+      "code": "await db.query(\n  `SELECT id, subject FROM tickets\n   WHERE team_id = $1 AND status = $2\n   ORDER BY created_at LIMIT 50`,\n  [teamId, 'open']);",
+      "options": [
+        {
+          "text": "Run `ANALYZE tickets` so the planner learns how rare open tickets are.",
+          "correct": false,
+          "why": "Statistics are not the issue; a generic plan cannot assume $2 = 'open', so it cannot prove the partial index's predicate however good the stats are."
+        },
+        {
+          "text": "Write the status as a literal in the SQL text: `… AND status = 'open'`.",
+          "correct": true,
+          "why": "With the literal in the query, every plan, generic or custom, can prove that rows match the index predicate."
+        },
+        {
+          "text": "Replace the partial index with a full index on `(team_id, status, created_at)`, which also works for every other status value.",
+          "correct": false,
+          "why": "It works for all plans, but it indexes 200M rows instead of 1M, so it is about 200 times larger and costs every write, to fix something a literal fixes for free."
+        },
+        {
+          "text": "Set `plan_cache_mode = force_custom_plan` for the whole cluster.",
+          "correct": false,
+          "why": "It forces replanning on every execution of every prepared statement in the system, raising CPU for all queries to fix one."
+        }
+      ],
+      "explain": "A partial index is usable only when the planner can prove the query's WHERE implies the index predicate. Parameters hide that in generic plans. Put partial-index predicates in the SQL text as literals, and test plans the way production runs them.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/indexes-partial.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q11",
+      "domain": "indexing",
+      "stem": "A secondhand marketplace stores listing attributes as JSONB (`attrs`), with hundreds of different keys across categories. Search filters run queries like `WHERE attrs @> '{\"brand\":\"Canon\",\"mount\":\"EF\"}'` on 80M listings, and new filter keys are added every week by category managers. Which index should back these filters?",
+      "options": [
+        {
+          "text": "One B-tree expression index per popular key, such as `((attrs->>'brand'))`.",
+          "correct": false,
+          "why": "Fast for the keys you index, but new keys arrive weekly, and every index added slows writes; the containment queries also would not use them."
+        },
+        {
+          "text": "A B-tree index on the whole `attrs` column.",
+          "correct": false,
+          "why": "B-tree on jsonb supports equality and ordering of whole documents, not containment of a few keys inside them."
+        },
+        {
+          "text": "A GIN index on `attrs` using `jsonb_path_ops`.",
+          "correct": true,
+          "why": "It indexes every key/value path, so @> queries on any combination of keys can use one index, and the jsonb_path_ops class is smaller and faster than the default for containment."
+        },
+        {
+          "text": "Move every attribute into its own column so that ordinary B-tree indexes can be used, and add new columns as categories need them.",
+          "correct": false,
+          "why": "Real columns are great for a handful of stable attributes, but hundreds of sparse, weekly-changing keys mean constant migrations on an 80M-row table."
+        }
+      ],
+      "explain": "Match the index type to the operator. JSONB containment (@>) over arbitrary keys is a GIN job; jsonb_path_ops is the compact choice when you only need @> (not key-exists ?). Use B-tree expression indexes for a few hot, stable keys.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/datatype-json.html#JSON-INDEXING"
+      ]
+    },
+    {
+      "id": "postgres-v2-q12",
+      "domain": "pooling",
+      "stem": "A loyalty-points service moves points between accounts with the helper below, using a node-postgres `Pool({ max: 10 })`. Under load, a failing second UPDATE sometimes leaves points removed from one account and never added to the other. Which change fixes it?",
+      "code": "async function movePoints(from, to, n) {\n  await pool.query('BEGIN');\n  await pool.query(\n    'UPDATE accounts SET points = points - $1 WHERE id = $2', [n, from]);\n  await pool.query(\n    'UPDATE accounts SET points = points + $1 WHERE id = $2', [n, to]);\n  await pool.query('COMMIT');\n}",
+      "options": [
+        {
+          "text": "Add `await pool.query('ROLLBACK')` in a catch block around the updates, so that a failed second update undoes the first one.",
+          "correct": false,
+          "why": "The ROLLBACK may run on yet another connection; the first UPDATE already autocommitted on whichever connection it used."
+        },
+        {
+          "text": "Check out one client with `pool.connect()`, run BEGIN, both UPDATEs and COMMIT on it, ROLLBACK on error, and release it in `finally`.",
+          "correct": true,
+          "why": "A transaction belongs to one connection; using one checked-out client keeps all statements in it, and release in finally returns the client cleanly."
+        },
+        {
+          "text": "Set the pool to `max: 1` so all queries share one connection.",
+          "correct": false,
+          "why": "It makes the statements land on one connection, but every request in the service now queues on a single connection and transactions from different requests interleave."
+        },
+        {
+          "text": "Combine the two updates into one `pool.query` string separated by semicolons.",
+          "correct": false,
+          "why": "A multi-statement simple query does run as one implicit transaction, but node-postgres cannot bind parameters across multiple statements, so values get string-built into SQL (an injection risk) and errors lose their per-statement context."
+        }
+      ],
+      "explain": "Pool-level query helpers pick any free connection per call, so BEGIN and COMMIT can land on different backends. Transactions need one checked-out client for their whole lifetime, released in finally. The same rule holds for any pooled driver.",
+      "refs": [
+        "https://node-postgres.com/features/transactions"
+      ]
+    },
+    {
+      "id": "postgres-v2-q13",
+      "domain": "pooling",
+      "stem": "A trading-analytics firm runs one PgBouncer (transaction mode) on a 16-core VM in front of a 64-vCPU primary. At about 40k transactions/s, latency climbs, one PgBouncer CPU core sits at 100%, and the database CPU is at 35%. Which change addresses the bottleneck?",
+      "options": [
+        {
+          "text": "Raise `default_pool_size` so more server connections are available to clients.",
+          "correct": false,
+          "why": "The server side is not saturated; a single PgBouncer process is out of CPU, and more server connections give it more work, not more capacity."
+        },
+        {
+          "text": "Move PgBouncer to a 32-core VM.",
+          "correct": false,
+          "why": "PgBouncer is single-threaded, so one process cannot use the extra cores; the busy core stays at 100%."
+        },
+        {
+          "text": "Run several PgBouncer processes on the VM (for example sharing the port with `so_reuseport`) or several PgBouncer instances behind a load balancer.",
+          "correct": true,
+          "why": "Each process uses one core, so adding processes adds pooling throughput until the database becomes the limit."
+        },
+        {
+          "text": "Switch PgBouncer to session mode, which does less work per transaction because it no longer has to reassign a server connection for each one.",
+          "correct": false,
+          "why": "Session mode removes multiplexing, so the 64-vCPU primary would need one backend per client connection, which is what the pooler was there to prevent."
+        }
+      ],
+      "explain": "Know the shape of each hop's limit. PgBouncer is a single-threaded event loop, so it scales out by process, not by bigger machines. When latency rises, check which tier is saturated before tuning pool sizes.",
+      "refs": [
+        "https://www.pgbouncer.org/config.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q14",
+      "domain": "pooling",
+      "stem": "A ticket resale site has 12 API pods on a 16-vCPU primary. Under a load test, p99 latency was 300 ms, so a developer raised each pod's pool from `max: 10` to `max: 60`. Now p99 is 1.4 s, the database shows hundreds of active sessions, and CPU and lock waits are up. Which change should they make?",
+      "options": [
+        {
+          "text": "Raise the pool even further, because the remaining latency is time spent waiting for a free connection in the app.",
+          "correct": false,
+          "why": "The extra connections already moved the queue into the database, where hundreds of active queries now compete for 16 cores and the same locks."
+        },
+        {
+          "text": "Give the database more RAM so that the hundreds of active sessions can all keep their working sets cached at the same time.",
+          "correct": false,
+          "why": "Memory was not the constraint shown; CPU and lock waits grew because more work runs at once than the cores can serve."
+        },
+        {
+          "text": "Turn on `synchronous_commit = off` to make commits cheaper so that each connection is returned to the pool sooner.",
+          "correct": false,
+          "why": "It risks losing recent commits on a crash, and it does not address too many concurrent queries contending for CPU and locks."
+        },
+        {
+          "text": "Go back to small pools so total active connections stay near what the cores can run, and let requests queue in the app.",
+          "correct": true,
+          "why": "A queue in front of a saturated database is cheaper than contention inside it; fewer concurrent queries finish faster each, which lowers tail latency."
+        }
+      ],
+      "explain": "A database's throughput peaks at a level of concurrency tied to its cores and I/O; beyond that, more connections add context switching and lock contention. Size the total pool across all instances to the database, and queue the excess in the app or a pooler.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/runtime-config-connection.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q15",
+      "domain": "replication",
+      "stem": "A food-delivery company runs 40-minute finance reports on a hot standby. They keep failing with `canceling statement due to conflict with recovery`. The primary is write-heavy and already fighting table bloat. Finance is fine with data up to an hour old, and the rider app reads from two other replicas. Which setup should they choose?",
+      "options": [
+        {
+          "text": "Turn on `hot_standby_feedback` on the reporting standby.",
+          "correct": false,
+          "why": "It stops the cancellations, but the standby then holds back vacuum on the primary for 40 minutes at a time, adding bloat to a primary that already has too much."
+        },
+        {
+          "text": "Make the reporting standby dedicated and raise its `max_standby_streaming_delay` (for example to 60 minutes), so replay waits for reports instead of cancelling them.",
+          "correct": true,
+          "why": "Only that standby falls behind during reports, which finance accepts; the primary and the rider-app replicas are untouched."
+        },
+        {
+          "text": "Raise `max_standby_streaming_delay` on all three standbys.",
+          "correct": false,
+          "why": "It fixes the reports but lets the rider-app replicas lag minutes behind too, which the app cannot tolerate."
+        },
+        {
+          "text": "Run the finance reports on the primary at night, when write traffic is lower and no replay conflict can cancel them.",
+          "correct": false,
+          "why": "Long scans on the write-heavy primary compete with production and hold back its vacuum horizon, the opposite of what the bloat problem needs."
+        }
+      ],
+      "explain": "A hot standby must either cancel queries that block WAL replay, delay replay (lag), or ask the primary to keep old rows (bloat there). Choose per replica: dedicate a lagging replica to long reports and keep the serving replicas fresh.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/hot-standby.html#HOT-STANDBY-CONFLICT"
+      ]
+    },
+    {
+      "id": "postgres-v2-q16",
+      "domain": "replication",
+      "stem": "A SaaS company runs a 6 TB Postgres 14 cluster, which reaches end of life in November 2026. They want to move to Postgres 17 on new hardware in another data center, with under 5 minutes of write downtime and a way back if the new cluster misbehaves in the first days. Which plan fits?",
+      "options": [
+        {
+          "text": "Run `pg_upgrade --link` in place on the current servers during a short maintenance window and then move the data files to the new hardware.",
+          "correct": false,
+          "why": "pg_upgrade in link mode is fast, but it is in place on the old hardware, and once the new cluster has started the old one cannot safely be used, so there is no way back."
+        },
+        {
+          "text": "Replicate into a new 17 cluster with logical replication, cut writes over, then reverse the replication so the 14 cluster stays as a fallback.",
+          "correct": true,
+          "why": "Logical replication works across major versions and machines; the write pause is only the final catch-up and cutover, and reverse replication keeps the old cluster current."
+        },
+        {
+          "text": "`pg_dump` from 14 and `pg_restore` into 17, then point the app at it.",
+          "correct": false,
+          "why": "Dumping and restoring 6 TB and rebuilding indexes takes many hours, far beyond the 5-minute budget."
+        },
+        {
+          "text": "Add a 17 streaming replica of the 14 primary and promote it.",
+          "correct": false,
+          "why": "Physical streaming replication only works between servers of the same major version."
+        }
+      ],
+      "explain": "For major upgrades with small downtime and a rollback path, use logical replication to a new cluster, then cut over. Budget for its limits: it does not carry DDL or sequence values, so freeze schema changes and set sequences past the old values at cutover.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/logical-replication-restrictions.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q17",
+      "domain": "replication",
+      "stem": "A B2B project-tracking SaaS runs its Postgres primary in us-east-1, with app servers there and in eu-west-1. EU users see slow saves (each write crosses about 80 ms), and new EU enterprise contracts require their data to stay in the EU. Tenants never share data. Which architecture should they move to?",
+      "options": [
+        {
+          "text": "Bidirectional logical replication between a us-east and an eu-west primary, writing locally in each region.",
+          "correct": false,
+          "why": "Postgres has no built-in conflict resolution for multi-writer setups, so concurrent edits clash, and EU data is still copied to the US."
+        },
+        {
+          "text": "Add a synchronous standby in eu-west-1 so EU reads are fresh.",
+          "correct": false,
+          "why": "Every US commit now waits a cross-Atlantic round trip, EU writes are still remote, and EU data still lives in the US."
+        },
+        {
+          "text": "Home each tenant in one region with its own primary there, and route each tenant's traffic to its home region.",
+          "correct": true,
+          "why": "Writes are local for every tenant, EU tenants' data stays in the EU, and since tenants never share data no cross-region writes are needed."
+        },
+        {
+          "text": "Add an async read replica in eu-west-1 for EU reads and keep writes in us-east-1.",
+          "correct": false,
+          "why": "It speeds up EU reads, but writes stay slow and EU tenant data still lives in the US, which breaks the new contracts."
+        }
+      ],
+      "explain": "Postgres has one writer per dataset. For multi-region writes, partition the data by a key that has a natural home (tenant, region) and run one primary per partition, rather than trying to make one dataset writable everywhere.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/different-replication-solutions.html"
+      ]
+    },
+    {
+      "id": "postgres-v2-q18",
+      "domain": "maintenance",
+      "stem": "A messaging app's `messages` table on Postgres 17 has 2 billion rows and receives about 30M updates and deletes a day. Autovacuum runs on it only every two weeks or so, and then for 30 hours, during which query latency rises. All autovacuum settings are at their defaults. Which change helps most?",
+      "options": [
+        {
+          "text": "Lower `autovacuum_vacuum_scale_factor` for this table (for example to 0.01), so vacuum triggers after millions of dead rows, not hundreds of millions.",
+          "correct": true,
+          "why": "The default 0.2 waits until about 400M dead rows on a 2B-row table; triggering far earlier gives many short vacuums instead of a rare 30-hour one."
+        },
+        {
+          "text": "Disable autovacuum on this table and run a manual `VACUUM` every Sunday night during the lowest-traffic window, so it never runs at peak.",
+          "correct": false,
+          "why": "A weekly vacuum still faces about 200M dead rows, and anti-wraparound vacuums will start anyway when needed, possibly at peak."
+        },
+        {
+          "text": "Raise `autovacuum_naptime` so autovacuum checks less often.",
+          "correct": false,
+          "why": "It makes autovacuum check tables less often, so it reacts even later."
+        },
+        {
+          "text": "Run `VACUUM FULL` monthly.",
+          "correct": false,
+          "why": "It rewrites 2B rows under ACCESS EXCLUSIVE, blocking the table for hours."
+        }
+      ],
+      "explain": "Autovacuum triggers on a fraction of the table (default 20%), which is fine for small tables and terrible for huge ones. Tune large, busy tables per table with a lower scale factor (or a fixed threshold) so vacuum runs often and briefly.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/routine-vacuuming.html#AUTOVACUUM"
+      ]
+    },
+    {
+      "id": "postgres-v2-q19",
+      "domain": "maintenance",
+      "stem": "After archiving 70% of a 900 GB `audit_events` table with batched DELETEs, autovacuum has run, but the files on disk are still 900 GB. Storage cost is the concern, and the table takes inserts 24/7 from compliance logging, so it cannot be locked for hours. Which approach reclaims the disk space?",
+      "options": [
+        {
+          "text": "Run `VACUUM FULL audit_events`, which rewrites the table compactly and returns the freed space to the operating system.",
+          "correct": false,
+          "why": "It does return the space, but it holds ACCESS EXCLUSIVE for the whole rewrite of a large table, blocking the 24/7 inserts for hours."
+        },
+        {
+          "text": "Run `pg_repack` on the table, which rebuilds it online and takes exclusive locks only briefly at the start and end.",
+          "correct": true,
+          "why": "It copies live rows into a new table while logging concurrent changes, then swaps; inserts continue during the copy."
+        },
+        {
+          "text": "Run plain `VACUUM` again, since it will shrink the file this time.",
+          "correct": false,
+          "why": "Plain VACUUM makes the space reusable for new rows and only truncates empty pages at the end of the file, so it rarely returns much to the OS."
+        },
+        {
+          "text": "Run `REINDEX TABLE CONCURRENTLY audit_events`.",
+          "correct": false,
+          "why": "It shrinks the indexes, but the heap, which holds most of the 900 GB, is untouched."
+        }
+      ],
+      "explain": "Plain VACUUM recycles space inside the table; only a rewrite gives it back to the OS. VACUUM FULL rewrites under an exclusive lock; pg_repack does it online. Often the best answer is to accept the reuse, or to partition so that future archiving drops partitions.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/routine-vacuuming.html#VACUUM-FOR-SPACE-RECOVERY"
+      ]
+    },
+    {
+      "id": "postgres-v2-q20",
+      "domain": "maintenance",
+      "stem": "An e-commerce platform partitions `orders` by month on `created_at` for retention. Customers look up orders by a public `order_number`, which must be unique across all time. `CREATE UNIQUE INDEX ON orders (order_number)` fails on the partitioned table. Which design keeps both retention by partition and global uniqueness?",
+      "options": [
+        {
+          "text": "Create a unique index on `(order_number, created_at)` on the parent table.",
+          "correct": false,
+          "why": "It is accepted because it includes the partition key, but it allows the same order_number in two different months, so it does not enforce the rule."
+        },
+        {
+          "text": "Create a separate unique index on `order_number` on each monthly partition as it is created.",
+          "correct": false,
+          "why": "Each index enforces uniqueness only within its own month, so duplicates across months are still possible."
+        },
+        {
+          "text": "Keep a small non-partitioned `order_numbers` table with a unique key, and insert into it in the same transaction as the order.",
+          "correct": true,
+          "why": "The unique constraint there is global, and it commits or rolls back with the order, so uniqueness holds across all partitions."
+        },
+        {
+          "text": "Re-partition the table by hash of `order_number`, so that a unique index on `order_number` becomes allowed on the partitioned parent.",
+          "correct": false,
+          "why": "The unique index then works, but monthly retention is lost: old orders are spread across every hash partition and must be deleted row by row."
+        }
+      ],
+      "explain": "Unique constraints on partitioned tables must include every partition-key column, because each partition enforces them locally. When the business key differs from the partition key, enforce uniqueness in a separate global table, or choose the partition key with that in mind.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/ddl-partitioning.html#DDL-PARTITIONING-DECLARATIVE-LIMITATIONS"
+      ]
+    }
+  ]
+}

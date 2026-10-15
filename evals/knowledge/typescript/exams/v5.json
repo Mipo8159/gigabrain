@@ -1,0 +1,677 @@
+{
+  "topic": "typescript",
+  "variant": 5,
+  "of": 5,
+  "title": "TypeScript type design at scale — variant 5",
+  "description": "Versioned documents, vendor SDK and jsonb edges, NestJS validation, parse-made brands, calendar dates, opaque money, runtime immutability, derived enums, mobile-client and wire-format contracts, async gaps, extension rewriting and erasable syntax.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "boundaries",
+      "name": "Runtime boundaries and validation",
+      "weight": 0.25
+    },
+    {
+      "id": "modelling",
+      "name": "Modelling domain states and ids",
+      "weight": 0.25
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts between services",
+      "weight": 0.15
+    },
+    {
+      "id": "strictness",
+      "name": "Strictness, any and escape hatches",
+      "weight": 0.15
+    },
+    {
+      "id": "toolchain",
+      "name": "Modules, monorepos and the toolchain",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "typescript-v5-q01",
+      "domain": "boundaries",
+      "stem": "An insurer must reprocess 3 years of claim documents stored as JSON in S3 (40M objects) for a regulator. The `Claim` shape changed four times; each document has a `schemaVersion`. The current job does `JSON.parse(body) as Claim` and produces wrong payouts for older documents. How should the job read them?",
+      "options": [
+        {
+          "text": "Migrate all 40M objects to the latest shape first, then keep the cast.",
+          "correct": false,
+          "why": "A large rewrite of data that must stay as filed for the regulator, and the cast still trusts whatever the migration missed."
+        },
+        {
+          "text": "Validate per `schemaVersion` with its own schema, then upcast to the current `Claim`.",
+          "correct": true,
+          "why": "Each historical shape is validated as it really was, and one tested function per version converts it to the current domain type."
+        },
+        {
+          "text": "Use the latest schema with every field optional so old documents pass.",
+          "correct": false,
+          "why": "Everything passes, including documents with missing data, and the domain code can no longer rely on any field."
+        },
+        {
+          "text": "Skip documents that fail the latest schema and report the skipped count to the regulator with the results.",
+          "correct": false,
+          "why": "Older but valid claims are excluded from a regulatory reprocessing, which defeats its purpose."
+        }
+      ],
+      "explain": "Data at rest keeps every shape it was ever written in. Version the documents, validate each version against its own schema, and upcast to the current model in one place, so domain code sees one shape.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions",
+        "https://zod.dev/api"
+      ]
+    },
+    {
+      "id": "typescript-v5-q02",
+      "domain": "boundaries",
+      "stem": "A food-delivery app uses a geocoding vendor's official SDK. Its TypeScript types declare `result.location.lat: number`. In some rural areas the API returns `location: null`; the dispatcher crashed and orders in those areas stalled for an afternoon. The SDK's types haven't been fixed. What should the team do?",
+      "options": [
+        {
+          "text": "Patch the SDK's `.d.ts` locally (e.g. with patch-package) to say `location: Location | null`.",
+          "correct": false,
+          "why": "It makes the type more honest for this field, but the patched types are still unverified claims about every other field."
+        },
+        {
+          "text": "Wrap the SDK in an adapter that validates the fields the dispatcher uses.",
+          "correct": true,
+          "why": "Third-party types are promises, not checks; the adapter validates what you depend on and maps failures to an explicit \"not geocoded\" result."
+        },
+        {
+          "text": "Add `?.` to every access of `location` in the dispatcher.",
+          "correct": false,
+          "why": "It avoids the crash, but `undefined` coordinates then flow into routing, which may assign drivers to (0, 0)."
+        },
+        {
+          "text": "Switch to the vendor's REST API and type responses by hand.",
+          "correct": false,
+          "why": "Hand-written types are also just claims; without runtime checks the null still gets through."
+        }
+      ],
+      "explain": "A library's type declarations describe what its authors believe the service returns. At important boundaries, wrap the SDK in an adapter that validates the fields you rely on and turns surprises into explicit domain outcomes.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown",
+        "https://zod.dev/api"
+      ]
+    },
+    {
+      "id": "typescript-v5-q03",
+      "domain": "boundaries",
+      "stem": "An HR platform stores per-company settings in a Postgres `jsonb` column, typed `settings: Settings` when read. A release added required `locale: string` and code calling `settings.locale.toLowerCase()`. Companies created before the release (80% of them) got 500s. What is the durable fix?",
+      "options": [
+        {
+          "text": "Parse on read with defaults for new fields, and backfill old rows.",
+          "correct": true,
+          "why": "The read path always yields a complete `Settings`, whatever its age, and the backfill makes stored data match over time."
+        },
+        {
+          "text": "Make `locale` optional in the type and add optional chaining with a fallback at each place it is used.",
+          "correct": false,
+          "why": "Every new field then becomes optional forever, and each reader decides its own default, so behaviour diverges across the code."
+        },
+        {
+          "text": "Run a backfill migration and keep the plain typed read.",
+          "correct": false,
+          "why": "It fixes today's rows, but rows written by older code during a rolling deploy, or restored from backup, still lack the field."
+        },
+        {
+          "text": "Move settings into proper columns so the database enforces the shape.",
+          "correct": false,
+          "why": "A reasonable long-term design, but a large migration for a problem a parse-on-read fixes now; and new columns still need defaults for old rows."
+        }
+      ],
+      "explain": "A `jsonb` column is a little document store: rows keep the shape they were written in. Treat reads as a boundary (parse with defaults for new fields) and backfill, rather than trusting a static type over schemaless storage.",
+      "refs": [
+        "https://zod.dev/api#defaults",
+        "https://zod.dev/api"
+      ]
+    },
+    {
+      "id": "typescript-v5-q04",
+      "domain": "boundaries",
+      "stem": "A NestJS 11 API declares `create(@Body() dto: CreateEmployeeDto)` with class-validator decorators on the DTO. A pentest sent `{ \"salary\": \"9999999\", \"role\": \"admin\" }` and the employee was created as an admin. The DTO doesn't include `role`. The `main.ts` bootstrap is minimal. What was missing?",
+      "options": [
+        {
+          "text": "The DTO should be an `interface` rather than a class so TypeScript checks it more strictly.",
+          "correct": false,
+          "why": "Interfaces vanish at runtime, so Nest couldn't validate at all; classes are what let a pipe see the metadata."
+        },
+        {
+          "text": "`strictPropertyInitialization` on the DTO class, so unset fields are errors.",
+          "correct": false,
+          "why": "That is a compile-time check on class fields; it has no effect on what arrives in the request body."
+        },
+        {
+          "text": "Rate limiting on the endpoint so pentest-style payloads are throttled.",
+          "correct": false,
+          "why": "Rate limits slow attempts; a single request was enough here."
+        },
+        {
+          "text": "A global `ValidationPipe` with `whitelist`; the DTO type alone checks nothing.",
+          "correct": true,
+          "why": "The `@Body()` type is only a compile-time annotation; validation, and stripping or rejecting extra fields (`whitelist`, `forbidNonWhitelisted`), happen only when a pipe runs."
+        }
+      ],
+      "explain": "A parameter type on a controller is a claim, not a check. Frameworks validate only when you wire validation in (a pipe, middleware or schema), and extra fields must be stripped or rejected explicitly. Test it with an invalid request that expects a 400.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/validation"
+      ]
+    },
+    {
+      "id": "typescript-v5-q05",
+      "domain": "boundaries",
+      "stem": "A support portal's controller does `const id = req.params.id as UserId` and calls `users.get(id)`. `UserId` is a branded type. Malformed ids now reach Postgres, which throws `invalid input syntax for type uuid` and returns 500s; error alerts fire on every scan by bots. What should the controller do?",
+      "options": [
+        {
+          "text": "Catch the Postgres error in the repository and map it to a 404 so bots stop triggering the alerts.",
+          "correct": false,
+          "why": "It quiets the alerts, but every malformed id still costs a database round trip, and the brand still means nothing."
+        },
+        {
+          "text": "Remove the brand, since route params are always strings.",
+          "correct": false,
+          "why": "It removes compile-time protection everywhere to avoid fixing one boundary."
+        },
+        {
+          "text": "Create the brand only by parsing (`z.uuid().brand<\"UserId\">()`) and return 400 on failure.",
+          "correct": true,
+          "why": "The brand now means \"checked\": malformed ids are rejected at the edge with a 400 and never reach the database."
+        },
+        {
+          "text": "Add a regex check in the repository before the query.",
+          "correct": false,
+          "why": "It works, but it validates in the wrong layer; every other place that builds `UserId` with `as` still skips it."
+        }
+      ],
+      "explain": "A brand created with `as` is just a label. Make the parse function or schema the only way to create it, at the boundary, so holding a branded value really means it was validated.",
+      "refs": [
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v5-q06",
+      "domain": "modelling",
+      "stem": "A payroll system stores employees' start dates as JS `Date` (`new Date(\"2026-03-01\")`). Servers in UTC and an admin UI in UTC-5 disagree, and 300 employees in the Americas were paid from the previous month. Start dates are calendar days with no time. How should they be modelled?",
+      "options": [
+        {
+          "text": "Store them as `Date` at midnight UTC and convert carefully in the UI.",
+          "correct": false,
+          "why": "A `Date` is an instant; any code that formats it in a local time zone shifts the day, so \"carefully\" must be repeated everywhere."
+        },
+        {
+          "text": "A `Date` with the employee's time zone stored next to it.",
+          "correct": false,
+          "why": "It describes an instant plus a zone, which is more than a calendar day needs and still invites zone conversions."
+        },
+        {
+          "text": "A branded `PlainDate` string (`YYYY-MM-DD`), validated at the edge and compared as text.",
+          "correct": true,
+          "why": "A calendar date has no time zone; keeping it as a validated date string means no conversion can shift it."
+        },
+        {
+          "text": "Unix timestamps in seconds, since they are time-zone free.",
+          "correct": false,
+          "why": "A timestamp is also an instant; turning it back into a calendar day needs a zone, so the same bug returns."
+        }
+      ],
+      "explain": "Pick the type that matches the concept: instants (`Date`, timestamps) versus calendar dates (no zone). Model calendar dates as their own validated type rather than as midnight instants, which drift across time zones.",
+      "refs": [
+        "https://zod.dev/api#branded-types",
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date"
+      ]
+    },
+    {
+      "id": "typescript-v5-q07",
+      "domain": "modelling",
+      "stem": "A streaming company's billing library exposes `type Money = { cents: number; currency: string }`. Twelve teams do arithmetic on `cents` directly. The library team now needs `bigint` cents for enterprise invoices, and every team's code would break. How should the library have exposed money, and how should it now?",
+      "options": [
+        {
+          "text": "As a plain `number` of cents, so arithmetic is simple.",
+          "correct": false,
+          "why": "Simpler, but it loses the currency and leaves the representation just as exposed to every team."
+        },
+        {
+          "text": "An opaque brand with unexported fields, plus `add`, `multiply` and `format` functions.",
+          "correct": true,
+          "why": "Callers can only use operations, so the representation (number or bigint) can change inside the library without breaking them."
+        },
+        {
+          "text": "As a class with public `cents` and `currency` fields.",
+          "correct": false,
+          "why": "A class with public fields exposes the representation just like the object type, so the switch to `bigint` still breaks callers."
+        },
+        {
+          "text": "Keep the object type and add a `bigintCents` field beside `cents` for enterprise invoices only.",
+          "correct": false,
+          "why": "Two representations that must stay in sync, and every team must now decide which one to use."
+        }
+      ],
+      "explain": "For shared domain primitives (money, ids, durations), expose operations, not representation. An opaque type (a brand with a private shape) lets the owning team change the internals without a cross-team migration.",
+      "refs": [
+        "https://zod.dev/api#branded-types",
+        "https://www.typescriptlang.org/play/#example/nominal-typing"
+      ]
+    },
+    {
+      "id": "typescript-v5-q08",
+      "domain": "modelling",
+      "stem": "A multi-tenant analytics service passes a shared `config: Readonly<TenantConfig>` to plugins. A plugin did `(config.limits as any).maxRows = 1e9` to work around a cap, and every tenant on that pod got the raised limit. The team believed `Readonly` prevented this. What protects the shared object?",
+      "options": [
+        {
+          "text": "Switch to `DeepReadonly<TenantConfig>` so nested fields are read-only too.",
+          "correct": false,
+          "why": "It fixes the shallow typing, but the plugin used `as any`; any type-only protection disappears at runtime."
+        },
+        {
+          "text": "A frozen per-plugin copy (`structuredClone` plus deep `Object.freeze`).",
+          "correct": true,
+          "why": "Runtime immutability holds whatever the plugin's types say, and a per-plugin copy keeps one plugin's changes from leaking."
+        },
+        {
+          "text": "A lint rule banning `as any` in plugin code.",
+          "correct": false,
+          "why": "Good hygiene, but third-party or legacy plugins may not run your lint, and mutations through other paths remain."
+        },
+        {
+          "text": "Document that plugins must not mutate config.",
+          "correct": false,
+          "why": "The plugin's author already chose to work around the type; documentation won't stop the next one."
+        }
+      ],
+      "explain": "`Readonly` is shallow and compile-time only; a cast removes it. When data is shared across trust boundaries (plugins, tenants), enforce immutability at runtime with copies or freezing, and use types for intent.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Object/freeze",
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions"
+      ]
+    },
+    {
+      "id": "typescript-v5-q09",
+      "domain": "modelling",
+      "stem": "An order system lists statuses in four places: a TypeScript union, a zod enum, a Postgres `CHECK` constraint and an admin UI dropdown. A new `\"on_hold\"` status was added to the union only; the API rejected it and the dropdown didn't show it. How should the code-side lists be defined?",
+      "options": [
+        {
+          "text": "Keep the union and generate the others from it with a build script that reads the TypeScript AST.",
+          "correct": false,
+          "why": "It works, but it is custom tooling, and a TS 7 compiler has no JS API for that script to use."
+        },
+        {
+          "text": "A TypeScript `enum`, which exists at runtime and can feed the schema and UI.",
+          "correct": false,
+          "why": "An enum does exist at runtime, but enums are not erasable syntax and crash under Node's type stripping."
+        },
+        {
+          "text": "Write them by hand and add a unit test comparing the lists.",
+          "correct": false,
+          "why": "A test catches drift after the fact, and someone still edits four places for every status."
+        },
+        {
+          "text": "One `const STATUSES = [...] as const`, deriving the type (`typeof STATUSES[number]`), `z.enum(STATUSES)` and the dropdown from it.",
+          "correct": true,
+          "why": "A single runtime list produces both the type and the runtime checks, so a new status is added in one place (plus the DB migration)."
+        }
+      ],
+      "explain": "When a set of values is needed both at runtime and in types, define the runtime value once (`as const`) and derive the type from it. Types can be derived from values, never the other way round.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/typeof-types.html",
+        "https://zod.dev/api#enums"
+      ]
+    },
+    {
+      "id": "typescript-v5-q10",
+      "domain": "modelling",
+      "stem": "An HR leave system models requests in code as a union (`pending`, `approved` with `approvedBy`, `rejected` with `reason`), but the Postgres table is flat with nullable `approved_by` and `reason` columns. Handlers read rows with `row as LeaveRequest`, and an approved request with `approved_by = NULL` crashed the payroll export. Where should the flat row become the union?",
+      "options": [
+        {
+          "text": "In each handler, with checks before reading `approvedBy`.",
+          "correct": false,
+          "why": "Every handler repeats the conversion, and the ones that forget it are where the crash happened."
+        },
+        {
+          "text": "Nowhere; make the union's fields nullable to match the table.",
+          "correct": false,
+          "why": "The type then matches the table but allows approved requests without an approver, losing the point of the union."
+        },
+        {
+          "text": "In the repository: parse each row into the union and fail on rows that fit no state.",
+          "correct": true,
+          "why": "The repository is the boundary between storage and domain; converting there means the rest of the code only sees valid states."
+        },
+        {
+          "text": "In the database, with a view that returns each row as JSON already shaped like the union.",
+          "correct": false,
+          "why": "It moves the mapping into SQL but the code still casts the result, so an invalid row still becomes a \"valid\" union."
+        }
+      ],
+      "explain": "Storage shapes and domain shapes differ; the repository is where one becomes the other. Parse rows into the domain union there, with a database `CHECK` constraint as defence in depth, so invalid combinations never reach business code.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions",
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions"
+      ]
+    },
+    {
+      "id": "typescript-v5-q11",
+      "domain": "contracts",
+      "stem": "A fitness company's mobile app and API share types in a monorepo; the client infers response types straight from the server's code. The server renamed `durationSec` to `durationSeconds`, everything compiled, and the new app release worked. But 35% of users run app versions up to 6 months old, and their workout history screens broke. What should the team change?",
+      "options": [
+        {
+          "text": "Force-update all app versions on every API change.",
+          "correct": false,
+          "why": "Forced updates frustrate users, and some can't update (old OS versions), so breakage remains for them."
+        },
+        {
+          "text": "Treat responses as a versioned contract: additive changes only until old apps are retired.",
+          "correct": true,
+          "why": "Inferred types only describe clients built from the same commit; deployed app versions keep the old expectations for months."
+        },
+        {
+          "text": "Generate an OpenAPI spec from the server and have the mobile team regenerate types each release.",
+          "correct": false,
+          "why": "It improves tooling, but regenerated types reach only new releases; installed apps are unchanged."
+        },
+        {
+          "text": "Pin the mobile app to an API version through a request header and keep every version of every handler.",
+          "correct": false,
+          "why": "Versioning helps, but keeping every handler version forever is expensive; additive evolution avoids most versions."
+        }
+      ],
+      "explain": "End-to-end inferred types are great inside one deploy unit, but clients installed on devices live for months. Anything consumed by separately deployed code (mobile apps, other services) needs a compatibility policy, not just shared types.",
+      "refs": [
+        "https://spec.openapis.org/oas/latest.html"
+      ]
+    },
+    {
+      "id": "typescript-v5-q12",
+      "domain": "contracts",
+      "stem": "A healthcare scheduling service generates a TypeScript client from a lab vendor's OpenAPI document. The spec says `resultStatus` is one of `\"final\" | \"preliminary\"`, but the vendor sometimes returns `\"corrected\"`. A generated `switch` defaulted to \"preliminary\" and doctors saw corrected results marked as drafts. What should the client side do?",
+      "options": [
+        {
+          "text": "Trust the generated types, since the vendor's published spec is the contract both sides signed up to follow.",
+          "correct": false,
+          "why": "The spec is the contract on paper; in production the vendor sends values outside it, and your code must handle that safely."
+        },
+        {
+          "text": "Edit the generated client by hand to add `\"corrected\"`.",
+          "correct": false,
+          "why": "Hand edits are lost on the next generation, and the next undeclared value causes the same bug."
+        },
+        {
+          "text": "Treat any unknown value as `\"final\"`, the most common case.",
+          "correct": false,
+          "why": "Guessing the meaning of an unknown status in medical data is the same mistake as defaulting to \"preliminary\"."
+        },
+        {
+          "text": "Validate critical fields at the edge and route unknown values to an alerting \"unrecognised\" state.",
+          "correct": true,
+          "why": "Generated types document the spec; runtime validation catches the vendor breaking it, and an explicit state avoids guessing."
+        }
+      ],
+      "explain": "Generated types are only as true as the spec, and external providers drift from their specs. For critical fields, validate at the edge and give unknown values their own handled state instead of a silent default.",
+      "refs": [
+        "https://spec.openapis.org/oas/latest.html",
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking"
+      ]
+    },
+    {
+      "id": "typescript-v5-q13",
+      "domain": "contracts",
+      "stem": "A `ShipmentDelivered` event is defined in a shared TypeScript package as `{ deliveredAt: Date }`. A Java consumer and a TypeScript consumer disagree on it: the TS service calls `.getTime()` and crashes, and the Java service expects epoch millis while the producer sends ISO strings. What should the contract describe?",
+      "options": [
+        {
+          "text": "The wire format: an ISO 8601 string with offset, converted by each consumer at its edge.",
+          "correct": true,
+          "why": "Contracts are about bytes on the wire; each language then maps them to its domain types in one place."
+        },
+        {
+          "text": "The TypeScript domain type, with Java teams adapting to it.",
+          "correct": false,
+          "why": "`Date` doesn't exist on the wire; a TS domain type can't tell other languages (or even TS) what is actually sent."
+        },
+        {
+          "text": "Epoch milliseconds, because numbers are easier to parse than strings in both Java and TypeScript.",
+          "correct": false,
+          "why": "Picking a number format is a valid contract choice, but switching formats now breaks every consumer; the problem is that the contract describes a type, not a format."
+        },
+        {
+          "text": "Both formats in two fields so each consumer picks one.",
+          "correct": false,
+          "why": "Two fields that must agree add a new failure mode, and still don't say how either is formatted."
+        }
+      ],
+      "explain": "A shared contract should describe the serialised form (string, format, offset), not an in-memory type. Each consumer then converts at its own boundary, and wire and domain types stay separate.",
+      "refs": [
+        "https://json-schema.org/understanding-json-schema/",
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify"
+      ]
+    },
+    {
+      "id": "typescript-v5-q14",
+      "domain": "strictness",
+      "stem": "A profile service turned on `exactOptionalPropertyTypes`. Assigning the parsed request to the domain type now fails: zod infers `{ nick?: string | undefined }` from `z.string().optional()`, while the domain says `{ nick?: string }`. A teammate proposes `parsed as ProfileUpdate`. What should they do instead?",
+      "options": [
+        {
+          "text": "Accept the `as`, since the request was already validated.",
+          "correct": false,
+          "why": "The cast hides the real difference: the schema allows an explicit `undefined`, which then reaches the update and may write NULL."
+        },
+        {
+          "text": "Turn the flag off for the API layer only.",
+          "correct": false,
+          "why": "It removes the protection exactly where `undefined` values arrive from clients."
+        },
+        {
+          "text": "Use `z.string().exactOptional()`, which infers `nick?: string` and rejects an explicit `undefined`.",
+          "correct": true,
+          "why": "The schema and the domain type then mean the same thing, so the assignment compiles without a cast."
+        },
+        {
+          "text": "Change the domain type to `nick?: string | undefined`.",
+          "correct": false,
+          "why": "It makes the code compile by weakening the domain, which then can't tell \"absent\" from \"explicitly undefined\"."
+        }
+      ],
+      "explain": "When a strict flag reports a mismatch between a schema and a domain type, fix the schema or the type so they agree; a cast just hides it. zod 4's `exactOptional` matches `exactOptionalPropertyTypes`.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#exactOptionalPropertyTypes",
+        "https://zod.dev/api#optionals"
+      ]
+    },
+    {
+      "id": "typescript-v5-q15",
+      "domain": "strictness",
+      "stem": "A media service uses an untyped JavaScript transcoding library. To silence the import error someone added `declare module \"legacy-transcoder\";`, so every export is `any`. A call with swapped arguments went unnoticed for a month and produced 40k broken thumbnails. What should the team do?",
+      "options": [
+        {
+          "text": "Declare only the functions used, with `unknown` outputs, behind a typed adapter.",
+          "correct": true,
+          "why": "Callers get real parameter checks for the parts they use, and uncertain outputs force validation instead of spreading `any`."
+        },
+        {
+          "text": "Keep the shorthand declaration and add `// @ts-expect-error` above each call to mark the risk.",
+          "correct": false,
+          "why": "With `any` there is no error for the directive to expect, so the build fails, and it wouldn't add any checking anyway."
+        },
+        {
+          "text": "Turn on `noImplicitAny`, which reports the untyped module.",
+          "correct": false,
+          "why": "The shorthand declaration explicitly makes the module `any`, so `noImplicitAny` has nothing to report."
+        },
+        {
+          "text": "Wait for community types to appear on DefinitelyTyped.",
+          "correct": false,
+          "why": "There may never be any for a legacy library, and the bug class stays open while waiting."
+        }
+      ],
+      "explain": "A shorthand ambient module turns a whole library into `any`, which spreads silently. Declare just the surface you use, prefer `unknown` for outputs you don't control, and keep the library behind a typed adapter.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/modules/reference.html#ambient-modules",
+        "https://typescript-eslint.io/rules/no-unsafe-assignment/"
+      ]
+    },
+    {
+      "id": "typescript-v5-q16",
+      "domain": "strictness",
+      "stem": "A pricing service has a fallback for when a remote quote fails. During a vendor outage, callers saw rejected promises instead of the fallback price, and checkout failed for 15 minutes. The code compiles under `strict`. Why did the fallback not run?",
+      "code": "async function getQuote(sku: string): Promise<number> {\n  try {\n    return fetchRemoteQuote(sku); // returns Promise<number>\n  } catch {\n    return cachedPrice(sku);\n  }\n}",
+      "options": [
+        {
+          "text": "`catch` without a binding is ignored in async functions; write `catch (e)`.",
+          "correct": false,
+          "why": "An omitted catch binding is valid JavaScript and works the same; the binding isn't the problem."
+        },
+        {
+          "text": "The function should not be `async`; remove the keyword so the promise is returned directly to callers.",
+          "correct": false,
+          "why": "Without `async` the `try/catch` still only sees synchronous errors; the rejection still escapes."
+        },
+        {
+          "text": "The promise is returned without `await`; use `return await fetchRemoteQuote(sku)`.",
+          "correct": true,
+          "why": "The returned promise rejects after the `try` has exited; only an awaited rejection is thrown inside the `try`."
+        },
+        {
+          "text": "`strict` should have flagged this; enable `noImplicitReturns`.",
+          "correct": false,
+          "why": "Both paths return a value, and no compiler flag checks whether a promise is awaited inside a `try`."
+        }
+      ],
+      "explain": "Inside `try`, `return promise` and `return await promise` differ: only the second lets `catch` see the rejection. The type checker treats both as correct; type-aware lint rules (e.g. typescript-eslint `return-await`) can enforce the safe form.",
+      "refs": [
+        "https://typescript-eslint.io/rules/return-await/",
+        "https://typescript-eslint.io/rules/no-floating-promises/"
+      ]
+    },
+    {
+      "id": "typescript-v5-q17",
+      "domain": "toolchain",
+      "stem": "An internal library runs its `.ts` sources directly with Node in development (imports like `./client.ts`, `allowImportingTsExtensions`) and publishes compiled JS to the registry. With `noEmit` removed for the publish build, tsc refuses `.ts` specifiers, and copying the files leaves `./client.ts` imports in the emitted JS. What should the build use?",
+      "options": [
+        {
+          "text": "Switch source imports to `./client.js` and run development through a loader that maps `.js` to `.ts`.",
+          "correct": false,
+          "why": "It works, but it adds a loader to every dev and test command just to undo the specifier choice."
+        },
+        {
+          "text": "`rewriteRelativeImportExtensions`, so tsc rewrites relative `.ts` imports to `.js` in the output.",
+          "correct": true,
+          "why": "Source keeps the specifiers Node needs for direct execution, and emitted JS gets the ones that exist after compilation."
+        },
+        {
+          "text": "Extensionless imports with `moduleResolution: \"bundler\"`.",
+          "correct": false,
+          "why": "Neither Node's direct execution nor the published ESM would resolve extensionless relative imports without a bundler."
+        },
+        {
+          "text": "Publish the `.ts` sources and let consumers' Node strip them.",
+          "correct": false,
+          "why": "Node refuses to strip types inside `node_modules`, so consumers fail to load the package."
+        }
+      ],
+      "explain": "One codebase can be run directly and also compiled: write `.ts` specifiers for Node, and let `rewriteRelativeImportExtensions` (TS 5.7+) turn them into `.js` in emitted output.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-7.html",
+        "https://nodejs.org/api/typescript.html#module-resolution"
+      ]
+    },
+    {
+      "id": "typescript-v5-q18",
+      "domain": "toolchain",
+      "stem": "A Node 24 service (no bundler; Docker runs `node dist/main.js`) uses `moduleResolution: \"bundler\"` because a tutorial recommended it. Developers write extensionless imports like `./db/pool`. `tsc` passes and emits, but the container crashes at startup with `ERR_MODULE_NOT_FOUND`. What should the config be?",
+      "options": [
+        {
+          "text": "Keep `bundler` and add a bundler to the build so imports get resolved.",
+          "correct": false,
+          "why": "It works, but it adds a tool to make a config correct that `nodenext` handles natively for a plain Node service."
+        },
+        {
+          "text": "`module: \"commonjs\"` so Node's `require` resolves extensions.",
+          "correct": false,
+          "why": "It runs, but it moves the service back to CommonJS to avoid writing extensions, and conflicts with ESM-only dependencies."
+        },
+        {
+          "text": "`moduleResolution: \"node10\"`, the classic Node resolution.",
+          "correct": false,
+          "why": "`node10` was removed in TS 7 and never modelled ESM in Node anyway."
+        },
+        {
+          "text": "`module: \"nodenext\"`, so tsc applies Node's own rules and requires extensions on relative imports.",
+          "correct": true,
+          "why": "tsc then reports extensionless imports (TS2835) at compile time, matching what Node will do at runtime."
+        }
+      ],
+      "explain": "Choose module settings by who resolves imports at runtime. If Node runs the output, use `nodenext` so tsc enforces Node's rules; `bundler` is for code that a bundler will process.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/modules/reference.html",
+        "https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/"
+      ]
+    },
+    {
+      "id": "typescript-v5-q19",
+      "domain": "toolchain",
+      "stem": "A team runs services with `node src/main.ts`. A new teammate added `enum Region { EU = \"eu\", US = \"us\" }`; `tsc --noEmit` passed in CI, but staging crashed with `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`. They want CI to catch this class of problem. What should they add?",
+      "options": [
+        {
+          "text": "A smoke test in CI that boots the service with `node src/main.ts` before deploying to staging.",
+          "correct": false,
+          "why": "Useful, but it catches non-erasable syntax only in files loaded at boot; lazily imported modules can still crash later."
+        },
+        {
+          "text": "A lint rule banning the `enum` keyword.",
+          "correct": false,
+          "why": "It catches enums, but not parameter properties or value namespaces, which fail the same way."
+        },
+        {
+          "text": "`erasableSyntaxOnly: true`, so tsc rejects syntax Node can't strip.",
+          "correct": true,
+          "why": "tsc then reports enums, value namespaces and parameter properties (TS1294) in every file, in the existing CI step."
+        },
+        {
+          "text": "Pin Node to an older version with stricter stripping rules.",
+          "correct": false,
+          "why": "No Node version makes enums erasable by stripping; the rule is that only type syntax can be removed."
+        }
+      ],
+      "explain": "When Node runs your TypeScript, the compiler must reject syntax that needs code generation. `erasableSyntaxOnly` (TS 5.8+) makes tsc enforce exactly what type stripping supports.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#erasableSyntaxOnly",
+        "https://nodejs.org/api/typescript.html#type-stripping"
+      ]
+    },
+    {
+      "id": "typescript-v5-q20",
+      "domain": "toolchain",
+      "stem": "A service runs on Node 24 LTS in production, but its `package.json` has `@types/node` at the latest major (26). A developer used a `fs` API added in Node 26; types and tests (run locally on Node 26) passed, and production crashed with `is not a function`. What should the project do?",
+      "options": [
+        {
+          "text": "Pin `@types/node` to the major of the production Node (24), and run CI on that same Node version.",
+          "correct": true,
+          "why": "The types then describe the APIs that actually exist in production, and CI runs on the same runtime."
+        },
+        {
+          "text": "Always use the latest `@types/node` to get the newest APIs.",
+          "correct": false,
+          "why": "The newest types describe a runtime you don't run, which is exactly how the missing API compiled."
+        },
+        {
+          "text": "Remove `@types/node` and declare the needed Node APIs by hand.",
+          "correct": false,
+          "why": "Hand-written declarations drift and miss APIs; the versioned package is the reliable source."
+        },
+        {
+          "text": "Upgrade production to Node 26 so the types match.",
+          "correct": false,
+          "why": "26 is the Current line, not LTS; upgrading production to match a types package reverses the dependency."
+        }
+      ],
+      "explain": "Type definitions for a runtime are a claim about that runtime's version. Pin `@types/node` to the Node major you deploy and run CI on it, so the compiler only offers APIs production actually has.",
+      "refs": [
+        "https://nodejs.org/en/about/previous-releases",
+        "https://www.npmjs.com/package/@types/node"
+      ]
+    }
+  ]
+}

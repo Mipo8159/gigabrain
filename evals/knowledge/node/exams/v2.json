@@ -1,0 +1,674 @@
+{
+  "topic": "node",
+  "variant": 2,
+  "of": 5,
+  "title": "Node.js in production — variant 2",
+  "description": "Removing work instead of moving it, nextTick starvation, autoscaling on loop saturation, process vs thread isolation, transfers, heap snapshots, error classification and remote cancellation.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "event-loop",
+      "name": "Event loop and blocking work",
+      "weight": 0.25
+    },
+    {
+      "id": "scaling",
+      "name": "Workers, processes and scaling out",
+      "weight": 0.2
+    },
+    {
+      "id": "streams-memory",
+      "name": "Streams, backpressure and memory",
+      "weight": 0.2
+    },
+    {
+      "id": "io",
+      "name": "Timeouts, cancellation and connections",
+      "weight": 0.2
+    },
+    {
+      "id": "ops",
+      "name": "Shutdown, failures and observability",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "node-v2-q01",
+      "domain": "event-loop",
+      "stem": "A mobile game's `/leaderboard?around=me` endpoint loads 2 million scores from a cache, sorts them in the handler, and returns the 50 entries around the player. It takes about 400 ms of CPU and is called 30 times a second across 6 pods. Players report the whole game API freezing in short bursts. Which design fits?",
+      "options": [
+        {
+          "text": "Sort in a worker thread per request so the main loop stays free.",
+          "correct": false,
+          "why": "The loop stays free, but 30 × 400 ms of CPU per second still needs 12 cores, and each request clones 2 million scores into the worker."
+        },
+        {
+          "text": "Keep scores in a Redis sorted set and ask it for the player's rank window.",
+          "correct": true,
+          "why": "A sorted set keeps the order on every write, so a rank-window read is O(log n + 50) instead of re-sorting 2 million entries per request."
+        },
+        {
+          "text": "Chunk the sort with `setImmediate` yields so other players' requests interleave with it.",
+          "correct": false,
+          "why": "Interleaving removes the freeze, but the total CPU is unchanged, so the pods are saturated and every leaderboard call gets slower."
+        },
+        {
+          "text": "Double the pod count so each pod sorts less often.",
+          "correct": false,
+          "why": "It halves the frequency per pod, but each sort still blocks its pod's loop for 400 ms, and you pay for capacity spent re-sorting the same data."
+        }
+      ],
+      "explain": "Before moving CPU work around (workers, chunking, more pods), ask whether it has to happen per request at all. Keeping data in the shape reads need (indexes, sorted sets, precomputed views) removes the work instead of relocating it.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop",
+        "https://redis.io/docs/latest/develop/data-types/sorted-sets/"
+      ]
+    },
+    {
+      "id": "node-v2-q02",
+      "domain": "event-loop",
+      "stem": "An in-house job library drains its in-memory queue with the code shown so that \"jobs run as soon as possible\". Under a backlog of 50 000 tiny jobs, the service's HTTP requests and `setTimeout`-based heartbeats stop for several seconds, although each job takes only microseconds. Which change fixes it while keeping throughput?",
+      "code": "function drain() {\n  const job = queue.shift();\n  if (!job) return;\n  job.run();                 // a few microseconds\n  process.nextTick(drain);   // \"yield\" before the next job\n}",
+      "options": [
+        {
+          "text": "Use `setImmediate(drain)` and run a batch of jobs per turn.",
+          "correct": true,
+          "why": "`setImmediate` runs in the check phase, so I/O and timers get a turn between batches; batching keeps throughput high."
+        },
+        {
+          "text": "Replace `process.nextTick` with `queueMicrotask`.",
+          "correct": false,
+          "why": "Microtasks also drain completely before the loop moves on, so recursive scheduling still starves I/O."
+        },
+        {
+          "text": "Wrap each job in `await Promise.resolve()` to make it asynchronous.",
+          "correct": false,
+          "why": "It turns each step into a microtask, which still never lets I/O or timers in."
+        },
+        {
+          "text": "Move the queue to a worker thread and post every job there.",
+          "correct": false,
+          "why": "It might work, but a structured clone per tiny job costs more than the job, and the bug (never yielding) moves with it."
+        }
+      ],
+      "explain": "`process.nextTick` and microtasks run before the loop continues; scheduling them recursively starves I/O and timers indefinitely. Use `setImmediate` for \"run soon, but let I/O in\", and do a batch of work per turn.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick"
+      ]
+    },
+    {
+      "id": "node-v2-q03",
+      "domain": "event-loop",
+      "stem": "A ride-hailing pricing API runs one Node process in pods with 2 vCPU requests, and the HPA targets 70% CPU. During a surge, p99 latency rose from 40 ms to 3 s, yet the HPA never added pods: CPU sat at about 52%. Which change makes autoscaling react to real saturation?",
+      "options": [
+        {
+          "text": "Lower the HPA CPU target to 40% so scaling starts earlier.",
+          "correct": false,
+          "why": "It might trigger scaling here, but a single JS thread can't exceed ~50% of 2 vCPUs, so the threshold stays fragile and pods sit half idle."
+        },
+        {
+          "text": "Raise pod CPU to 4 vCPU so the process has more headroom.",
+          "correct": false,
+          "why": "The JS thread still uses one core; the percentage drops further and scaling becomes even less likely."
+        },
+        {
+          "text": "Pods of ~1 vCPU, scaled on event-loop utilization or lag.",
+          "correct": true,
+          "why": "Matching the pod to one JS thread makes CPU% meaningful again, and ELU or lag measures the actual bottleneck: the single loop's busy time."
+        },
+        {
+          "text": "Scale on memory usage instead of CPU.",
+          "correct": false,
+          "why": "Memory doesn't track loop saturation; it can stay flat while latency explodes."
+        }
+      ],
+      "explain": "A single Node process saturates at one core. CPU-percentage autoscaling only works when the pod's CPU matches what the process can use; otherwise scale on event-loop utilization or lag, which measure the real bottleneck.",
+      "refs": [
+        "https://nodejs.org/api/perf_hooks.html#performanceeventlooputilizationutilization1-utilization2",
+        "https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/"
+      ]
+    },
+    {
+      "id": "node-v2-q04",
+      "domain": "event-loop",
+      "stem": "A catalogue API compresses its 5 MB product-feed responses with `zlib.gzipSync` inside the handler (about 60 ms of CPU each). Partners fetch the feed 20 times a second, and other endpoints on the same pods show regular 60 ms latency steps. The feed changes every 5 minutes. Which change is best?",
+      "options": [
+        {
+          "text": "Use async `zlib.gzip` so compression runs on the libuv threadpool.",
+          "correct": false,
+          "why": "It frees the loop, but the CPU is still spent 20 times a second, and the four threadpool threads are shared with fs and crypto."
+        },
+        {
+          "text": "Compress once per feed version and serve the cached gzip bytes.",
+          "correct": true,
+          "why": "The content changes every 5 minutes, so one compression per version replaces about 6 000; the loop, threadpool and CPU are all relieved."
+        },
+        {
+          "text": "Lower the gzip level to 1 to cut CPU time.",
+          "correct": false,
+          "why": "It shortens each block, but you still do redundant work per request and get bigger responses."
+        },
+        {
+          "text": "Disable compression for the feed.",
+          "correct": false,
+          "why": "No CPU, but 5 MB × 20 per second of extra egress and slower partner downloads."
+        }
+      ],
+      "explain": "Synchronous compression blocks the loop; async compression moves it to the threadpool, but either way repeated identical work is waste. Cache the result of expensive, deterministic transforms keyed by content version.",
+      "refs": [
+        "https://nodejs.org/api/zlib.html#threadpool-usage-and-performance-considerations"
+      ]
+    },
+    {
+      "id": "node-v2-q05",
+      "domain": "event-loop",
+      "stem": "A healthcare API logs `logger.info({ req, res, body })` on every request, and bodies average 200 KB. At 2 000 rps, CPU profiles show 35% of main-thread time in JSON serialization inside the logger. A teammate proposes moving to a pino transport that runs in a worker thread. Which change actually removes the cost?",
+      "options": [
+        {
+          "text": "Use the pino worker-thread transport so logging leaves the main thread.",
+          "correct": false,
+          "why": "Tempting, but the log object is still serialized on the main thread before it reaches the transport; only the writing moves."
+        },
+        {
+          "text": "Log at `debug` level and switch production to `warn`.",
+          "correct": false,
+          "why": "It removes the cost by removing request logs, and with them the audit trail and debugging data the service needs."
+        },
+        {
+          "text": "Raise the pod CPU limit to cover logging overhead.",
+          "correct": false,
+          "why": "One JS thread does the serializing; more CPU quota on the pod doesn't make that thread faster."
+        },
+        {
+          "text": "Log a few fields (ids, route, status, sizes, timing), not whole bodies.",
+          "correct": true,
+          "why": "Serialization cost scales with what you log; small structured records cost microseconds, and dropping bodies also keeps patient data out of logs."
+        }
+      ],
+      "explain": "Logging is synchronous CPU work on the request path. Transports can move I/O off the thread, but not serialization. Decide what each log line needs; whole request bodies are expensive and often a data-protection problem too.",
+      "refs": [
+        "https://github.com/pinojs/pino/blob/main/docs/transports.md"
+      ]
+    },
+    {
+      "id": "node-v2-q06",
+      "domain": "scaling",
+      "stem": "An insurance service renders PDFs with a native addon that segfaults on about 1 in 50 000 malformed inputs. It currently runs in a `worker_threads` pool, and each segfault takes down the whole pod and the 400 requests in flight on it. What isolation should the renderer use?",
+      "options": [
+        {
+          "text": "Keep the worker pool but add `resourceLimits` to each worker.",
+          "correct": false,
+          "why": "Resource limits cap a worker's JS heap; they don't contain a crash in native code, which takes down the whole process."
+        },
+        {
+          "text": "Wrap the render call in `try/catch` and the worker in an `'error'` handler.",
+          "correct": false,
+          "why": "A segfault is a signal killing the process, not a JS exception; no handler ever runs."
+        },
+        {
+          "text": "Run renders in separate processes, as a child-process pool or a separate service.",
+          "correct": true,
+          "why": "A native crash ends only its own process; the API process survives, sees the child exit, and can retry or fail just that render."
+        },
+        {
+          "text": "Increase the replica count so a crash affects a smaller share of traffic.",
+          "correct": false,
+          "why": "Each crash still drops every in-flight request on the pod; you only shrink the blast radius a bit."
+        }
+      ],
+      "explain": "Worker threads share one process: a native crash, `process.exit` or an OOM in any thread kills them all. Use process isolation (child processes or a separate service) for code you don't trust to stay up, and threads for trusted CPU work.",
+      "refs": [
+        "https://nodejs.org/api/worker_threads.html",
+        "https://nodejs.org/api/child_process.html"
+      ]
+    },
+    {
+      "id": "node-v2-q07",
+      "domain": "scaling",
+      "stem": "A live-auction app keeps WebSocket room membership in an in-memory `Map` in each Node process. After scaling from 1 to 8 pods, bidders only see bids from people connected to the same pod. Which change fits a horizontally scaled design?",
+      "options": [
+        {
+          "text": "Enable sticky sessions on the load balancer.",
+          "correct": false,
+          "why": "Stickiness keeps one client on one pod, but bidders in the same room still land on different pods, so they still miss each other's bids."
+        },
+        {
+          "text": "Publish bids on a shared bus (e.g. Redis pub/sub) all pods subscribe to.",
+          "correct": true,
+          "why": "Each pod relays bus messages to its own local sockets, so every bidder sees every bid regardless of which pod holds their connection."
+        },
+        {
+          "text": "Run a single large pod for the auction service.",
+          "correct": false,
+          "why": "It works until that pod restarts or saturates; you trade the bug for a single point of failure and a hard capacity ceiling."
+        },
+        {
+          "text": "Route each auction to one pod by hashing the auction id at the load balancer.",
+          "correct": false,
+          "why": "Possible, but it needs custom routing, rebalances painfully when pods change, and one hot auction can overload a pod."
+        }
+      ],
+      "explain": "Connections are local to a pod, but the conversation is global. Fan messages out through a shared bus so any pod can deliver to its own sockets; keep only per-connection state in process memory.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/interact/pubsub/"
+      ]
+    },
+    {
+      "id": "node-v2-q08",
+      "domain": "scaling",
+      "stem": "A team runs PM2 in cluster mode with 4 workers inside each 4-vCPU Kubernetes pod. One worker slowly leaks memory and serves 500s once it is degraded, but the pod's liveness probe keeps passing because the other workers answer it, and the HPA reads per-pod averages. Which setup fits better?",
+      "options": [
+        {
+          "text": "Keep PM2 and add `max_memory_restart` so leaking workers are recycled.",
+          "correct": false,
+          "why": "It patches the leak symptom, but Kubernetes still can't see or restart individual workers, and scaling remains blind to their state."
+        },
+        {
+          "text": "One Node process per ~1 vCPU pod; Kubernetes restarts and scales.",
+          "correct": true,
+          "why": "Each process gets its own probes, metrics and restarts, so a sick process is seen and replaced, and the HPA scales in units that match one event loop."
+        },
+        {
+          "text": "Raise the liveness probe frequency so the bad worker is hit more often.",
+          "correct": false,
+          "why": "The probe still lands on a random worker; a healthy one usually answers, so the bad one survives."
+        },
+        {
+          "text": "Replace PM2 with Node's `cluster` module.",
+          "correct": false,
+          "why": "Same model (a primary with workers inside one pod), so the same visibility problems remain."
+        }
+      ],
+      "explain": "In Kubernetes, the orchestrator already does process supervision and scaling. Nesting a process manager inside a pod hides individual processes from probes, metrics and restarts. Prefer one Node process per container and scale with pods.",
+      "refs": [
+        "https://nodejs.org/api/cluster.html",
+        "https://kubernetes.io/docs/concepts/workloads/pods/"
+      ]
+    },
+    {
+      "id": "node-v2-q09",
+      "domain": "scaling",
+      "stem": "A weather-modelling service sends a 200 MB `Float64Array` grid to a worker thread with `worker.postMessage({ grid })` for each simulation. Profiles show 300 ms of main-thread time per job in serialization, and memory doubles during each hand-off. The main thread doesn't need the grid afterwards. Which change fits?",
+      "options": [
+        {
+          "text": "Send the grid as JSON with `JSON.stringify` to avoid structured clone.",
+          "correct": false,
+          "why": "JSON of 200 MB of floats is slower and larger than structured clone, and it still runs on the main thread."
+        },
+        {
+          "text": "Split the grid into 100 messages of 2 MB.",
+          "correct": false,
+          "why": "Total copying is the same; you just spread the 300 ms out and add per-message overhead."
+        },
+        {
+          "text": "Transfer the buffer: `worker.postMessage({ grid }, [grid.buffer])`.",
+          "correct": true,
+          "why": "Transferring moves ownership of the ArrayBuffer without copying; the sender's view becomes length 0, which is fine because the main thread is done with it."
+        },
+        {
+          "text": "Use a child process instead of a worker thread.",
+          "correct": false,
+          "why": "IPC to a child process serializes everything too, and more slowly than structured clone."
+        }
+      ],
+      "explain": "Crossing a thread boundary copies by default (structured clone). For large binary data, transfer the `ArrayBuffer` (zero-copy, the sender loses it) or share a `SharedArrayBuffer` when both sides need it.",
+      "refs": [
+        "https://nodejs.org/api/worker_threads.html#portpostmessagevalue-transferlist"
+      ]
+    },
+    {
+      "id": "node-v2-q10",
+      "domain": "streams-memory",
+      "stem": "A media service proxies video downloads from object storage. The handler does `const buf = Buffer.from(await upstream.arrayBuffer()); res.end(buf);`. Files average 500 MB. With 50 concurrent downloads, pods hit their 4 GiB memory limit and are OOMKilled. Which change fixes it?",
+      "options": [
+        {
+          "text": "`await pipeline(Readable.fromWeb(upstream.body), res)`.",
+          "correct": true,
+          "why": "Streaming forwards chunks as the client accepts them; memory per download is bounded by the stream buffers, not the file size."
+        },
+        {
+          "text": "Raise the memory limit to 32 GiB and cap concurrency at 50.",
+          "correct": false,
+          "why": "It fits today's numbers at large cost, and still fails once more than ~60 downloads overlap."
+        },
+        {
+          "text": "Use `upstream.text()` instead of `arrayBuffer()` to save memory.",
+          "correct": false,
+          "why": "Text decoding creates an even bigger string and corrupts binary video data."
+        },
+        {
+          "text": "Redirect clients to a pre-signed URL only for files over 1 GB.",
+          "correct": false,
+          "why": "Redirecting is a good pattern, but at a 1 GB threshold the 500 MB files that cause the OOM are still buffered."
+        }
+      ],
+      "explain": "Never buffer a whole payload whose size you don't control. Pipe the web stream through `Readable.fromWeb` and `pipeline` so memory stays bounded and backpressure reaches the upstream.",
+      "refs": [
+        "https://nodejs.org/api/stream.html#streamreadablefromwebreadablestream-options",
+        "https://nodejs.org/api/stream.html#streampipelinesource-transforms-destination-options"
+      ]
+    },
+    {
+      "id": "node-v2-q11",
+      "domain": "streams-memory",
+      "stem": "A B2B API caches each user's permission set in a module-level `Map` keyed by user id, with no eviction. The tenant base grew to 3 million users. Pods now restart every 2 days with \"JavaScript heap out of memory\", and p99 latency climbs for hours before each crash. Which fix is right?",
+      "options": [
+        {
+          "text": "Raise `--max-old-space-size` to 8 GB.",
+          "correct": false,
+          "why": "It delays the crash and makes each major GC slower; the cache still grows with the user base."
+        },
+        {
+          "text": "Use a `WeakMap` so the GC can drop entries.",
+          "correct": false,
+          "why": "`WeakMap` keys must be objects and drop entries only when the key object is unreachable, so string user ids can't be used and nothing gets evicted."
+        },
+        {
+          "text": "Restart pods nightly with a CronJob.",
+          "correct": false,
+          "why": "It hides the leak, gives every pod a cold cache each morning, and breaks again once the cache fills in under a day."
+        },
+        {
+          "text": "Use a bounded LRU with a TTL, or a shared cache such as Redis.",
+          "correct": true,
+          "why": "A size cap plus expiry bounds memory and keeps entries fresh; a shared cache also stops each pod holding its own copy."
+        }
+      ],
+      "explain": "An unbounded in-process cache is a slow memory leak; as the heap fills, GC runs more and longer, which is why latency climbs before the crash. Every cache needs a size bound and an expiry.",
+      "refs": [
+        "https://nodejs.org/en/learn/diagnostics/memory/understanding-and-tuning-memory"
+      ]
+    },
+    {
+      "id": "node-v2-q12",
+      "domain": "streams-memory",
+      "stem": "An on-call engineer wants to find a leak in a production pod whose heap is 3 GB, with a 4 GiB container limit. They plan to call `v8.writeHeapSnapshot()` through an admin endpoint on a pod that is serving live traffic. Which approach is safer?",
+      "options": [
+        {
+          "text": "Call it on the live pod; the snapshot is written in the background.",
+          "correct": false,
+          "why": "Writing a snapshot is synchronous: the loop stops for the whole dump, and it needs a lot of extra memory on top of the heap."
+        },
+        {
+          "text": "Use `--inspect` and attach Chrome DevTools from your laptop to take the snapshot remotely.",
+          "correct": false,
+          "why": "Same synchronous dump and memory cost, plus an exposed debug port on a production pod."
+        },
+        {
+          "text": "Lower the heap limit so the snapshot is smaller.",
+          "correct": false,
+          "why": "It changes the process's behaviour and makes it crash sooner; it doesn't make the dump safe."
+        },
+        {
+          "text": "Snapshot a pod out of rotation with headroom, or use `--heapsnapshot-near-heap-limit`.",
+          "correct": true,
+          "why": "Removing the pod from traffic means the pause hurts no one, and headroom avoids an OOM kill mid-dump; the flag captures a snapshot automatically near the limit."
+        }
+      ],
+      "explain": "Heap snapshots stop the event loop and need extra memory, roughly the size of the heap again. On production pods, take them out of rotation with headroom, or let `--heapsnapshot-near-heap-limit` capture one just before an OOM.",
+      "refs": [
+        "https://nodejs.org/api/v8.html#v8writeheapsnapshotfilenameoptions",
+        "https://nodejs.org/api/cli.html#--heapsnapshot-near-heap-limitmax_count"
+      ]
+    },
+    {
+      "id": "node-v2-q13",
+      "domain": "streams-memory",
+      "stem": "A Georgian e-commerce site ingests partner product files as NDJSON over HTTP with `for await (const c of res.body) buf += c;` and splits on newlines. ASCII-only test files pass, but in production about 1 in 2 000 product names contains `�` characters at random positions. Which fix is right?",
+      "options": [
+        {
+          "text": "Ask partners to send smaller files so lines don't span chunks.",
+          "correct": false,
+          "why": "The corruption is per character, not per line; any chunk boundary can split a multi-byte character, whatever the file size."
+        },
+        {
+          "text": "Decode with `TextDecoderStream` or `setEncoding('utf8')`.",
+          "correct": true,
+          "why": "A streaming decoder holds the partial bytes of a character split across chunks and completes it with the next chunk."
+        },
+        {
+          "text": "Call `c.toString('utf8')` explicitly on each chunk.",
+          "correct": false,
+          "why": "That is what `+=` already does: each chunk is decoded on its own, so split characters still break."
+        },
+        {
+          "text": "Normalize the strings with `.normalize('NFC')` after parsing.",
+          "correct": false,
+          "why": "Normalization can't recover bytes that were already turned into replacement characters."
+        }
+      ],
+      "explain": "Chunk boundaries fall anywhere, including inside a multi-byte UTF-8 character. Decode with a stateful decoder, never chunk by chunk; ASCII-only fixtures will never catch this.",
+      "refs": [
+        "https://nodejs.org/api/webstreams.html#class-textdecoderstream",
+        "https://nodejs.org/api/string_decoder.html"
+      ]
+    },
+    {
+      "id": "node-v2-q14",
+      "domain": "io",
+      "stem": "A payment-routing service retries a provider call on timeout but must never retry when the merchant cancelled. It classifies errors as shown, with `fetch(url, { signal: AbortSignal.any([merchantSignal, AbortSignal.timeout(1500)]) })`. Ops notice that timed-out calls are never retried and show up as \"unknown\". Which change fixes the classification?",
+      "code": "try { return await callProvider(req, merchantSignal); }\ncatch (e) {\n  if (e.name === 'AbortError') return { status: 'cancelled' }; // no retry\n  if (e.code === 'ETIMEDOUT')  return retry(req);\n  return { status: 'unknown' };\n}",
+      "options": [
+        {
+          "text": "Branch on `TimeoutError` vs `AbortError` via `e.name`.",
+          "correct": true,
+          "why": "A timeout signal aborts with a `TimeoutError` DOMException; only a manual `abort()` produces `AbortError`. Checking both names separates the two cases."
+        },
+        {
+          "text": "Check `e instanceof DOMException` and treat all of them as cancellations.",
+          "correct": false,
+          "why": "Both cases are DOMExceptions, so timeouts would then be treated as merchant cancels and never retried."
+        },
+        {
+          "text": "Replace `AbortSignal.timeout` with `setTimeout(() => ac.abort(), 1500)`.",
+          "correct": false,
+          "why": "It does make timeouts look like `AbortError`, which then collides with the merchant cancel, so you can't tell them apart."
+        },
+        {
+          "text": "Check `e.message.includes('timeout')`.",
+          "correct": false,
+          "why": "Message text isn't a contract and varies by runtime; it also misses the `cause` chain."
+        }
+      ],
+      "explain": "`AbortSignal.timeout()` rejects with `TimeoutError`, a manual abort with `AbortError`. When combining signals with `AbortSignal.any`, branch on the error name (or `signal.reason`) so retry and cancel policies stay distinct.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#static-method-abortsignaltimeoutdelay",
+        "https://nodejs.org/api/globals.html#static-method-abortsignalanysignals"
+      ]
+    },
+    {
+      "id": "node-v2-q15",
+      "domain": "io",
+      "stem": "A document-conversion service starts a 20-second conversion per POST and wants to stop it if the client disconnects. After deploying the code shown, every conversion is aborted within milliseconds, including for clients that are still waiting. Which change is right?",
+      "code": "http.createServer(async (req, res) => {\n  const ac = new AbortController();\n  req.on('close', () => ac.abort());          // \"client went away\"\n  const input = await readBody(req);          // for await over req\n  const pdf = await convert(input, { signal: ac.signal });   // ~20 s\n  res.end(pdf);\n});",
+      "options": [
+        {
+          "text": "Listen on `res.on('close')` and abort only if `!res.writableFinished`.",
+          "correct": true,
+          "why": "The response closes early only when the client goes away; `writableFinished` tells a normal finish from a disconnect."
+        },
+        {
+          "text": "Listen on `req.on('aborted')` instead.",
+          "correct": false,
+          "why": "`'aborted'` is deprecated and only fires while the request body is still being received, so a disconnect during the 20 s of work goes unnoticed."
+        },
+        {
+          "text": "Abort only when `req.socket.destroyed` is true inside the `'close'` handler.",
+          "correct": false,
+          "why": "It's closer, but it's tied to socket internals and keep-alive reuse; the response-level check is the documented signal."
+        },
+        {
+          "text": "Read the body with `req.on('data')` instead of `for await`.",
+          "correct": false,
+          "why": "How you read the body doesn't matter: `req` still emits `'close'` once the body is consumed."
+        }
+      ],
+      "explain": "Since Node 16, `IncomingMessage` emits `'close'` once the request body is consumed, not when the client leaves. Detect a disconnect on the response: `res.on('close')` with `!res.writableFinished`.",
+      "refs": [
+        "https://nodejs.org/api/http.html#class-httpincomingmessage",
+        "https://nodejs.org/api/http.html#class-httpserverresponse"
+      ]
+    },
+    {
+      "id": "node-v2-q16",
+      "domain": "io",
+      "stem": "An analytics product runs reports as Postgres queries of up to 5 minutes. When a user closes the tab, the Node handler aborts its `AbortController`, and the HTTP work stops. Yet the DBA sees the abandoned queries running to completion and stacking up during busy hours. Which change actually stops the database work?",
+      "options": [
+        {
+          "text": "Destroy the Node-side pool client so the query stops.",
+          "correct": false,
+          "why": "Postgres doesn't reliably notice a dropped client until it tries to send results, so the query can keep running; you also lose a pooled connection."
+        },
+        {
+          "text": "Lower the HTTP server's `requestTimeout` to 60 s.",
+          "correct": false,
+          "why": "It ends the HTTP request sooner, but nothing reaches Postgres, so the query still runs."
+        },
+        {
+          "text": "Set `statement_timeout` for report queries, and on abort send a cancel (`pg_cancel_backend`) for that backend.",
+          "correct": true,
+          "why": "Cancellation must reach the server that does the work: a server-side timeout bounds every query, and an explicit cancel stops abandoned ones at once."
+        },
+        {
+          "text": "Run report queries on a read replica.",
+          "correct": false,
+          "why": "It protects the primary, but abandoned queries still stack up on the replica."
+        }
+      ],
+      "explain": "Aborting a promise in Node stops Node's work, not the remote system's. Cancellation has to be propagated in the remote system's own terms (a query cancel, a server-side timeout) or the work continues for no one.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/functions-admin.html#FUNCTIONS-ADMIN-SIGNAL",
+        "https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STATEMENT-TIMEOUT"
+      ]
+    },
+    {
+      "id": "node-v2-q17",
+      "domain": "io",
+      "stem": "A logistics API enriches a shipment manifest by calling a carrier's tracking API for every parcel with `await Promise.all(parcels.map(p => track(p)))`. Manifests have up to 2 000 parcels, and the carrier allows 50 concurrent requests per client. Big manifests cause bursts of 429s and the carrier has threatened to block you. Which change fits?",
+      "options": [
+        {
+          "text": "Keep `Promise.all` and retry 429s with exponential backoff.",
+          "correct": false,
+          "why": "Backoff spreads the retries, but every manifest still opens 2 000 requests at once, so you keep tripping the limit."
+        },
+        {
+          "text": "Use `Promise.allSettled` so one 429 doesn't fail the manifest.",
+          "correct": false,
+          "why": "It changes error handling, not concurrency; the burst is the same."
+        },
+        {
+          "text": "Run the parcels with bounded concurrency (for example `p-limit(40)`) under the carrier's limit.",
+          "correct": true,
+          "why": "A concurrency limiter keeps at most 40 in flight per process; across pods you also need a shared limit if the 50 is per client account."
+        },
+        {
+          "text": "Process parcels one at a time with `for…of` and `await`.",
+          "correct": false,
+          "why": "It respects the limit, but 2 000 sequential calls take far too long for an API response."
+        }
+      ],
+      "explain": "`Promise.all` over user-sized input is unbounded fan-out. Bound concurrency to the downstream's capacity, and remember the bound is per process, so a per-account limit across many pods needs a shared limiter.",
+      "refs": [
+        "https://github.com/sindresorhus/p-limit"
+      ]
+    },
+    {
+      "id": "node-v2-q18",
+      "domain": "ops",
+      "stem": "A Dockerfile ends with `CMD [\"sh\", \"-c\", \"npm run migrate && node server.js\"]`. The server has a careful SIGTERM handler that drains connections, but on every rollout pods take the full 30 s grace period and are SIGKILLed, dropping in-flight requests. Which cause and fix are right?",
+      "options": [
+        {
+          "text": "The drain is too slow; raise `terminationGracePeriodSeconds` to 90.",
+          "correct": false,
+          "why": "The handler never ran, so more time just makes rollouts slower before the same SIGKILL."
+        },
+        {
+          "text": "`sh` is PID 1 and doesn't forward SIGTERM; run migrations as a separate Job and make `node` PID 1 (or use an init such as tini).",
+          "correct": true,
+          "why": "Kubernetes signals PID 1 only. With a shell wrapper, Node never sees SIGTERM; with `node` (or an init that forwards signals) as PID 1, the drain runs."
+        },
+        {
+          "text": "Handle SIGKILL in Node as well as SIGTERM.",
+          "correct": false,
+          "why": "SIGKILL can't be caught by any process; the problem is that SIGTERM never reached Node."
+        },
+        {
+          "text": "Add a `preStop` hook that sleeps 10 s.",
+          "correct": false,
+          "why": "A pre-stop delay helps endpoint propagation, but SIGTERM still goes to the shell, so Node still never drains."
+        }
+      ],
+      "explain": "The container runtime signals PID 1 only. If a shell or another wrapper sits there without forwarding signals, graceful shutdown code never runs. Make the app PID 1 (or use a forwarding init) and keep one-off tasks such as migrations out of the serving container's command.",
+      "refs": [
+        "https://docs.docker.com/reference/dockerfile/#cmd",
+        "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination"
+      ]
+    },
+    {
+      "id": "node-v2-q19",
+      "domain": "ops",
+      "stem": "A notification service is a `JobQueue extends EventEmitter` with `queue.on('job', async (job) => { await send(job); })` and a `queue.on('error', log)` listener. When the SMS provider started returning errors, pods began crash-looping with exit code 1 instead of logging. Which change routes these failures to the `'error'` listener?",
+      "options": [
+        {
+          "text": "Wrap `queue.emit('job', job)` in `try/catch`.",
+          "correct": false,
+          "why": "`emit` calls the listener synchronously and ignores its promise; the rejection happens later, outside the try."
+        },
+        {
+          "text": "Construct the emitter with `{ captureRejections: true }`.",
+          "correct": true,
+          "why": "With captureRejections, a rejected promise returned by a listener is routed to the `'error'` event (or `Symbol.for('nodejs.rejection')`) instead of becoming an unhandled rejection."
+        },
+        {
+          "text": "Register a `process.on('unhandledRejection')` handler that logs and continues.",
+          "correct": false,
+          "why": "It stops the crash globally, but it hides every other unhandled rejection too and loses the job context."
+        },
+        {
+          "text": "Make the listener synchronous and call `send(job).then()`.",
+          "correct": false,
+          "why": "A `.then()` with no rejection handler still leaves the rejection unhandled."
+        }
+      ],
+      "explain": "`EventEmitter` ignores what listeners return, so an async listener's rejection becomes an unhandled rejection that crashes the process. Use `captureRejections` or catch inside every async listener.",
+      "refs": [
+        "https://nodejs.org/api/events.html#capture-rejections-of-promises"
+      ]
+    },
+    {
+      "id": "node-v2-q20",
+      "domain": "ops",
+      "stem": "A fintech API attaches a `requestId` to every log line through `AsyncLocalStorage`. The audit writer shown batches records and flushes every 10 ms. Under load, auditors find audit lines from concurrent requests all tagged with the same `requestId`. Which fix makes each callback log its own request?",
+      "code": "const pending = [];\nsetInterval(() => {\n  const batch = pending.splice(0);\n  if (batch.length) auditStore.write(batch.map(p => p.rec))\n    .then(() => batch.forEach(p => p.cb()));   // cb logs with ALS requestId\n}, 10);\nexport function add(rec, cb) { pending.push({ rec, cb }); }",
+      "options": [
+        {
+          "text": "Call `als.enterWith(ctx)` at the top of each request.",
+          "correct": false,
+          "why": "Context is not the problem at entry; the callback still runs later from the shared timer, in whatever context created that timer."
+        },
+        {
+          "text": "Bind the callback at enqueue time with `AsyncLocalStorage.bind(cb)`.",
+          "correct": true,
+          "why": "`bind` captures the current context when the record is added, so the callback runs with its own request's store even when the shared timer calls it."
+        },
+        {
+          "text": "Create one `AsyncLocalStorage` instance per request.",
+          "correct": false,
+          "why": "The logger reads one instance; per-request instances don't change which context a timer callback runs in."
+        },
+        {
+          "text": "Flush synchronously inside `add()` instead of batching.",
+          "correct": false,
+          "why": "It fixes the tagging but drops the batching that protects the audit store at high write rates."
+        }
+      ],
+      "explain": "Callbacks run in the async context of whoever triggers them. When shared code stores callbacks and runs them later (batchers, pools, emitters), capture the context at enqueue time with `AsyncLocalStorage.bind` or `snapshot()`.",
+      "refs": [
+        "https://nodejs.org/api/async_context.html#static-method-asynclocalstoragebindfn"
+      ]
+    }
+  ]
+}

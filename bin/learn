@@ -10,7 +10,19 @@ makes the page stale and the next /learn rebuilds it.
   bin/learn path <topic>    where the page for <topic> lives in the cache
   bin/learn open <topic> [--anyway]  open the cached page in the browser; exit 3 if missing or stale
                             (--anyway opens a stale page)
-  bin/learn stamp <topic>   record that the page was rebuilt from the current brief (after check-lesson passes)
+  bin/learn assemble <topic> <src.html>  inline the teach kit (global/skills/teach/kit) into a lesson
+                            source and write the cached page; the source is kept in the cache's src/
+  bin/learn stamp <topic>   record that the page was rebuilt from the current brief and kit (after check-lesson passes)
+  bin/learn exam <topic> [n]  open exam variant n (default: the first one not taken yet) via the local server
+  bin/learn serve           run the local server (127.0.0.1 only; stops after 2 h idle). `open` and `exam` start it.
+                            It serves lessons with an Exams section added at the end, the exam runner
+                            (global/skills/teach/kit/exam.html) and appends finished attempts to me/exam-log.jsonl.
+  bin/learn stop            stop the local server
+
+Exams are data: evals/knowledge/<topic>/exams/v1..v5.json (contract: global/skills/teach/kit/EXAMS.md).
+A topic can have exams and no lesson (aws-associate).
+
+A page is stale when its brief changed or when it was built with an older teach kit.
 """
 import hashlib
 import json
@@ -20,8 +32,11 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-KNOW = ROOT / "evals" / "knowledge"
+KNOW = pathlib.Path(os.environ.get("GIGABRAIN_KNOWLEDGE", ROOT / "evals" / "knowledge"))
+EXAM_LOG = pathlib.Path(os.environ.get("GIGABRAIN_EXAM_LOG", ROOT / "me" / "exam-log.jsonl"))
+PORT = int(os.environ.get("GIGABRAIN_LEARN_PORT", "47615"))
 CACHE = pathlib.Path(os.environ.get("GIGABRAIN_LEARN_CACHE", pathlib.Path.home() / ".cache" / "gigabrain" / "learn"))
+KIT = ROOT / "global" / "skills" / "teach" / "kit"
 
 
 def brief(topic):
@@ -32,6 +47,13 @@ def brief(topic):
 def brief_hash(topic):
     b = brief(topic)
     return hashlib.sha256(b.read_bytes()).hexdigest()[:16] if b else None
+
+
+def kit_hash():
+    h = hashlib.sha256()
+    for name in ("kit.css", "kit.js"):
+        h.update((KIT / name).read_bytes())
+    return h.hexdigest()[:16]
 
 
 def page(topic):
@@ -45,16 +67,33 @@ def meta(topic):
         return {}
 
 
+def page_kit(topic):
+    """The kit hash assemble wrote into the page (meta teach-kit), or None."""
+    import re
+    try:
+        m = re.search(r'<meta name="teach-kit" content="([0-9a-f]+)">', page(topic).read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
 def state(topic):
     if not page(topic).is_file():
         return "not built"
     if brief(topic) and meta(topic).get("brief") != brief_hash(topic):
         return "stale (brief changed)"
+    if page_kit(topic) != kit_hash():
+        return "stale (kit changed)"
     return "ready"
 
 
+def exams(topic):
+    d = KNOW / topic / "exams"
+    return sorted((int(p.stem[1:]) for p in d.glob("v*.json") if p.stem[1:].isdigit())) if d.is_dir() else []
+
+
 def topics():
-    from_briefs = sorted(p.parent.name for p in KNOW.glob("*/BRIEF.md"))
+    from_briefs = sorted({p.parent.name for p in KNOW.glob("*/BRIEF.md")} | {p.parent.name for p in KNOW.glob("*/exams")})
     extra = sorted(p.stem for p in CACHE.glob("*.html") if p.stem not in from_briefs) if CACHE.is_dir() else []
     return from_briefs, extra
 
@@ -78,22 +117,289 @@ def practice_count(topic):
 
 def cmd_list():
     from_briefs, extra = topics()
-    rows = [(t, title(t), practice_count(t), state(t)) for t in from_briefs + extra]
+    rows = [(t, title(t), practice_count(t), len(exams(t)), state(t) if (brief(t) or page(t).is_file()) else "exams only")
+            for t in from_briefs + extra]
     w = max(len(r[0]) for r in rows) if rows else 5
-    print(f"{'topic'.ljust(w)}  {'practice':>8}  {'page'.ljust(9)}  title")
-    for t, name, n, s in rows:
-        print(f"{t.ljust(w)}  {n:>8}  {s.ljust(9)}  {'' if name == t else name}")
+    print(f"{'topic'.ljust(w)}  {'practice':>8}  {'exams':>5}  {'page'.ljust(10)}  title")
+    for t, name, n, e, s in rows:
+        print(f"{t.ljust(w)}  {n:>8}  {e:>5}  {s.ljust(10)}  {'' if name == t else name}")
     print(f"\ncache: {CACHE}")
 
 
+def browse(target):
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.run([opener, target], check=False)
+    print(target)
+
+
 def cmd_open(topic, anyway=False):
+    if not brief(topic) and not page(topic).is_file() and exams(topic):
+        try:
+            return browse(f"{ensure_server()}/topic/{topic}") or 0     # exams-only topic (aws-associate)
+        except OSError as e:
+            print(e)
+            return 1
     s = state(topic)
     if s != "ready" and not (anyway and page(topic).is_file()):
         print(f"{topic}: {s}. Build it with skill teach, then: bin/learn stamp {topic}")
         return 3
-    opener = "open" if sys.platform == "darwin" else "xdg-open"
-    subprocess.run([opener, str(page(topic))], check=False)
-    print(page(topic))
+    try:
+        browse(f"{ensure_server()}/lesson/{topic}")
+    except OSError as e:      # no server: the file still works, just without the exams section
+        print(f"local server unavailable ({e}); opening the file")
+        browse(str(page(topic)))
+    return 0
+
+
+def last_results():
+    """{(topic, variant): last logged attempt} from the exam log."""
+    out = {}
+    try:
+        for line in EXAM_LOG.read_text().splitlines():
+            try:
+                r = json.loads(line)
+                if isinstance(r, dict) and valid_shape(r):
+                    out[(r["topic"], r["variant"])] = r
+            except (ValueError, KeyError, TypeError, AttributeError):
+                continue
+    except OSError:
+        pass
+    return out
+
+
+def cmd_exam(topic, n=None):
+    have = exams(topic)
+    if not have:
+        print(f"{topic}: no exams (evals/knowledge/{topic}/exams/v*.json)")
+        return 3
+    taken = last_results()
+    n = n or next((v for v in have if (topic, v) not in taken), have[0])
+    if n not in have:
+        print(f"{topic}: no variant {n} (have {have})")
+        return 2
+    try:
+        browse(f"{ensure_server()}/exam/{topic}/{n}")
+    except OSError as e:
+        print(e)
+        return 1
+    return 0
+
+
+# ---------------- local server ----------------
+def server_url(port=None):
+    return f"http://127.0.0.1:{port or PORT}"
+
+
+def server_alive():
+    import urllib.request
+    try:
+        with urllib.request.urlopen(server_url() + "/health", timeout=1) as r:
+            return r.read().decode().startswith("gigabrain-learn")
+    except OSError:
+        return False
+
+
+def ensure_server():
+    """Start `bin/learn serve` in the background if it isn't running; return its base URL."""
+    import time
+    if server_alive():
+        return server_url()
+    CACHE.mkdir(parents=True, exist_ok=True)
+    with open(CACHE / "serve.log", "a") as log:
+        subprocess.Popen([sys.executable, str(pathlib.Path(__file__).resolve()), "serve"], stdout=log, stderr=log,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    for _ in range(50):
+        if server_alive():
+            return server_url()
+        time.sleep(.1)
+    raise OSError(f"server did not start on {server_url()} (see {CACHE / 'serve.log'})")
+
+
+def html_esc(s):
+    import html
+    return html.escape(str(s), quote=True)
+
+
+def exams_section(topic, standalone=False):
+    """The Exams block: one row per variant with its last result."""
+    taken = last_results()
+    rows = []
+    for v in exams(topic):
+        try:
+            d = json.loads((KNOW / topic / "exams" / f"v{v}.json").read_text())
+        except (OSError, ValueError):
+            continue
+        r = taken.get((topic, v))
+        last = "not taken yet"
+        if r and valid_shape(r):
+            pct = round(100 * r.get("score", 0))
+            last = f"last: {r.get('correct')}/{r.get('total')} ({pct}%) {'pass' if r.get('pass') else 'not yet'}, {r.get('mode')}, {str(r.get('finished', ''))[:10]}"
+        rows.append(f'<li style="display:grid;gap:4px;padding:12px 14px;border:1px solid var(--border,#ccc);border-radius:10px;background:var(--surface,transparent)">'
+                    f'<a href="/exam/{html_esc(topic)}/{v}" style="font-weight:600">Variant {v}: {html_esc(d.get("title", ""))}</a>'
+                    f'<span style="opacity:.75">{html_esc(d.get("description", ""))} · {len(d.get("questions", []))} questions · {html_esc(d.get("minutes"))} min</span>'
+                    f'<span style="opacity:.75;font-size:.9em">{html_esc(last)}</span></li>')
+    if not rows:
+        return ""
+    lead = ("Five variants, each a full practice exam. Exam mode is timed with answers at the end; study mode explains each answer as you go. "
+            "Every finished attempt goes to your exam log, so the next session can target what you missed.")
+    return (f'<section id="exams" data-exams><h2 data-short="Exams">Exams</h2><p>{lead}</p>'
+            f'<ol style="list-style:none;padding:0;margin:0;display:grid;gap:10px">{"".join(rows)}</ol></section>')
+
+
+def topic_page(topic):
+    lesson = (f'<p><a href="/lesson/{html_esc(topic)}">← the lesson</a></p>' if page(topic).is_file() else "")
+    import html
+    name = html.unescape(title(topic)) if page(topic).is_file() else topic
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<title>{html_esc(name)} · exams</title><style>:root{{--bg:#f7f4ee;--surface:#fffdf8;--border:#ddd6c8;--text:#22201b;color-scheme:light}}'
+            f'@media (prefers-color-scheme:dark){{:root{{--bg:#17161a;--surface:#1f1e23;--border:#37353d;--text:#ebe8e1;color-scheme:dark}}}}'
+            f'body{{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,sans-serif}}main{{max-width:860px;margin:0 auto;padding:24px 16px;display:grid;gap:16px}}'
+            f'a{{color:#4a7fb5}}section{{display:grid;gap:12px}}</style></head><body><main><p><a href="/">all topics</a></p>{lesson}'
+            f'<h1 style="margin:0">{html_esc(name)}</h1>{exams_section(topic, True) or "<p>No exams for this topic yet.</p>"}</main></body></html>')
+
+
+def index_page():
+    from_briefs, extra = topics()
+    import html
+    items = "".join(f'<li><a href="/topic/{html_esc(t)}">{html_esc(html.unescape(title(t)) if page(t).is_file() else t)}</a>'
+                    f' <span style="opacity:.7">({len(exams(t))} exams{", lesson" if page(t).is_file() else ""})</span></li>'
+                    for t in from_briefs + extra)
+    return (f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
+            f'<title>Lessons and exams</title><style>body{{margin:0;font:16px/1.6 system-ui,sans-serif;background:#f7f4ee;color:#22201b}}'
+            f'@media (prefers-color-scheme:dark){{body{{background:#17161a;color:#ebe8e1}}}}main{{max-width:860px;margin:0 auto;padding:24px 16px}}a{{color:#4a7fb5}}</style>'
+            f'</head><body><main><h1>Lessons and exams</h1><ul>{items}</ul></main></body></html>')
+
+
+def is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def valid_shape(r):
+    """Types the pages rely on; a row failing this is skipped, never rendered."""
+    return (isinstance(r.get("topic"), str) and is_int(r.get("variant")) and is_int(r.get("correct")) and is_int(r.get("total"))
+            and 0 <= r["correct"] <= r["total"] and isinstance(r.get("score"), (int, float)) and not isinstance(r.get("score"), bool)
+            and 0 <= r["score"] <= 1 and isinstance(r.get("pass"), bool) and r.get("mode") in ("exam", "study")
+            and isinstance(r.get("misses", []), list) and isinstance(r.get("finished", ""), str))
+
+
+def valid_result(r):
+    return isinstance(r, dict) and valid_shape(r) and r["variant"] in exams(r["topic"])
+
+
+def cmd_serve(print_port=False):
+    import http.server
+    import threading
+    import time
+    from datetime import datetime, timezone
+    idle = int(os.environ.get("GIGABRAIN_SERVE_IDLE", "7200"))
+    last = [time.time()]
+    log_lock = threading.Lock()
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def send(self, code, body, ctype="text/html; charset=utf-8"):
+            data = body.encode() if isinstance(body, str) else body
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
+
+        def own_host(self):
+            # DNS rebinding: a foreign name resolving to 127.0.0.1 must not read pages (they hold answers and scores)
+            port = self.server.server_port
+            return self.headers.get("Host") in (f"127.0.0.1:{port}", f"localhost:{port}")
+
+        def same_origin(self):
+            # browsers send Origin on POST; a page from any other site must not write to the log or stop us
+            o = self.headers.get("Origin")
+            return o is None or o in (f"http://127.0.0.1:{self.server.server_port}", f"http://localhost:{self.server.server_port}")
+
+        def do_GET(self):
+            last[0] = time.time()
+            if not self.own_host():
+                return self.send(403, "wrong host", "text/plain")
+            parts = [p for p in self.path.split("?")[0].split("/") if p]
+            if parts == ["health"]:
+                return self.send(200, "gigabrain-learn", "text/plain")
+            if not parts:
+                return self.send(200, index_page())
+            if len(parts) == 2 and parts[0] == "topic" and (exams(parts[1]) or page(parts[1]).is_file()):
+                return self.send(200, topic_page(parts[1]))
+            if len(parts) == 2 and parts[0] == "lesson" and page(parts[1]).is_file():
+                html = page(parts[1]).read_text(encoding="utf-8")
+                sec = exams_section(parts[1])
+                if sec:
+                    i = html.rfind("</main>")
+                    i = i if i >= 0 else html.rfind("</body>")
+                    html = html[:i] + sec + html[i:] if i >= 0 else html + sec
+                return self.send(200, html)
+            if len(parts) == 3 and parts[0] == "exam" and parts[2].isdigit() and int(parts[2]) in exams(parts[1]):
+                data = (KNOW / parts[1] / "exams" / f"v{parts[2]}.json").read_text(encoding="utf-8")
+                json.loads(data)      # refuse to serve a broken file
+                # every "<" as \u003c: no "</script" and no "<!--<script" (double-escaped state) can end the data block
+                safe = data.replace("<", "\\u003c")
+                runner = (KIT / "exam.html").read_text(encoding="utf-8")
+                return self.send(200, runner.replace("/*EXAM_DATA*/", safe))
+            return self.send(404, "not found", "text/plain")
+
+        def do_POST(self):
+            last[0] = time.time()
+            if not self.own_host() or not self.same_origin():
+                return self.send(403, "cross-origin", "text/plain")
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self.send(400, "bad length", "text/plain")
+            if n < 0 or n > 256_000:
+                return self.send(413, "too large", "text/plain")
+            body = self.rfile.read(n)
+            if self.path == "/api/stop":
+                self.send(200, "bye", "text/plain")
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+                return
+            if self.path != "/api/result":
+                return self.send(404, "not found", "text/plain")
+            try:
+                r = json.loads(body)
+            except ValueError:
+                return self.send(400, "bad json", "text/plain")
+            if not valid_result(r):
+                return self.send(400, "bad result", "text/plain")
+            r["logged"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            EXAM_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with log_lock, open(EXAM_LOG, "a") as f:
+                f.write(json.dumps(r, separators=(",", ":")) + "\n")
+            return self.send(200, '{"ok":true}', "application/json")
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), H)
+    if print_port:
+        print(srv.server_port, flush=True)
+    else:
+        print(f"serving {server_url(srv.server_port)} (stops after {idle // 60} min idle)", flush=True)
+
+    def reaper():
+        while True:
+            time.sleep(min(30, idle))
+            if time.time() - last[0] > idle:
+                srv.shutdown()
+                return
+    threading.Thread(target=reaper, daemon=True).start()
+    srv.serve_forever()
+    return 0
+
+
+def cmd_stop():
+    import urllib.request
+    if not server_alive():
+        print("not running")
+        return 0
+    req = urllib.request.Request(server_url() + "/api/stop", data=b"", method="POST")
+    urllib.request.urlopen(req, timeout=2).read()
+    print("stopped")
     return 0
 
 
@@ -101,9 +407,30 @@ def cmd_stamp(topic, name=None):
     if not page(topic).is_file():
         print(f"no page at {page(topic)}")
         return 1
-    m = {"brief": brief_hash(topic), "title": name or meta(topic).get("title") or topic}
+    m = {"brief": brief_hash(topic), "kit": page_kit(topic), "title": name or meta(topic).get("title") or topic}
     (CACHE / f"{topic}.meta.json").write_text(json.dumps(m) + "\n")
     print(f"stamped {topic} ({m['brief'] or 'no brief'})")
+    return 0
+
+
+def cmd_assemble(topic, src):
+    src = pathlib.Path(src).expanduser().resolve()
+    html = src.read_text(encoding="utf-8")
+    markers = ("<!-- teach-kit:css -->", "<!-- teach-kit:js -->")
+    missing = [m for m in markers if html.count(m) != 1]
+    if missing:
+        print(f"{src}: needs exactly one of each marker: {', '.join(missing)}")
+        return 1
+    css = (KIT / "kit.css").read_text(encoding="utf-8")
+    js = (KIT / "kit.js").read_text(encoding="utf-8").replace("</script", "<\\/script")
+    out = html.replace(markers[0], f'<meta name="teach-kit" content="{kit_hash()}">\n<style>\n{css}</style>')
+    out = out.replace(markers[1], f"<script>\n{js}</script>")
+    page(topic).write_text(out, encoding="utf-8")
+    keep = CACHE / "src" / f"{topic}.html"
+    keep.parent.mkdir(parents=True, exist_ok=True)
+    if keep.resolve() != src:
+        keep.write_text(html, encoding="utf-8")
+    print(page(topic))
     return 0
 
 
@@ -112,15 +439,26 @@ def main(argv):
     if not argv or argv[0] == "list":
         cmd_list()
         return 0
-    if len(argv) < 2 or argv[0] not in ("path", "open", "stamp"):
+    if argv[0] == "serve":
+        return cmd_serve("--print-port" in argv)
+    if argv[0] == "stop":
+        return cmd_stop()
+    if len(argv) < 2 or argv[0] not in ("path", "open", "stamp", "assemble", "exam"):
         print(__doc__)
         return 2
-    topic = argv[1].strip().lower().replace(" ", "-")
+    topic = argv[1].strip().lower().replace(" ", "-").replace("_", "-")
+    if argv[0] == "exam":
+        return cmd_exam(topic, int(argv[2]) if len(argv) > 2 and argv[2].isdigit() else None)
     if argv[0] == "path":
         print(page(topic))
         return 0
     if argv[0] == "open":
         return cmd_open(topic, "--anyway" in argv)
+    if argv[0] == "assemble":
+        if len(argv) != 3:
+            print("usage: bin/learn assemble <topic> <src.html>")
+            return 2
+        return cmd_assemble(topic, argv[2])
     return cmd_stamp(topic, " ".join(argv[2:]) or None)
 
 

@@ -1,0 +1,678 @@
+{
+  "topic": "aws",
+  "variant": 3,
+  "of": 5,
+  "title": "AWS for Node backends — variant 3",
+  "description": "Leans on media and gaming workloads: leases and heartbeats, retry jitter, idempotency states, hot indexes, SDK budgets and multi-Region routing.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "delivery",
+      "name": "Delivery, retries and failure routing (SQS, Lambda, EventBridge, Step Functions)",
+      "weight": 0.3
+    },
+    {
+      "id": "dynamo",
+      "name": "DynamoDB keys, hot partitions and conditional writes",
+      "weight": 0.25
+    },
+    {
+      "id": "sdk",
+      "name": "SDK clients, timeouts, throttling and partial failures",
+      "weight": 0.2
+    },
+    {
+      "id": "storage",
+      "name": "S3 uploads and object integrity",
+      "weight": 0.1
+    },
+    {
+      "id": "region",
+      "name": "Multi-region and failover",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "aws-v3-q01",
+      "domain": "delivery",
+      "stem": "A podcast platform transcribes episodes from an SQS queue with a Lambda consumer. The transcription vendor returns `429` a few times an hour for 10–20 seconds. The queue's redrive policy has `maxReceiveCount: 1`, chosen 'so nothing is processed twice'. On-call is paged daily for DLQ messages that succeed when redriven by hand. Which configuration fits?",
+      "options": [
+        {
+          "text": "Keep `maxReceiveCount: 1` and add a Lambda retry loop with a 30 s sleep inside the handler.",
+          "correct": false,
+          "why": "Sleeping inside the function burns paid duration and must fit under the visibility timeout; it also doesn't stop duplicates."
+        },
+        {
+          "text": "Raise `maxReceiveCount` to 5 or more and make the handler idempotent on the episode id.",
+          "correct": true,
+          "why": "A short vendor throttle needs a few receives to clear; idempotency, not a receive count of 1, is what prevents double processing."
+        },
+        {
+          "text": "Remove the DLQ so failed messages stay on the queue until they succeed.",
+          "correct": false,
+          "why": "Without a DLQ a truly poison episode loops until retention expires (up to 14 days), hiding real failures."
+        },
+        {
+          "text": "Move to a FIFO queue, which retries in place and never moves messages to a DLQ.",
+          "correct": false,
+          "why": "FIFO queues use DLQs and receive counts the same way; ordering doesn't fix transient-failure handling."
+        }
+      ],
+      "explain": "`maxReceiveCount: 1` doesn't buy exactly-once; it turns every transient blip into a DLQ entry. Give transient failures several receives (AWS suggests 5 or more for Lambda) and get once-only effects from idempotent handlers.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q02",
+      "domain": "delivery",
+      "stem": "A video transcoding fleet on ECS long-polls an SQS queue. Jobs take 4 to 40 minutes depending on length. With a 45-minute visibility timeout, a crashed worker delays its job by 45 minutes, which breaks the 'published within 1 hour' promise. How should visibility be managed?",
+      "options": [
+        {
+          "text": "Set a 5-minute visibility timeout and have the worker extend it with `ChangeMessageVisibility` every few minutes while the job is alive.",
+          "correct": true,
+          "why": "A heartbeat keeps the lease short: a live worker keeps extending it, and a crashed one releases the job within minutes."
+        },
+        {
+          "text": "Lower the visibility timeout to 5 minutes and accept that long jobs run on two workers at once.",
+          "correct": false,
+          "why": "Parallel duplicate transcodes waste the most expensive resource and race on the output object."
+        },
+        {
+          "text": "Raise the timeout to 12 hours so long jobs never time out.",
+          "correct": false,
+          "why": "That makes the crash case worse: a dead worker now holds the job for 12 hours."
+        },
+        {
+          "text": "Delete the message as soon as the worker receives it, and track progress in a DynamoDB table that a sweeper process scans for stale jobs to requeue.",
+          "correct": false,
+          "why": "It works but rebuilds SQS's lease mechanism by hand, and a crash between delete and the table write loses the job."
+        }
+      ],
+      "explain": "A visibility timeout is a lease. For long, variable jobs, use a short lease plus a heartbeat (`ChangeMessageVisibility`) so a healthy worker keeps it and a dead one gives it back quickly.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q03",
+      "domain": "delivery",
+      "stem": "A Step Functions workflow (JSONPath) encodes a video, then publishes it. When `Encode` fails, the `Notify` state can't find `$.videoId` and the execution fails with a second, confusing error. Which change fixes it?",
+      "code": "\"Encode\": {\n  \"Type\": \"Task\",\n  \"Resource\": \"arn:aws:states:::lambda:invoke\",\n  \"Parameters\": { \"FunctionName\": \"encode\", \"Payload.$\": \"$\" },\n  \"Catch\": [{ \"ErrorEquals\": [\"States.ALL\"], \"Next\": \"Notify\" }],\n  \"Next\": \"Publish\"\n},\n\"Notify\": {\n  \"Type\": \"Task\",\n  \"Resource\": \"arn:aws:states:::lambda:invoke\",\n  \"Parameters\": { \"FunctionName\": \"notify\", \"Payload\": { \"videoId.$\": \"$.videoId\" } },\n  \"End\": true\n}",
+      "options": [
+        {
+          "text": "Add `ResultPath: \"$.error\"` to the `Catch` so the error is added to the input instead of replacing it.",
+          "correct": true,
+          "why": "Without `ResultPath`, a `Catch` writes the error output over the whole state input, so `videoId` is gone by the time `Notify` runs."
+        },
+        {
+          "text": "Change `ErrorEquals` to `[\"States.ALL\", \"States.TaskFailed\"]` so both kinds of error are caught.",
+          "correct": false,
+          "why": "`States.ALL` must appear alone and last; the problem is where the error is stored, not which errors are caught."
+        },
+        {
+          "text": "Add a `Retry` with `MaxAttempts: 3` and exponential backoff on `Encode`, so transient failures never reach the `Catch` at all.",
+          "correct": false,
+          "why": "Retries help transient failures, but a permanent failure still reaches the `Catch` and loses the input."
+        },
+        {
+          "text": "Pass `videoId` through a Lambda environment variable.",
+          "correct": false,
+          "why": "Environment variables are per function, not per execution; concurrent executions would overwrite each other."
+        }
+      ],
+      "explain": "In JSONPath state machines a `Catch` without `ResultPath` replaces the input with the error. Always set `ResultPath` (for example `$.error`) so compensation steps still have the data they need; in JSONata use `$states.errorOutput` with `Assign`.",
+      "refs": [
+        "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q04",
+      "domain": "delivery",
+      "stem": "A licensing service used by 2,000 concurrent Step Functions executions was down for 3 minutes. Each task has `Retry: [{ ErrorEquals: [\"Licensing.Unavailable\"], IntervalSeconds: 2, BackoffRate: 2, MaxAttempts: 6 }]`. When the service came back, it was knocked over again by waves of requests at regular intervals. Which change helps most?",
+      "options": [
+        {
+          "text": "Lower `BackoffRate` to 1 so retries are spread evenly over time.",
+          "correct": false,
+          "why": "A constant interval keeps all executions in lockstep; the waves stay, just at a fixed period."
+        },
+        {
+          "text": "Raise `MaxAttempts` to 20 so executions survive longer outages.",
+          "correct": false,
+          "why": "More attempts extend the storm without breaking the synchronisation that causes it."
+        },
+        {
+          "text": "Add `JitterStrategy: \"FULL\"` (and a `MaxDelaySeconds` cap) to the retrier.",
+          "correct": true,
+          "why": "The default jitter is `NONE`, so executions that failed together retry together. Full jitter spreads the retries out."
+        },
+        {
+          "text": "Put a `Wait` state of 60 seconds before every licensing call so the service always has time to recover between bursts of traffic.",
+          "correct": false,
+          "why": "It delays every execution, including healthy ones, and the retries after the wait are still synchronised."
+        }
+      ],
+      "explain": "Exponential backoff without jitter synchronises clients that failed at the same moment, so a recovering service sees retry waves. Step Functions' default `JitterStrategy` is `NONE`; set `FULL` and cap the delay.",
+      "refs": [
+        "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q05",
+      "domain": "delivery",
+      "stem": "A game studio promises 'match results processed within 5 minutes'. Results go through an SQS queue to a Lambda, with a DLQ after 5 receives. The current alarm is on `NumberOfMessagesSent`, and a stuck consumer went unnoticed for 2 hours. Which two alarms track the promise? (Choose two.)",
+      "options": [
+        {
+          "text": "`ApproximateAgeOfOldestMessage` on the main queue above a threshold below 5 minutes.",
+          "correct": true,
+          "why": "Age of the oldest message measures the lag users feel, regardless of volume."
+        },
+        {
+          "text": "`ApproximateNumberOfMessagesVisible` on the DLQ greater than 0.",
+          "correct": true,
+          "why": "Anything in the DLQ was not processed at all; it should page, not wait for a weekly review."
+        },
+        {
+          "text": "Average Lambda `Duration` above 1 minute.",
+          "correct": false,
+          "why": "Duration says how slow each batch is, not whether the queue is being drained; a stopped consumer has no duration at all."
+        },
+        {
+          "text": "`NumberOfEmptyReceives` on the main queue above 1,000.",
+          "correct": false,
+          "why": "Empty receives mean the queue is often empty, which is the healthy case."
+        },
+        {
+          "text": "`NumberOfMessagesSent` on the main queue below its weekly average.",
+          "correct": false,
+          "why": "That watches producers, not the consumer; a stuck consumer leaves sends unchanged."
+        }
+      ],
+      "explain": "Alarm on what the promise is about. For a latency promise on a queue, that's the age of the oldest message; for 'nothing lost', it's the DLQ depth. Volume metrics describe producers, not whether the work is done.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-available-cloudwatch-metrics.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q06",
+      "domain": "delivery",
+      "stem": "A Lambda sends 'your highlight reel is ready' emails from an SQS standard queue. It writes `{ id, status: 'COMPLETED' }` to an idempotency table after sending, and skips messages whose id is already there. Users still get duplicates when a message is delivered to two instances at once. Which idempotency design fixes it without risking lost emails?",
+      "options": [
+        {
+          "text": "Write `COMPLETED` first, then send, so a duplicate always sees the record and skips.",
+          "correct": false,
+          "why": "This turns duplicates into possible losses: a crash after the write and before the send means the email never goes out."
+        },
+        {
+          "text": "Claim with a conditional put of `IN_PROGRESS` plus an expiry slightly above the function timeout; on conflict, retry later if in progress or skip if completed.",
+          "correct": true,
+          "why": "The atomic claim stops concurrent duplicates; the expiry lets a crashed attempt be retried instead of blocking the id forever."
+        },
+        {
+          "text": "Claim with a conditional put of `IN_PROGRESS` that never expires, and mark it `COMPLETED` after sending.",
+          "correct": false,
+          "why": "Concurrent duplicates are stopped, but a crash mid-send leaves the id stuck in progress for good, so that email is silently never sent."
+        },
+        {
+          "text": "Use `ConsistentRead: true` on the idempotency check.",
+          "correct": false,
+          "why": "A consistent read still races with a concurrent delivery; only a conditional write is atomic."
+        }
+      ],
+      "explain": "Idempotency needs an atomic claim before the side effect, a state for 'in progress' with an expiry tied to the function timeout, and the stored result once done. This is the pattern Powertools' idempotency utility implements on DynamoDB.",
+      "refs": [
+        "https://docs.powertools.aws.dev/lambda/typescript/latest/features/idempotency/",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q07",
+      "domain": "dynamo",
+      "stem": "A mobile game shows a global top-100 leaderboard. Scores are stored per player, and a GSI with partition key `board = \"GLOBAL\"` and sort key `score` serves the top 100. At a tournament peak of 6,000 score updates/s, writes to the **players table** start throttling even though the table itself has spare capacity. Which design fixes it?",
+      "options": [
+        {
+          "text": "Raise the base table's write capacity so it can absorb the GSI's lag.",
+          "correct": false,
+          "why": "The base table has spare capacity already; the bottleneck is the single GSI partition key value."
+        },
+        {
+          "text": "Shard the GSI key (`GLOBAL#0..N-1`), query each shard's top 100 and merge, or keep the leaderboard in a sorted set outside DynamoDB.",
+          "correct": true,
+          "why": "All updates currently land on one GSI partition, whose throttling back-pressures base-table writes; sharding spreads them, and a merge of N small queries is cheap."
+        },
+        {
+          "text": "Change the GSI projection to `KEYS_ONLY` to reduce the write size per update.",
+          "correct": false,
+          "why": "Smaller items lower the cost per write a bit, but the write rate on one partition key value stays the same."
+        },
+        {
+          "text": "Make the GSI a local secondary index so it shares the base table's capacity.",
+          "correct": false,
+          "why": "An LSI must share the base table's partition key (player), so it can't sort all players together; and it can't be added to an existing table."
+        }
+      ],
+      "explain": "A GSI with a low-cardinality partition key is a hot partition, and GSI write throttling throttles the base table too. Shard index keys the same way you shard table keys, and merge on read.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.ThroughputConsiderations.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-sharding.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q08",
+      "domain": "dynamo",
+      "stem": "A streaming service logs plays with `pk = PLAYS#<yyyy-mm-dd>`, `sk = <timestamp>#<userId>` so analysts can query a day. At 25,000 plays/s at evening peak, most writes are throttled. Which key design keeps the daily query possible?",
+      "options": [
+        {
+          "text": "`pk = PLAYS#<yyyy-mm-dd>#<hour>`, which splits each day into 24 separate partitions that the analysts' daily query can fan out over in parallel.",
+          "correct": false,
+          "why": "Peak traffic all falls in the same hour, so the current hour is still one hot key."
+        },
+        {
+          "text": "Switch the sort key to `<userId>#<timestamp>` for better spread.",
+          "correct": false,
+          "why": "The sort key doesn't choose the partition; all writes for the day still share one partition key."
+        },
+        {
+          "text": "`pk = PLAYS#<date>#<n>` with n from 0 to a few dozen (for example a hash of `userId`), and a day query fans out over all n.",
+          "correct": true,
+          "why": "Suffix sharding spreads one day's writes over many partitions; the daily query becomes a parallel query per shard."
+        },
+        {
+          "text": "Move the plays to an on-demand table so it scales to 25,000 writes/s automatically.",
+          "correct": false,
+          "why": "On-demand raises the table's total, not the roughly 1,000 writes/s ceiling of a single partition key."
+        }
+      ],
+      "explain": "Time-based partition keys concentrate the present on one key. Add a calculated shard suffix sized to peak write rate / per-partition limit, and pay for it with a fan-out query on read.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-sharding.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q09",
+      "domain": "dynamo",
+      "stem": "A season-pass service grants a pass once per player. The code below was ported from SDK v2. Load tests show duplicate grant requests returning HTTP 500 instead of 200 'already granted', and error dashboards flood during retries. Why?",
+      "code": "try {\n  await ddb.send(new PutCommand({\n    TableName: \"passes\",\n    Item: { pk: `PASS#${season}#${playerId}`, grantedAt: Date.now() },\n    ConditionExpression: \"attribute_not_exists(pk)\",\n  }));\n  return { status: 200, body: \"granted\" };\n} catch (err: any) {\n  if (err.code === \"ConditionalCheckFailedException\") {\n    return { status: 200, body: \"already granted\" };\n  }\n  throw err;\n}",
+      "options": [
+        {
+          "text": "SDK v3 errors don't have `code`; match on `err.name` or `instanceof ConditionalCheckFailedException`.",
+          "correct": true,
+          "why": "In v3 the comparison is always false, so an expected condition failure is rethrown and becomes a 500."
+        },
+        {
+          "text": "`attribute_not_exists(pk)` is evaluated after the write, so duplicates get through and then fail.",
+          "correct": false,
+          "why": "Conditions are evaluated before the write, atomically; the duplicate is correctly rejected, just mishandled."
+        },
+        {
+          "text": "`PutCommand` from lib-dynamodb can't take a `ConditionExpression`; it needs the low-level `PutItemCommand` for conditional writes to work.",
+          "correct": false,
+          "why": "The DocumentClient passes conditions through; the issue is the error check."
+        },
+        {
+          "text": "DynamoDB returns HTTP 500 for condition failures, so the handler can't tell them apart.",
+          "correct": false,
+          "why": "Condition failures are 400-class errors with a specific name the code can match."
+        }
+      ],
+      "explain": "In SDK v3, service errors are classes: check `err.name` or `instanceof` the exported exception, never v2's `err.code`. An expected condition failure is a business outcome ('already done'), not a 500.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q10",
+      "domain": "dynamo",
+      "stem": "A purchase API records in-game purchases idempotently with a conditional put on `PURCHASE#<receiptId>`. On a condition failure it runs a `GetItem` to return the original result to the client. At launch peaks, a third of all reads on the table are these follow-up `GetItem`s. Which change removes them without weakening correctness?",
+      "options": [
+        {
+          "text": "Cache recent receipt ids in Lambda memory and skip the put when a receipt was seen.",
+          "correct": false,
+          "why": "Per-instance memory misses duplicates on other instances and after cold starts; correctness still needs the condition."
+        },
+        {
+          "text": "Pass `ReturnValuesOnConditionCheckFailure: \"ALL_OLD\"` and read the stored item from the error.",
+          "correct": true,
+          "why": "The failed condition returns the existing item in the error (`err.Item`, in raw attribute-value form), so no second request is needed."
+        },
+        {
+          "text": "Switch to `UpdateItem` with `ReturnValues: \"ALL_NEW\"`, so the latest item comes back on every write whether or not it existed before.",
+          "correct": false,
+          "why": "An unconditional update overwrites the original purchase; adding the condition back brings you to the same failure path."
+        },
+        {
+          "text": "Read with `GetItem` before the put and skip the put if found.",
+          "correct": false,
+          "why": "That adds a read to every purchase instead of to duplicates, and the read-then-write still races."
+        }
+      ],
+      "explain": "Conditional writes can return the conflicting item on failure (`ReturnValuesOnConditionCheckFailure: ALL_OLD`). Note it arrives as raw AttributeValues even through the DocumentClient, so `unmarshall()` it.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_PutItem.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q11",
+      "domain": "dynamo",
+      "stem": "A wallet service stores in-game coin balances as numbers. After a whale account passed 2^53 coins, `GET /wallet` started returning 500 with `TypeError: Do not know how to serialize a BigInt`, while small accounts work. The read goes through a default `DynamoDBDocumentClient`. Which fix keeps every balance exact?",
+      "options": [
+        {
+          "text": "Convert with `Number(item.balance)` before `JSON.stringify`.",
+          "correct": false,
+          "why": "Converting to a JS number silently rounds values above 2^53, trading a crash for wrong balances."
+        },
+        {
+          "text": "Use `unmarshallOptions: { wrapNumbers: true }` (or store balances as strings) and serialise the exact decimal string.",
+          "correct": true,
+          "why": "Wrapped numbers keep DynamoDB's exact decimal text, so large integers and precise decimals survive to the API response."
+        },
+        {
+          "text": "Add `removeUndefinedValues: true` to the marshall options.",
+          "correct": false,
+          "why": "That option prevents writes with `undefined` fields from throwing; it doesn't affect number reads."
+        },
+        {
+          "text": "Move the balance to a DynamoDB `Binary` attribute so the SDK never has to interpret it as a JavaScript number when reading.",
+          "correct": false,
+          "why": "It works mechanically but loses atomic `ADD` updates and readable data for no reason when strings or wrapped numbers do the job."
+        }
+      ],
+      "explain": "Current lib-dynamodb returns integers above `Number.MAX_SAFE_INTEGER` as `bigint`, which `JSON.stringify` can't handle, and silently rounds high-precision decimals. Money and big ids should use `wrapNumbers` or string storage end to end.",
+      "refs": [
+        "https://github.com/aws/aws-sdk-js-v3/tree/main/lib/lib-dynamodb#configuration---marshall-and-unmarshall-options"
+      ]
+    },
+    {
+      "id": "aws-v3-q12",
+      "domain": "sdk",
+      "stem": "During a partial DynamoDB outage, a matchmaking service's logs show that after the first minute the SDK stopped retrying and failed requests immediately, even though `maxAttempts` is 5 (standard retry mode). An engineer proposes a custom retry wrapper to force all 5 attempts. How should you respond?",
+      "options": [
+        {
+          "text": "Agree, because standard mode is meant to always use every attempt and this looks like an SDK bug.",
+          "correct": false,
+          "why": "Standard mode deliberately stops retrying when its retry quota is drained; the behaviour is by design."
+        },
+        {
+          "text": "Agree, but use a fixed 1 s delay in the wrapper to keep it gentle.",
+          "correct": false,
+          "why": "A wrapper reintroduces the retry amplification the quota prevents, and fixed delays synchronise clients."
+        },
+        {
+          "text": "Plug in a custom `RetryStrategy` with no retry quota so every attempt is used.",
+          "correct": false,
+          "why": "Possible in JS SDK v3, but it removes the load-shedding exactly during the kind of outage the quota exists for."
+        },
+        {
+          "text": "Decline: standard mode's retry quota stops retries once many fail, which keeps a struggling dependency from a retry storm; fail fast and degrade instead.",
+          "correct": true,
+          "why": "The quota (a token bucket) is a circuit breaker built into the SDK; overriding it turns a partial outage into a full one."
+        }
+      ],
+      "explain": "The SDK's standard retry mode has a retry quota: when many attempts fail, it stops retrying and fails fast until successes refill it. That is a load-shedding feature. Design graceful degradation around it instead of fighting it.",
+      "refs": [
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q13",
+      "domain": "sdk",
+      "stem": "A Lambda (timeout 10 s) consumes SQS and writes a match result to DynamoDB, then updates player stats. The DynamoDB client uses `maxAttempts: 5` with `requestTimeout: 3000, throwOnRequestTimeout: true`. During throttling, some invocations time out after the first write succeeded; the message retries and stats are applied twice. Which change addresses the cause?",
+      "options": [
+        {
+          "text": "Raise the Lambda timeout to 15 minutes so the retries always have time to finish.",
+          "correct": false,
+          "why": "It hides the budget mismatch, and a 15-minute timeout requires a visibility timeout over 90 minutes, delaying every real failure."
+        },
+        {
+          "text": "Keep the SDK's total retry budget under the remaining invocation time (deadline from `context.getRemainingTimeInMillis()`), and make the stats update idempotent per match.",
+          "correct": true,
+          "why": "When the SDK budget fits inside the invocation, failures surface as errors you can handle; idempotent stats make the inevitable redelivery harmless."
+        },
+        {
+          "text": "Set `maxAttempts: 1` so the SDK never retries.",
+          "correct": false,
+          "why": "It avoids the timeout, but transient throttles become message retries, and the double-apply on redelivery remains."
+        },
+        {
+          "text": "Raise batch size so fewer invocations hit throttling.",
+          "correct": false,
+          "why": "Bigger batches take longer per invocation, which makes the timeout problem worse."
+        }
+      ],
+      "explain": "A function that times out is killed mid-flight, after some side effects. Size SDK retries and timeouts from the remaining invocation time, and make every step idempotent because the queue will redeliver.",
+      "refs": [
+        "https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q14",
+      "domain": "sdk",
+      "stem": "A notification fan-out service sends push jobs with `SendMessageBatch` in groups of 10. Players in one region report missing notifications during evening peaks. The code awaits each `send()` and logs any thrown error, and the logs are clean. Which change fixes the gap?",
+      "options": [
+        {
+          "text": "Read `Failed[]` in each response and resend only those entries by `Id`, with backoff.",
+          "correct": true,
+          "why": "`SendMessageBatch` returns 200 with a `Failed` list; the code never looks at it."
+        },
+        {
+          "text": "Switch to `SendMessage` per notification for clearer errors.",
+          "correct": false,
+          "why": "Single sends do throw on failure, but at ten times the requests and cost; reading `Failed[]` fixes it while keeping batching."
+        },
+        {
+          "text": "Enable long polling on the queue so messages aren't lost.",
+          "correct": false,
+          "why": "Long polling affects how consumers receive, not whether producer sends succeeded."
+        },
+        {
+          "text": "Use a FIFO queue, because SQS then guarantees that every message in a batch is accepted together or the whole call fails.",
+          "correct": false,
+          "why": "FIFO batches report per-entry failures exactly like standard ones."
+        }
+      ],
+      "explain": "A resolved promise from a batch API only means the request was processed. Look at the per-entry result (`Failed`, `UnprocessedItems`, `FailedEntryCount`) and retry only what failed.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessageBatch.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q15",
+      "domain": "sdk",
+      "stem": "A game stats API on ECS Fargate (Node 24) handles 3,000 req/s per task, each making 2–3 DynamoDB calls through one shared client. Logs show `socket usage at capacity=50` warnings and latency grows while DynamoDB's own latency is flat. Which change fits?",
+      "options": [
+        {
+          "text": "Create a new `DynamoDBClient` per request so each request gets its own sockets.",
+          "correct": false,
+          "why": "It avoids the shared pool but pays client construction and TLS per request, which is far slower and leaks sockets."
+        },
+        {
+          "text": "Raise `maxSockets` on the client's HTTP agent to match the concurrency each task needs.",
+          "correct": true,
+          "why": "The default Node handler caps the agent at 50 sockets; requests beyond that queue inside the process, which is the latency being seen."
+        },
+        {
+          "text": "Turn off HTTP keep-alive so sockets are released immediately after each request.",
+          "correct": false,
+          "why": "Without keep-alive every request opens a new TLS connection; latency and CPU go up."
+        },
+        {
+          "text": "Increase the ECS task's CPU allocation so the extra queued requests are processed faster.",
+          "correct": false,
+          "why": "The queue is waiting for a free socket, not for CPU."
+        }
+      ],
+      "explain": "SDK v3's Node HTTP handler limits concurrent sockets per client (50 by default) and queues requests beyond that. High-concurrency services should size `maxSockets` to expected in-flight calls and watch for the capacity warning. `socketAcquisitionWarningTimeout` only controls when that warning fires; it does not add capacity.",
+      "refs": [
+        "https://github.com/smithy-lang/smithy-typescript/tree/main/packages/node-http-handler"
+      ]
+    },
+    {
+      "id": "aws-v3-q16",
+      "domain": "storage",
+      "stem": "A video-on-demand service emails customers presigned GET links to download purchases, with `expiresIn` of 7 days. The URLs are generated in a Lambda using its execution role. Customers report links failing within hours. Which change makes links last a week?",
+      "options": [
+        {
+          "text": "Raise `expiresIn` to 14 days to add headroom.",
+          "correct": false,
+          "why": "Presigned URLs can't exceed 7 days with SigV4, and the real limit here is the credential lifetime."
+        },
+        {
+          "text": "Sign with credentials that outlive the week, or link to your own endpoint that re-signs on click.",
+          "correct": true,
+          "why": "A URL signed with temporary role credentials dies when that session expires, whatever `expiresIn` says."
+        },
+        {
+          "text": "Set `X-Amz-Expires` manually in the URL after signing.",
+          "correct": false,
+          "why": "Changing a signed parameter breaks the signature, so S3 rejects the request."
+        },
+        {
+          "text": "Make the bucket public-read and rely on unguessable keys so links never expire and need no signing.",
+          "correct": false,
+          "why": "That removes access control from paid content; anyone with or guessing the key can share it forever."
+        }
+      ],
+      "explain": "A presigned URL is valid until the earlier of `expiresIn` (max 7 days) and the expiry of the credentials that signed it. For long-lived links, re-sign on demand from an endpoint you control.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q17",
+      "domain": "storage",
+      "stem": "Uploading a channel avatar writes `avatars/<userId>.png` to S3, and an S3 event notification triggers a Lambda that writes a thumbnail. Users who change avatars twice within seconds sometimes end up with the thumbnail of the *older* image. Which fix is correct?",
+      "options": [
+        {
+          "text": "Enable S3 versioning on the bucket so the Lambda can always fetch the latest version of the avatar instead of the one in the event.",
+          "correct": false,
+          "why": "Versioning keeps history, but the Lambda still processes events in whatever order they arrive."
+        },
+        {
+          "text": "Add a 10-second delay before processing each event.",
+          "correct": false,
+          "why": "Delays don't order events; a slow or retried older event can still finish last."
+        },
+        {
+          "text": "Use FIFO SQS between S3 and Lambda so events are processed in order.",
+          "correct": false,
+          "why": "S3 event notifications can only target standard SQS queues, and the events may already be out of order when emitted."
+        },
+        {
+          "text": "Track each key's last `sequencer` and write the thumbnail only for a newer one, via a conditional write.",
+          "correct": true,
+          "why": "S3 notifications can arrive out of order or twice; the `sequencer` lets you order events for the same key and drop stale ones."
+        }
+      ],
+      "explain": "S3 event notifications are at-least-once and unordered. For the same key, compare the `sequencer` value (lexicographically after padding) and keep only the newest, using a conditional write so concurrent handlers can't race.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/notification-content-structure.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q18",
+      "domain": "region",
+      "stem": "A live-streaming control plane runs active-passive across two Regions. The current runbook for a regional outage is 'update the Route 53 records via the console to point at the standby'. In a game day, the console and APIs in the primary Region were slow and the change took 25 minutes. How should failover be triggered?",
+      "options": [
+        {
+          "text": "Write a Lambda in the primary Region that calls `ChangeResourceRecordSets` when an alarm fires.",
+          "correct": false,
+          "why": "Automation helps, but it runs in the failing Region and still depends on Route 53's control plane, both at risk during the event."
+        },
+        {
+          "text": "Raise the record TTL so clients keep working while the change propagates.",
+          "correct": false,
+          "why": "A longer TTL slows failover further; clients keep the old answer longer."
+        },
+        {
+          "text": "Use Route 53 health checks or ARC routing controls, which flip traffic through the highly available data plane without editing records.",
+          "correct": true,
+          "why": "Health-check and routing-control states are evaluated by Route 53's data plane, which is designed to keep working when a control plane is impaired."
+        },
+        {
+          "text": "Keep both Regions' IPs in one simple record so clients pick whichever one answers.",
+          "correct": false,
+          "why": "Clients aren't required to try the second IP, and many retry the same one; the dead Region keeps getting traffic."
+        }
+      ],
+      "explain": "Fail over with data-plane mechanisms (health checks, ARC routing controls) that are set up in advance, not with control-plane edits during the incident. Control planes are the parts most likely to be degraded when you need them.",
+      "refs": [
+        "https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route53-recovery.html",
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-how-route-53-chooses-records.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q19",
+      "domain": "region",
+      "stem": "A video platform keeps thumbnails in S3 buckets in two Regions with replication both ways. Apps hard-code a regional bucket name, and a Region failover needs an app release. The team wants one endpoint that sends requests to the nearest bucket and can be failed over in minutes. Which approach fits?",
+      "options": [
+        {
+          "text": "An S3 Multi-Region Access Point over the two replicated buckets, with failover controls for active-passive switching.",
+          "correct": true,
+          "why": "A Multi-Region Access Point gives one global endpoint routed to the closest bucket, and its failover controls move traffic without app changes."
+        },
+        {
+          "text": "A Route 53 CNAME pointing at one bucket's regional endpoint, edited during failover.",
+          "correct": false,
+          "why": "S3 requests are signed for a specific bucket and Region, so swapping the DNS target breaks signing; it also relies on a control-plane edit."
+        },
+        {
+          "text": "Keep hard-coded buckets and ship config through a feature flag that the apps poll every few minutes.",
+          "correct": false,
+          "why": "It can work, but every client needs code to switch, and failover speed depends on each app polling."
+        },
+        {
+          "text": "Enable S3 Transfer Acceleration on both buckets so each request reaches the nearest edge location.",
+          "correct": false,
+          "why": "Acceleration speeds transfers to one bucket; it doesn't route between buckets or fail over."
+        }
+      ],
+      "explain": "For multi-Region object storage, put the routing in AWS (Multi-Region Access Points over replicated buckets) instead of in every client. Replication supplies the data; the access point supplies the single endpoint and failover.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/replication-time-control.html"
+      ]
+    },
+    {
+      "id": "aws-v3-q20",
+      "domain": "region",
+      "stem": "A multiplayer game keeps player profiles in a DynamoDB global table (eventual consistency) across three Regions. Players connect to the nearest Region but sometimes reconnect elsewhere. Profiles are read often and written a few times per session. Which two design decisions follow from how the table replicates? (Choose two.)",
+      "options": [
+        {
+          "text": "Concurrent updates to the same profile in two Regions resolve by last writer wins, so route a player's writes to one home Region.",
+          "correct": true,
+          "why": "Global tables in eventual-consistency mode resolve conflicts per item by last writer wins; one writer per item avoids silent lost updates."
+        },
+        {
+          "text": "A read in a non-home Region can be stale for a moment, so read from the home Region when the player must see their own change.",
+          "correct": true,
+          "why": "Replication is asynchronous, usually under a second; read-your-write needs the Region that took the write."
+        },
+        {
+          "text": "Use `TransactWriteItems` so updates commit atomically in all three Regions.",
+          "correct": false,
+          "why": "Transactions are atomic only within the Region where they run; replicas receive the changes later."
+        },
+        {
+          "text": "Use `ConsistentRead: true` to get the globally latest profile from any Region.",
+          "correct": false,
+          "why": "In eventual-consistency mode a strongly consistent read reflects only the local replica."
+        },
+        {
+          "text": "Add a condition expression on `version` so concurrent cross-Region updates are rejected instead of overwritten.",
+          "correct": false,
+          "why": "Conditions are checked against the local replica only, so two Regions can both pass and then last writer wins."
+        }
+      ],
+      "explain": "Eventual-consistency global tables give local, fast reads and writes with last-writer-wins conflicts. Make writes single-homed per item and route read-your-write traffic to the home Region; everything else can read locally.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html"
+      ]
+    }
+  ]
+}

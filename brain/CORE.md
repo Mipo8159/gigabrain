@@ -36,13 +36,12 @@ old one has to earn its place or leave.
 
 ## How every task runs (the "Track 0" defaults)
 
-- **Say how "done" will be proven, first.** Before building, name the proof (a
-  test, a curl, a script). Finish by showing that proof, not by claiming it.
+- **Name the proof first; for a bug, the proof is a failing reproduction.**
+  Before building, say what will prove "done" (a test, a curl, a script); before
+  fixing, reproduce (expected vs actual, guess, smallest fix; skill
+  `debug-protocol`). Finish by showing the proof. A fix is *plausible* until a
+  rerun proves it; only then say "confirmed" (hence the `verifier` agent).
 - **Plan before changing several files.** Show the plan, then build.
-- **Debug by reproducing first.** Write expected versus actual, then a guess at
-  the cause, then the smallest fix, then the proof. Use skill `debug-protocol`.
-  A diagnosis or fix is *plausible* until a rerun proves it; only then say
-  "confirmed" (the `verifier` agent exists because that word came too early).
 - **Check versions against live docs** (context7 or the web), not memory.
 - **Second pass before handover.** If a diff is over ~100 lines, or touches
   auth, money, data or infrastructure, run the `reviewer` subagent **in the

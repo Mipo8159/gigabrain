@@ -1,0 +1,606 @@
+{
+  "topic": "distributed-systems",
+  "variant": 3,
+  "of": 5,
+  "title": "Distributed systems at scale — variant 3",
+  "description": "Uniqueness, sloppy quorums, conflict merging, whale tenants, leases, consumer offsets, pivot steps, tail latency and staged rollouts.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "consistency",
+      "name": "Consistency, replication and quorums",
+      "weight": 0.2
+    },
+    {
+      "id": "partitioning",
+      "name": "Partitioning, consensus and clocks",
+      "weight": 0.2
+    },
+    {
+      "id": "effects",
+      "name": "Idempotency, outbox and sagas",
+      "weight": 0.2
+    },
+    {
+      "id": "overload",
+      "name": "Timeouts, retries, breakers and load shedding",
+      "weight": 0.25
+    },
+    {
+      "id": "regions",
+      "name": "Multi-region, cells and blast radius",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "distributed-systems-v3-q01",
+      "domain": "consistency",
+      "stem": "A gaming platform lets players claim unique gamertags. The signup service checks `SELECT 1 FROM tags WHERE tag = $1` on a read replica, then inserts on the primary if the replica says the tag is free. During a launch-day rush, 312 tags ended up owned by two players. What change guarantees uniqueness?",
+      "options": [
+        {
+          "text": "Run the availability check on the primary instead of the replica, so the check always sees every committed tag.",
+          "correct": false,
+          "why": "It removes replica lag, but two concurrent signups can still both see 'free' before either inserts, so the race stays."
+        },
+        {
+          "text": "Put a unique constraint on `tag` and treat a conflict on insert as 'taken'.",
+          "correct": true,
+          "why": "The primary enforces uniqueness atomically at write time, so exactly one concurrent claim wins and the others get a clean conflict."
+        },
+        {
+          "text": "Run a nightly job that finds duplicate tags and renames the newer owner's tag.",
+          "correct": false,
+          "why": "It eventually restores uniqueness, but players live with duplicates for a day and then lose a name they were told was theirs."
+        },
+        {
+          "text": "Keep a Bloom filter of taken tags in every pod and check it before inserting.",
+          "correct": false,
+          "why": "A Bloom filter can say 'maybe taken', but each pod's copy is stale and two pods can both see 'free', so it can't enforce anything."
+        }
+      ],
+      "explain": "Uniqueness is a linearizable decision: it must be made atomically by a single authority at write time. A check-then-insert, on a replica or even on the primary, races. Let the store enforce it (a unique constraint or a conditional put) and handle the conflict as a normal outcome."
+    },
+    {
+      "id": "distributed-systems-v3-q02",
+      "domain": "consistency",
+      "stem": "A Dynamo-style store runs with N = 3, W = 2, R = 2 and **sloppy quorums** with hinted handoff enabled. During a rack partition, writes to some keys were acknowledged by fallback nodes outside the keys' home replicas. Reads on the main side then returned old account balances. For the balances table, which setting matches 'never read an older balance than an acknowledged write'?",
+      "options": [
+        {
+          "text": "Raise R to 3 so every read contacts all of the replicas and always finds the newest value.",
+          "correct": false,
+          "why": "It tightens reads, but writes held on fallback nodes still aren't on any home replica, so even R = 3 can miss them, and reads fail with one node down."
+        },
+        {
+          "text": "Speed up hinted handoff so fallback nodes return writes within seconds.",
+          "correct": false,
+          "why": "It shrinks the window, but until handoff completes, reads on the home replicas still miss acknowledged writes."
+        },
+        {
+          "text": "Use strict quorums for this table, accepting failed writes during a partition.",
+          "correct": true,
+          "why": "Only home replicas count towards W and R, so W + R > N really guarantees overlap, at the price of availability during partitions."
+        },
+        {
+          "text": "Turn on read repair so stale replicas are fixed the next time a key is read.",
+          "correct": false,
+          "why": "Read repair fixes replicas it reaches, but it cannot repair from a write that sits on a fallback node the read doesn't reach."
+        }
+      ],
+      "explain": "W + R > N guarantees overlap only for strict quorums over a key's home replicas. Sloppy quorums keep writes available during partitions by counting other nodes, which breaks the overlap until hinted handoff runs. Choose per table: strict for data with invariants, sloppy where availability matters more."
+    },
+    {
+      "id": "distributed-systems-v3-q03",
+      "domain": "consistency",
+      "stem": "A recruiting app writes jobs to Postgres, and a CDC pipeline indexes them into OpenSearch within about 2 s. Recruiters complain that a job they just posted is missing from the search results page they are redirected to. Everyone else is fine with a few seconds of delay. What should the team do?",
+      "options": [
+        {
+          "text": "Write to OpenSearch synchronously inside the request, in addition to Postgres, so search is current when the request returns.",
+          "correct": false,
+          "why": "The search page would be current, but it adds a dual write: a failure between the two writes leaves Postgres and the index disagreeing, with nothing to repair it."
+        },
+        {
+          "text": "Redirect the recruiter to the job's detail page, read from Postgres, and accept the index lag for search.",
+          "correct": true,
+          "why": "The writer sees their write from the source of truth, while search stays eventually consistent and fed by CDC."
+        },
+        {
+          "text": "Force an index refresh on every write so new documents are searchable at once.",
+          "correct": false,
+          "why": "Per-write refreshes create many tiny segments and hurt indexing throughput, and the CDC delay before the write arrives still remains."
+        },
+        {
+          "text": "Make the search page poll every 500 ms until the job appears.",
+          "correct": false,
+          "why": "It eventually shows the job, but it multiplies search load and leaves the recruiter on a spinner when the pipeline lags."
+        }
+      ],
+      "explain": "Derived views (search indexes, caches, read models) are eventually consistent by design. Give the writer read-your-writes from the source of truth, for example a detail page or the write's own response, rather than making the derived view synchronous, which brings back the dual-write problem."
+    },
+    {
+      "id": "distributed-systems-v3-q04",
+      "domain": "consistency",
+      "stem": "A grocery app stores shopping carts in a multi-leader store across two regions, with last-write-wins conflict resolution. A shopper adds milk on their phone (region A) and eggs on a laptop (region B) within a second, and the cart ends up with only one of them. Losing a removed item is fine; losing an added item costs sales. How should carts be stored?",
+      "options": [
+        {
+          "text": "Keep last-write-wins, but synchronise clocks more tightly with PTP.",
+          "correct": false,
+          "why": "Better clocks pick the 'right' winner more often, but two concurrent adds still produce one winner, so an item is still lost."
+        },
+        {
+          "text": "Move carts to a single-leader store in region A to avoid conflicts.",
+          "correct": false,
+          "why": "No conflicts, but region B users pay cross-region latency on every cart change, and carts become unavailable when A is cut off."
+        },
+        {
+          "text": "Take a distributed lock on the cart before each change.",
+          "correct": false,
+          "why": "A cross-region lock serialises changes, but it adds a round trip to every click and fails when the regions are partitioned."
+        },
+        {
+          "text": "Keep concurrent versions and merge them as a set union (add-wins).",
+          "correct": true,
+          "why": "Concurrent adds are both kept when the versions merge, which matches the business rule that added items must never vanish."
+        }
+      ],
+      "explain": "When conflicts are acceptable but losing data isn't, detect concurrency (version vectors) and merge with a rule the business agrees with: add-wins sets, counters, CRDTs. Last-write-wins is only right when dropping a concurrent update is genuinely fine."
+    },
+    {
+      "id": "distributed-systems-v3-q05",
+      "domain": "partitioning",
+      "stem": "A helpdesk SaaS shards Postgres by `hash(tenant_id)` across 16 shards. One enterprise tenant now produces 30% of all traffic, and its shard is at 95% CPU while the others idle near 20%. The tenant's queries are nearly always for one mailbox at a time. What should the team do?",
+      "options": [
+        {
+          "text": "Go from 16 to 64 shards with the same `hash(tenant_id)` function, which spreads tenants and their load more evenly.",
+          "correct": false,
+          "why": "It spreads the small tenants more thinly, but the whale still hashes to one shard, which stays saturated."
+        },
+        {
+          "text": "Give the whale its own shards, split by `(tenant_id, mailbox_id)`, via a tenant-to-shard directory.",
+          "correct": true,
+          "why": "The hot tenant spreads across several shards along the key its queries use, and the directory leaves the small tenants alone."
+        },
+        {
+          "text": "Shard every table by a random row id so load is uniform everywhere.",
+          "correct": false,
+          "why": "Load becomes uniform, but every tenant's queries now fan out to all shards, which loses tenant locality for everyone."
+        },
+        {
+          "text": "Move the whale's shard to an instance with four times the CPU.",
+          "correct": false,
+          "why": "It buys headroom, but one tenant growing further hits the ceiling again, and the largest instance is the end of the road."
+        }
+      ],
+      "explain": "Hash partitioning by tenant spreads tenants, not load within a tenant. Detect whales and give them dedicated capacity, partitioned by a finer key their queries use. A tenant-to-shard directory (instead of a pure hash) makes such special placements possible."
+    },
+    {
+      "id": "distributed-systems-v3-q06",
+      "domain": "partitioning",
+      "stem": "A cache cluster uses consistent hashing with **one** ring position per node across 10 nodes. Monitoring shows two nodes holding 3× the keys of others, and when a node was added it took load from a single neighbour only, leaving that neighbour's hotspot in place. Which change addresses both problems?",
+      "options": [
+        {
+          "text": "Switch to `hash(key) % N`, which spreads keys evenly across the nodes.",
+          "correct": false,
+          "why": "Spread becomes even, but every change in node count remaps most keys, which consistent hashing exists to avoid."
+        },
+        {
+          "text": "Use a larger hash space, 64-bit instead of 32-bit, for the ring.",
+          "correct": false,
+          "why": "A bigger space doesn't change how few positions each node has, so the arcs stay just as uneven."
+        },
+        {
+          "text": "Give each node many virtual positions on the ring, such as 256.",
+          "correct": true,
+          "why": "Many small arcs per node average out the imbalance, and a new node takes small slices from every node rather than a big one from a single neighbour."
+        },
+        {
+          "text": "Switch to range partitioning with manually chosen split points that an operator rebalances.",
+          "correct": false,
+          "why": "Manual splits can be balanced at first, but they need constant tuning, and cache keys are random, so range scans add nothing."
+        }
+      ],
+      "explain": "Consistent hashing with one point per node gives uneven arcs and lopsided rebalancing. Virtual nodes (many points per physical node, or fixed logical partitions) smooth the load statistically, and let a new node take a fair share from everyone."
+    },
+    {
+      "id": "distributed-systems-v3-q07",
+      "domain": "partitioning",
+      "stem": "A shard-ownership service grants 10-second leases. After a VM migration, NTP stepped one host's clock back by 40 minutes, and that host kept acting as shard owner long after its lease had been given to another host. Lease checks look like the code below. What should change?",
+      "code": "async function acquire() {\n  const lease = await coord.grant(shard, 10_000);\n  this.expiresAt = Date.now() + 10_000;\n}\n\nfunction isValid() {\n  return Date.now() < this.expiresAt;\n}",
+      "options": [
+        {
+          "text": "Have the coordinator return its own expiry time, and compare that with the local `Date.now()`.",
+          "correct": false,
+          "why": "It sounds more authoritative, but comparing a remote wall clock with a local one adds a second clock's skew."
+        },
+        {
+          "text": "Use the monotonic clock, start timing before sending `grant`, and subtract a safety margin.",
+          "correct": true,
+          "why": "A monotonic clock can't jump, and starting before the request means network delay shortens the lease instead of stretching it."
+        },
+        {
+          "text": "Configure NTP to slew instead of step, so the clock never jumps.",
+          "correct": false,
+          "why": "It avoids most jumps, but VM pauses, manual changes and leap handling still move wall time, and the lease logic stays wrong."
+        },
+        {
+          "text": "Call `isValid()` twice, before and after each write, and abort the write if either check fails.",
+          "correct": false,
+          "why": "Checking more often doesn't help when the clock itself is wrong, and a pause can still fall between the check and the write."
+        }
+      ],
+      "explain": "Measure durations with a monotonic clock (`performance.now()`, `process.hrtime.bigint()`), never with wall time. Treat a lease as a duration counted from before you asked for it, minus a margin. Even then a paused process can overrun its lease, so correctness still needs fencing at the resource."
+    },
+    {
+      "id": "distributed-systems-v3-q08",
+      "domain": "partitioning",
+      "stem": "A two-node Postgres HA pair uses a heartbeat: if the standby misses 3 heartbeats, it promotes itself. A switch fault cut the link between the nodes while both stayed up and reachable by clients, and both accepted writes. Which change prevents this?",
+      "options": [
+        {
+          "text": "Shorten the heartbeat interval so failures are detected faster.",
+          "correct": false,
+          "why": "Faster detection doesn't tell a dead peer from a broken link, so split brain just happens sooner."
+        },
+        {
+          "text": "Make the primary always win: the standby never promotes while the primary's IP answers pings.",
+          "correct": false,
+          "why": "It sounds decisive, but the standby pings over the same broken link, sees no answer and promotes anyway; and a hung primary that still answers pings would block every real failover."
+        },
+        {
+          "text": "Add a third voter (a witness) in a separate failure domain, and promote only with a majority.",
+          "correct": true,
+          "why": "Only the side that can reach a majority of 3 may hold the primary role, so the two nodes can't both win."
+        },
+        {
+          "text": "Have both nodes write to a shared SAN volume so there is only one copy of the data.",
+          "correct": false,
+          "why": "One copy avoids divergence, but two nodes writing the same volume without fencing corrupts it, which is worse than split brain."
+        }
+      ],
+      "explain": "Two nodes can't reach a safe decision during a partition: each sees the other as dead. Majority quorum needs an odd number of voters in independent failure domains (a cheap witness is enough), plus fencing so the losing side stops writing."
+    },
+    {
+      "id": "distributed-systems-v3-q09",
+      "domain": "effects",
+      "stem": "An invoicing consumer on Kafka 4 uses manual commits. After every deploy, the last invoice in each partition is generated twice, and during a node crash some invoices were never generated at all. Here is the handler. What fixes both problems?",
+      "code": "await consumer.run({\n  eachMessage: async ({ topic, partition, message }) => {\n    generateInvoice(message);              // returns a promise\n    await consumer.commitOffsets([{\n      topic, partition, offset: message.offset,\n    }]);\n  },\n});",
+      "options": [
+        {
+          "text": "Commit before calling `generateInvoice`, so a restart never reprocesses a message that was already handled.",
+          "correct": false,
+          "why": "It removes the duplicates, but it is at-most-once: a crash after the commit loses that invoice for good."
+        },
+        {
+          "text": "Await `generateInvoice`, then commit `offset + 1` (as a BigInt string).",
+          "correct": true,
+          "why": "The committed offset is the next message to read, and awaiting means only finished work is committed."
+        },
+        {
+          "text": "Switch to auto-commit every 1 s.",
+          "correct": false,
+          "why": "It removes the manual off-by-one, but auto-commit can commit offsets for invoices still being generated, so a crash can still lose them."
+        },
+        {
+          "text": "Keep the code and make `generateInvoice` idempotent on the invoice number.",
+          "correct": false,
+          "why": "It absorbs the duplicates, but un-awaited work committed before it finishes is still lost in a crash."
+        }
+      ],
+      "explain": "A Kafka committed offset means 'the next message to read', so commit `offset + 1`, and only after the effect is durable. Un-awaited handlers let commits run ahead of the work. Even with this fixed, delivery is at-least-once, so keep the effect idempotent."
+    },
+    {
+      "id": "distributed-systems-v3-q10",
+      "domain": "effects",
+      "stem": "A video-transcoding worker reads jobs from an SQS standard queue with the default 30-second visibility timeout. Transcodes take 20 s to 4 minutes. Long videos are transcoded two or three times by different workers, wasting GPU hours. What fixes this?",
+      "options": [
+        {
+          "text": "Switch to a FIFO queue with content-based deduplication so each job is processed only once.",
+          "correct": false,
+          "why": "FIFO deduplication drops duplicate *sends* within 5 minutes. A message not deleted before its visibility timeout is still delivered again."
+        },
+        {
+          "text": "Raise the queue's message retention period to 14 days.",
+          "correct": false,
+          "why": "Retention controls how long unprocessed messages are kept, not when an in-flight message becomes visible again."
+        },
+        {
+          "text": "Extend visibility while working (`ChangeMessageVisibility`), and keep the job idempotent.",
+          "correct": true,
+          "why": "A live worker keeps its message hidden however long the transcode takes, and idempotency covers a worker that dies mid-job."
+        },
+        {
+          "text": "Turn on long polling with a 20-second wait.",
+          "correct": false,
+          "why": "Long polling cuts empty receives and cost, but it has nothing to do with in-flight messages reappearing."
+        }
+      ],
+      "explain": "In a queue with visibility timeouts, a message becomes visible again if it isn't deleted in time, whether the worker died or is just slow. Size the timeout to the work, or extend it while working, and still make processing idempotent, because at-least-once delivery means duplicates will happen."
+    },
+    {
+      "id": "distributed-systems-v3-q11",
+      "domain": "effects",
+      "stem": "A furniture retailer's order saga has these steps: reserve stock, charge card, book a freight carrier (the carrier charges a fee and cannot cancel), then send a confirmation email. Last month cards were declined *after* freight was booked, and the retailer paid for 90 trucks it didn't need. How should the saga be arranged?",
+      "options": [
+        {
+          "text": "Book freight first, so the expensive step is locked in early.",
+          "correct": false,
+          "why": "It secures the truck, but it guarantees the fee is paid even when stock or payment then fails."
+        },
+        {
+          "text": "Compensate a freight booking by asking the carrier to cancel it, and retry until they accept.",
+          "correct": false,
+          "why": "It looks like a standard compensation, but the stem says the carrier cannot cancel, so the retries never succeed."
+        },
+        {
+          "text": "Use a two-phase commit with the bank and the carrier, so the card charge and the truck booking either both happen or neither does.",
+          "correct": false,
+          "why": "It would be atomic, but neither the card network nor the carrier takes part in 2PC."
+        },
+        {
+          "text": "Run reserve and charge before freight; after freight, only retry steps until they succeed.",
+          "correct": true,
+          "why": "Freight becomes the pivot: everything that can fail runs before it, and the email after it is retried rather than compensated."
+        }
+      ],
+      "explain": "Sagas have compensatable steps, a pivot (the point of no return) and retriable steps. Put the steps that can fail and be undone before the pivot, and after the pivot allow only steps that will succeed if retried. Place an irreversible external action at the pivot, never early."
+    },
+    {
+      "id": "distributed-systems-v3-q12",
+      "domain": "effects",
+      "stem": "A ledger consumer dedupes Kafka messages by `(partition, offset)` in its database. After the outbox relay crashed mid-batch and restarted, it republished 300 events, and the ledger booked them twice. Two different deposits of €50 from the same customer in one minute are common and both must count. What should the dedupe key be?",
+      "options": [
+        {
+          "text": "A hash of the event payload, since an identical payload must be the same event.",
+          "correct": false,
+          "why": "It catches republished copies, but two real €50 deposits have identical payloads, so a genuine deposit would be dropped."
+        },
+        {
+          "text": "An event id assigned when the outbox row is written, and carried in the message.",
+          "correct": true,
+          "why": "A republished event carries the same id, while two real deposits get different ids."
+        },
+        {
+          "text": "The broker's offset, combined with the consumer group name.",
+          "correct": false,
+          "why": "A republished event lands at a new offset, so the duplicate looks new, whatever group name is added."
+        },
+        {
+          "text": "Turn on `enable.idempotence` in the relay's producer so republishing can't create duplicates.",
+          "correct": false,
+          "why": "The idempotent producer only dedupes retries within one producer session; a relay that restarts and resends is a new send."
+        }
+      ],
+      "explain": "Dedupe on an identity the producer assigns to the logical event when it is created, stored with the outbox row and carried in the message. Broker positions change when you republish, and payload hashes merge distinct events that happen to look the same."
+    },
+    {
+      "id": "distributed-systems-v3-q13",
+      "domain": "overload",
+      "stem": "A 2-minute database failover at 14:00 caused errors. The database was healthy by 14:02, but the API kept failing at 70% until 14:45, when someone cut traffic at the load balancer. Clients retry failed calls up to 5 times with 100 ms fixed delays. Which change prevents this from recurring?",
+      "options": [
+        {
+          "text": "Scale the database up by two instance sizes so it has the headroom to absorb a recovery spike like this one.",
+          "correct": false,
+          "why": "More headroom raises the threshold, but at 5 retries per call a bigger outage can still push load past it and get stuck again."
+        },
+        {
+          "text": "Raise client timeouts so fewer requests fail and need a retry.",
+          "correct": false,
+          "why": "Fewer timeouts sounds good, but each request holds resources longer, so an overloaded server stays overloaded."
+        },
+        {
+          "text": "A client retry budget (retries ≤ 10% of requests) plus jittered, capped backoff.",
+          "correct": true,
+          "why": "When most calls fail, the budget runs out, so retry load collapses and the system can leave the overloaded state on its own."
+        },
+        {
+          "text": "Raise retries to 10 so clients outlast an outage of any length.",
+          "correct": false,
+          "why": "More attempts per request means more load during recovery, which is exactly what kept the system down."
+        }
+      ],
+      "explain": "This is a metastable failure: the trigger is gone, but retry load keeps the system overloaded. Bound retries in aggregate (a retry budget or token bucket), not just per request, and use backoff with jitter, so the extra load shrinks as the error rate rises."
+    },
+    {
+      "id": "distributed-systems-v3-q14",
+      "domain": "overload",
+      "stem": "A Node API calls a fraud-scoring service with the HTTP client's default 30 s timeout. Fraud scoring normally has p50 40 ms, p99 180 ms and p99.9 350 ms. When one fraud host hung last night, API requests piled up holding sockets and memory until the API itself fell over. What timeout should the API use?",
+      "options": [
+        {
+          "text": "40 ms, the median, so hung calls are cut off as early as possible.",
+          "correct": false,
+          "why": "Hung calls end quickly, but about half of all healthy calls now time out too, which fails users and multiplies load if those calls are retried."
+        },
+        {
+          "text": "No timeout; rely on TCP keepalive to detect the dead host.",
+          "correct": false,
+          "why": "Keepalive detects dead connections after minutes, and a host that accepts the connection but never answers can pass it forever."
+        },
+        {
+          "text": "Keep 30 s, and add more API instances to absorb the stuck requests.",
+          "correct": false,
+          "why": "More instances survive longer, but every one still fills up with requests waiting 30 s on a hung host."
+        },
+        {
+          "text": "About 400 ms: just above the p99.9 and within the API's own deadline.",
+          "correct": true,
+          "why": "Healthy calls almost never time out, and a hung host costs at most 400 ms per call instead of 30 s."
+        }
+      ],
+      "explain": "Set timeouts from the dependency's measured latency distribution: just above a high percentile (p99 or p99.9), which fixes the rate of false timeouts you accept, and always within the caller's remaining deadline. Library defaults of 30 s or 300 s are not a decision."
+    },
+    {
+      "id": "distributed-systems-v3-q15",
+      "domain": "overload",
+      "stem": "A product-search service reads from three identical replicas. Median latency is 15 ms, but p99 is 1.2 s, caused by whichever replica is in a GC pause or compaction. The reads are idempotent, and the replicas have 40% spare capacity. What reduces p99 at a modest load cost?",
+      "options": [
+        {
+          "text": "Send every read to all three replicas and use the first answer that comes back.",
+          "correct": false,
+          "why": "It cuts tail latency well, but it triples read load, which is far more than 40% spare capacity can take."
+        },
+        {
+          "text": "Hedge: if no reply arrives by the p95 (about 40 ms), send to a second replica, then cancel the loser.",
+          "correct": true,
+          "why": "Only about 5% of reads get a second copy, and those are exactly the slow ones, so the tail collapses for little extra load."
+        },
+        {
+          "text": "Retry the read on another replica after a 1 s timeout.",
+          "correct": false,
+          "why": "It eventually avoids the slow replica, but it only acts after a second has passed, so p99 stays around 1 s."
+        },
+        {
+          "text": "Hedge both reads and writes, so slow writes benefit too.",
+          "correct": false,
+          "why": "Hedging non-idempotent writes duplicates their effects; it is only safe for idempotent requests."
+        }
+      ],
+      "explain": "Hedged requests cut tail latency: after the expected p95, send a backup request to another replica and take whichever answers first. It costs only a few percent of extra load. Use it only for idempotent requests, cancel the loser, and cap hedging so it can't add to overload."
+    },
+    {
+      "id": "distributed-systems-v3-q16",
+      "domain": "overload",
+      "stem": "A Node 24 API behind an AWS Application Load Balancer (idle timeout 60 s) returns occasional 502s on quiet endpoints. Load-balancer logs show the target closed the connection just as a request was sent on it. The server uses Node's defaults (`keepAliveTimeout` 5,000 ms, `headersTimeout` 60,000 ms, `requestTimeout` 300,000 ms). Which two changes would each fix it on their own? (Choose two.)",
+      "options": [
+        {
+          "text": "Set `server.keepAliveTimeout` above the load balancer's idle timeout, for example 65,000 ms.",
+          "correct": true,
+          "why": "The load balancer then always closes idle connections first, so it never sends a request on a socket Node is closing. This is the usual fix, since it keeps connection reuse high (Node 24.6+ also adds `keepAliveTimeoutBuffer`, 1,000 ms by default, on top)."
+        },
+        {
+          "text": "Lower the load balancer's idle timeout below Node's keep-alive, for example to 4 s.",
+          "correct": true,
+          "why": "The load balancer then always closes idle connections first, so the race disappears too, at the cost of more connection setup between the load balancer and the targets."
+        },
+        {
+          "text": "Raise `server.requestTimeout` from 300,000 ms to 600,000 ms.",
+          "correct": false,
+          "why": "It limits how long a whole request may take; the 502s come from idle keep-alive connections closing, not slow requests."
+        },
+        {
+          "text": "Set `server.timeout = 0` to disable socket timeouts.",
+          "correct": false,
+          "why": "In Node 24 `server.timeout` already defaults to 0, so this changes nothing about the 5-second keep-alive close."
+        },
+        {
+          "text": "Have clients retry every 502, including POSTs.",
+          "correct": false,
+          "why": "It hides the symptom, but retrying non-idempotent POSTs can duplicate side effects, and the cause stays in place."
+        }
+      ],
+      "explain": "When two hops both keep idle connections open, the upstream one (the load balancer) must time out first, or it will sometimes send a request on a socket the downstream is closing. Node's default `keepAliveTimeout` of 5 s is far below a typical 60 s load-balancer idle timeout, so raise Node's or, less commonly, lower the load balancer's. Community guidance also keeps `headersTimeout` above `keepAliveTimeout`."
+    },
+    {
+      "id": "distributed-systems-v3-q17",
+      "domain": "overload",
+      "stem": "On Black Friday a retail API fleet runs at 160% of capacity. Its traffic is checkout (5%), cart (15%), browsing (40%) and analytics beacons (40%). Autoscaling needs 8 minutes to catch up. Revenue comes almost entirely from checkout and cart. What should the fleet do right now?",
+      "options": [
+        {
+          "text": "Rate-limit each client IP to 10 requests per second, the same limit for every endpoint.",
+          "correct": false,
+          "why": "It caps heavy clients, but it treats a checkout the same as a beacon, so paying customers get throttled with everyone else."
+        },
+        {
+          "text": "Queue every request in arrival order until capacity frees up, so nothing is ever dropped.",
+          "correct": false,
+          "why": "Nothing is dropped, but every request, checkout included, waits behind a growing queue and times out."
+        },
+        {
+          "text": "Classify requests at admission and shed beacons first, then browsing, keeping cart and checkout.",
+          "correct": true,
+          "why": "Dropping beacons alone removes 40% of load, so the fleet fits its capacity again, and revenue traffic is never shed."
+        },
+        {
+          "text": "Do nothing until autoscaling finishes, since shedding loses traffic.",
+          "correct": false,
+          "why": "Without shedding, 160% load makes everything slow or failing for 8 minutes, including checkout."
+        }
+      ],
+      "explain": "Load shedding should be prioritised: decide in advance which traffic is most valuable and shed the least valuable first, cheaply, at admission. Shedding a little low-value work keeps the important work fast while capacity catches up."
+    },
+    {
+      "id": "distributed-systems-v3-q18",
+      "domain": "regions",
+      "stem": "A payments platform runs 12 cells across two regions. A release with a bad database migration went to all 12 cells at once, and every merchant lost card processing for 35 minutes. Releases happen daily. What rollout should they adopt?",
+      "options": [
+        {
+          "text": "Release one cell first, bake with alarms watching, then roll out in growing waves with automatic rollback.",
+          "correct": true,
+          "why": "A bad release is caught while it affects one cell (about 8% of merchants), and alarms stop it before it spreads further."
+        },
+        {
+          "text": "Blue/green the whole fleet: stand up all 12 new cells, then flip traffic to them at once.",
+          "correct": false,
+          "why": "Blue/green makes rollback fast, but the flip still sends every merchant to the bad release at the same moment."
+        },
+        {
+          "text": "Roll out region by region, all six cells of a region at a time, with a bake period in between.",
+          "correct": false,
+          "why": "It is staged, but the first wave is half of all merchants, which is far more than needed to detect a bad release."
+        },
+        {
+          "text": "Add a larger integration test suite and require it to pass before every release.",
+          "correct": false,
+          "why": "Better tests catch more bugs, but some failures only show in production, and a global rollout still turns them into a global outage."
+        }
+      ],
+      "explain": "Cells only cap blast radius if changes reach them one at a time. Roll out code and config in waves (one cell, then a few, then the rest), with bake time and automated rollback on health signals, so production catches what tests miss while the damage stays small."
+    },
+    {
+      "id": "distributed-systems-v3-q19",
+      "domain": "regions",
+      "stem": "An HR SaaS must keep EU customers' employee data inside the EU (contractual data residency). It currently runs active-active in us-east and eu-west with full bidirectional replication and geo-DNS routing. EU employees often travel to the US. What design satisfies residency?",
+      "options": [
+        {
+          "text": "Keep full replication everywhere, but encrypt all data at rest with keys that are held only in the EU.",
+          "correct": false,
+          "why": "Encryption protects confidentiality, but the data is still stored in the US, which a residency clause forbids."
+        },
+        {
+          "text": "Pin EU tenants to an EU home cell, route by tenant not geo-IP, and replicate only within the EU.",
+          "correct": true,
+          "why": "The data never leaves the EU, and a travelling user is still routed to the tenant's EU home."
+        },
+        {
+          "text": "Keep geo-DNS, but turn off writes in us-east for EU users.",
+          "correct": false,
+          "why": "Writes stay in the EU, but replicas of EU data still sit in the US for reads, which breaks residency."
+        },
+        {
+          "text": "Replicate EU data to the US only as read replicas used for reporting.",
+          "correct": false,
+          "why": "Reporting gets easier, but read replicas are still copies stored in the US."
+        }
+      ],
+      "explain": "Data residency is a placement rule, so put it into routing: each tenant has a home cell in an allowed region, requests route by tenant identity (not client location), and replication and backups stay within the allowed set. Disaster recovery then uses a second region inside the same jurisdiction."
+    },
+    {
+      "id": "distributed-systems-v3-q20",
+      "domain": "regions",
+      "stem": "An e-commerce platform replicates its orders database asynchronously from us-east to us-west. Lag is usually 3 s but spikes to 60 s during batch jobs. The board now requires: 'a regional failover may never lose a confirmed order.' Order writes can tolerate about 70 ms of extra latency. What meets the requirement?",
+      "options": [
+        {
+          "text": "Upgrade the replica instance and network so the lag stays under 1 s at all times.",
+          "correct": false,
+          "why": "Lower lag means fewer lost orders, but async replication still confirms orders before the other region has them, so some can be lost."
+        },
+        {
+          "text": "Before failing over, wait until replication lag is 0.",
+          "correct": false,
+          "why": "When the primary region is down, you can't fetch what it never sent, so waiting either never ends or proves nothing."
+        },
+        {
+          "text": "Take hourly snapshots of the orders database and copy them to us-west.",
+          "correct": false,
+          "why": "Snapshots help disaster recovery, but they can lose up to an hour of orders."
+        },
+        {
+          "text": "Confirm an order only once it is durable in both regions.",
+          "correct": true,
+          "why": "A confirmed order then already exists in the surviving region, giving RPO 0, at the cost of the cross-region round trip on each order write."
+        }
+      ],
+      "explain": "Async replication means RPO > 0 by definition: the primary confirms before the replica has the data. If a class of data needs RPO 0, it must be committed synchronously (or by quorum) across failure domains before you confirm it. Pay that latency only for the data that needs it."
+    }
+  ]
+}

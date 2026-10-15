@@ -1,13 +1,26 @@
 #!/usr/bin/env node
-// Render check for a teaching page (skill `teach`). Usage: bin/check-lesson <page.html> (lessons live in ~/.cache/gigabrain/learn, see bin/learn) [--shots dir]
+// Render check for a teaching page (skill `teach`, kit v2). Usage: bin/check-lesson <page.html> [--shots dir]
+// Lessons live in ~/.cache/gigabrain/learn (see bin/learn). The markup contract is
+// global/skills/teach/kit/CONTRACT.md; this file is its enforcement.
 //
 // Loads the page in headless Chromium and checks, mechanically:
-//   - no console errors and no uncaught page errors
-//   - at least 4 <figure> elements that contain an <svg>
-//   - every [data-stepper] changes the page when its [data-step="next"] button is clicked
-//   - at least 5 [data-quiz]; clicking one [data-option] in each makes its [data-feedback] visible
+//   - built with the teach kit (meta teach-kit); under 1.5 MB
+//   - no console errors or uncaught page errors, also with localStorage blocked
+//   - no network requests except Google Fonts (pages must work offline)
+//   - a [data-hook] and a [data-prereq] section; nav[data-toc] filled with 4+ sections
+//   - 6+ <figure> with SVG, each with a <figcaption>; each figure's SVG has role="img" + aria-label
+//   - 2+ [data-stepper]: [data-step="next"] changes it and [data-step="prev"] undoes that
+//   - 1+ [data-sim]: changing its first [data-param] input changes the figure
+//   - 8+ [data-quiz] (2+ with data-predict): exactly one [data-correct] option, a data-why on every
+//     wrong option, and clicking an option shows [data-feedback] with 20+ characters
+//   - a [data-recall] section holding 3+ quizzes
+//   - 1+ [data-order] or [data-fill] whose [data-check] shows feedback
+//   - 6+ glossary terms ([data-tip])
 //   - no horizontal scroll at phone width (390 px), in light and dark colour schemes
+//   - at 390 px, every SVG label in a figure renders at 10.5 px or more
 // Exit 0 = pass. Screenshots (desktop + phone, light + dark) go to --shots (default: a temp dir).
+// --figs also captures every <figure> (desktop, light + dark; steppers at their last step) as
+// figs-<scheme>-NN.png in that dir, so labels below the first screen get looked at too.
 // Playwright lives in ~/.cache/gigabrain/render (npm i playwright && npx playwright install chromium).
 const path = require('node:path');
 const fs = require('node:fs');
@@ -28,69 +41,102 @@ const file = args.find(a => !a.startsWith('--'));
 if (!file) { console.error('usage: bin/check-lesson <page.html> [--shots dir]'); process.exit(2); }
 const shotsIdx = args.indexOf('--shots');
 const shots = shotsIdx >= 0 ? args[shotsIdx + 1] : fs.mkdtempSync(path.join(os.tmpdir(), 'lesson-shots-'));
+fs.mkdirSync(shots, { recursive: true });
 const url = 'file://' + path.resolve(file);
+const allowedHost = /^https:\/\/fonts\.(googleapis|gstatic)\.com\//;
 
 (async () => {
   const browser = await chromium.launch();
   const problems = [];
   const facts = {};
+  const bytes = fs.statSync(file).size;
+  facts.kb = Math.round(bytes / 1024);
+  if (bytes > 1.5 * 1024 * 1024) problems.push(`page is ${facts.kb} KB (limit 1536)`);
+
+  const open = async (viewport, colorScheme, blockStorage = false) => {
+    const page = await browser.newPage({ viewport, colorScheme });
+    const errors = [], remote = [];
+    page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+    page.on('pageerror', e => errors.push(String(e)));
+    page.on('request', r => { const u = r.url(); if (!/^(file|data|blob|about):/.test(u) && !allowedHost.test(u)) remote.push(u); });
+    if (blockStorage) await page.addInitScript(() => {
+      Object.defineProperty(window, 'localStorage', { get() { throw new DOMException('blocked', 'SecurityError'); } });
+    });
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForTimeout(300);
+    return { page, errors, remote };
+  };
   try {
     for (const scheme of ['light', 'dark']) {
       for (const [label, viewport] of [['desktop', { width: 1280, height: 900 }], ['phone', { width: 390, height: 844 }]]) {
-        const page = await browser.newPage({ viewport, colorScheme: scheme });
-        const errors = [];
-        page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-        page.on('pageerror', e => errors.push(String(e)));
-        await page.goto(url, { waitUntil: 'load' });
-        await page.waitForTimeout(300);
+        const { page, errors, remote } = await open(viewport, scheme);
         await page.screenshot({ path: path.join(shots, `${label}-${scheme}.png`), fullPage: false });
         if (errors.length) problems.push(`${label}/${scheme}: console errors: ${errors.slice(0, 3).join(' | ')}`);
+        if (remote.length) problems.push(`${label}/${scheme}: network requests (pages must work offline): ${[...new Set(remote)].slice(0, 3).join(' ')}`);
         if (label === 'phone') {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 2) problems.push(`${scheme}: horizontal scroll at 390px (${overflow}px wider)`);
-        }
-        if (label === 'desktop' && scheme === 'light') {
-          facts.svgFigures = await page.locator('figure:has(svg)').count();
-          if (facts.svgFigures < 4) problems.push(`only ${facts.svgFigures} <figure> with SVG (need 4+)`);
-
-          const steppers = page.locator('[data-stepper]');
-          facts.steppers = await steppers.count();
-          if (facts.steppers < 1) problems.push('no [data-stepper]');
-          for (let i = 0; i < facts.steppers; i++) {
-            const s = steppers.nth(i);
-            const before = await s.innerHTML();
-            const next = s.locator('[data-step="next"]').first();
-            if (!(await next.count())) { problems.push(`stepper ${i + 1}: no [data-step="next"] button`); continue; }
-            await next.scrollIntoViewIfNeeded();
-            await next.click();
-            await page.waitForTimeout(150);
-            if ((await s.innerHTML()) === before) problems.push(`stepper ${i + 1}: clicking next changed nothing`);
-          }
-
-          const quizzes = page.locator('[data-quiz]');
-          facts.quizzes = await quizzes.count();
-          if (facts.quizzes < 5) problems.push(`only ${facts.quizzes} [data-quiz] (need 5+)`);
-          let reacting = 0;
-          for (let i = 0; i < facts.quizzes; i++) {
-            const q = quizzes.nth(i);
-            const opt = q.locator('[data-option]').first();
-            const fb = q.locator('[data-feedback]').first();
-            if (!(await opt.count()) || !(await fb.count())) { problems.push(`quiz ${i + 1}: needs [data-option] and [data-feedback]`); continue; }
-            await opt.scrollIntoViewIfNeeded();
-            await opt.click();
-            await page.waitForTimeout(100);
-            const shown = await fb.evaluate(el => {
-              const cs = getComputedStyle(el);
-              return cs.display !== 'none' && cs.visibility !== 'hidden' && !el.hidden && el.textContent.trim().length > 20;
+          if (scheme === 'light') {
+            // SVG labels scale with their figure; at 390 px a wide viewBox shrinks them below reading size
+            const tiny = await page.evaluate(() => {
+              const out = [];
+              document.querySelectorAll('[data-reveal]').forEach((r) => { r.hidden = false; });
+            document.documentElement.classList.remove('js-motion'); // capture final state, not a fade-in
+            document.querySelectorAll('[data-progress], nav[data-toc]').forEach((el) => { el.style.visibility = 'hidden'; }); // fixed/sticky chrome would sit on top of the capture
+              document.querySelectorAll('figure svg').forEach((svg) => {
+                const vb = svg.viewBox?.baseVal, w = svg.getBoundingClientRect().width;
+                if (!vb || !vb.width || !w || svg.closest('[hidden]')) return;
+                for (const t of svg.querySelectorAll('text')) {
+                  if (!t.textContent.trim()) continue;
+                  const px = parseFloat(getComputedStyle(t).fontSize) * (w / vb.width);
+                  if (px < 10.5) { out.push(`${(svg.getAttribute('aria-label') || 'svg').slice(0, 40)}: "${t.textContent.trim().slice(0, 20)}" at ${px.toFixed(1)}px`); break; }
+                }
+              });
+              return out;
             });
-            if (shown) reacting++; else problems.push(`quiz ${i + 1}: feedback not shown after a click`);
+            // with reveals and feedback open, nothing may stick out past the screen edge (scroll boxes excepted)
+            const spill = await page.evaluate(() => {
+              document.querySelectorAll('[data-reveal], [data-feedback]').forEach((r) => { r.hidden = false; });
+              const scrolls = (el) => { for (let a = el.parentElement; a && a !== document.body; a = a.parentElement) { const o = getComputedStyle(a).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden' || o === 'clip') return true; } return false; };
+              const out = [];
+              for (const el of document.querySelectorAll('main *')) {
+                const r = el.getBoundingClientRect();
+                if (r.width && r.right > innerWidth + 2 && !scrolls(el)) { out.push(`${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.split(' ')[0] : ''} +${Math.round(r.right - innerWidth)}px`); if (out.length > 4) break; }
+              }
+              return out;
+            });
+            if (spill.length) problems.push(`phone: elements past the screen edge with reveals open: ${spill.join(', ')}`);
+            facts.tinyLabelFigures = tiny.length;
+            if (tiny.length) problems.push(`phone: ${tiny.length} figure(s) with SVG labels under 10.5px as rendered (use a narrower viewBox or a scroll frame): ${tiny.slice(0, 3).join(' | ')}`);
           }
-          facts.quizzesReacting = reacting;
-          facts.practiceLinks = await page.locator('text=/bin\\/practice/').count();
+        }
+        if (label === 'desktop' && scheme === 'light') await structural(page, problems, facts);
+        if (label === 'desktop' && args.includes('--figs')) {
+          await page.evaluate(() => {
+            document.querySelectorAll('[data-reveal]').forEach((r) => { r.hidden = false; });
+            document.querySelectorAll('[data-progress], nav[data-toc]').forEach((el) => { el.style.visibility = 'hidden'; }); // fixed/sticky chrome would sit on top of the capture
+            document.querySelectorAll('[data-stepper] [data-step="next"]').forEach((b) => { for (let k = 0; k < 40 && !b.disabled; k++) b.click(); });
+          });
+          await page.waitForTimeout(600);
+          const figs = page.locator('figure');
+          const n = await figs.count();
+          for (let i = 0; i < n; i++) {
+            const f = figs.nth(i);
+            if (!(await f.evaluate(el => el.getClientRects().length > 0))) continue;
+            await f.scrollIntoViewIfNeeded();
+            await f.screenshot({ path: path.join(shots, `figs-${scheme}-${String(i + 1).padStart(2, '0')}.png`) });
+          }
+          facts[`figShots_${scheme}`] = n;
         }
         await page.close();
       }
     }
+    // storage blocked (private window, strict settings): the page must still work
+    const { page, errors } = await open({ width: 1280, height: 900 }, 'light', true);
+    const q = page.locator('[data-quiz] [data-option]').first();
+    if (await q.count()) { await q.scrollIntoViewIfNeeded(); await q.click(); await page.waitForTimeout(100); }
+    if (errors.length) problems.push(`localStorage blocked: console errors: ${errors.slice(0, 3).join(' | ')}`);
+    await page.close();
   } finally {
     await browser.close();
   }
@@ -101,3 +147,143 @@ const url = 'file://' + path.resolve(file);
   }
   console.log('PASS');
 })().catch(e => { console.error('check-lesson crashed:', e.message); process.exit(2); });
+
+// What the reader sees of a stepper: which [data-s] parts are on, the shown caption, the lit code lines.
+// (Counters, data-at and disabled buttons change on every step, so they prove nothing.)
+const state = (loc) => loc.evaluate(root => JSON.stringify([
+  [...root.querySelectorAll('[data-s], [data-only]')].map(el => el.classList.contains('on') ? 1 : 0).join(''),
+  [...root.querySelectorAll('.ve-cap li')].findIndex(li => !li.hidden),
+  [...document.querySelectorAll('.line.is-lit')].length,
+]));
+
+const visible = (loc) => loc.evaluate(el => {
+  const cs = getComputedStyle(el);
+  return cs.display !== 'none' && cs.visibility !== 'hidden' && !el.hidden && el.textContent.trim().length >= 20;
+});
+
+async function structural(page, problems, facts) {
+  // what shows before any click: feedback and reveals must start hidden (later checks click things open)
+  const earlyQuiz = await page.evaluate(() => [...document.querySelectorAll('[data-quiz]')].map(el =>
+    [...el.querySelectorAll('[data-feedback], [data-reveal]')].filter(x => x.getClientRects().length > 0).length));
+  const earlyEx = await page.evaluate(() => [...document.querySelectorAll('[data-order], [data-fill]')].map(el =>
+    [...el.querySelectorAll('[data-feedback]')].filter(x => x.getClientRects().length > 0).length));
+  if (!(await page.locator('meta[name="teach-kit"]').count())) problems.push('not built with the teach kit (no meta teach-kit; use bin/learn assemble)');
+  if (!(await page.locator('[data-hook]').count())) problems.push('no [data-hook] section (the opening question)');
+  if (!(await page.locator('[data-prereq]').count())) problems.push('no [data-prereq] section (before you start)');
+  facts.tocLinks = await page.locator('nav[data-toc] a').count();
+  if (facts.tocLinks < 4) problems.push(`section map has ${facts.tocLinks} links (need nav[data-toc] and 4+ main section[id] with h2)`);
+
+  facts.svgFigures = await page.locator('figure:has(svg)').count();
+  if (facts.svgFigures < 6) problems.push(`only ${facts.svgFigures} <figure> with SVG (need 6+)`);
+  const figIssues = await page.evaluate(() => [...document.querySelectorAll('figure:has(svg)')].flatMap((f, i) => {
+    const out = [];
+    if (!f.querySelector('figcaption')) out.push(`figure ${i + 1}: no figcaption`);
+    const svg = f.querySelector('svg');
+    if (svg.getAttribute('role') !== 'img' || !(svg.getAttribute('aria-label') || '').trim()) out.push(`figure ${i + 1}: first svg needs role="img" and aria-label`);
+    return out;
+  }));
+  problems.push(...figIssues.slice(0, 5));
+
+  const steppers = page.locator('[data-stepper]');
+  facts.steppers = await steppers.count();
+  if (facts.steppers < 2) problems.push(`only ${facts.steppers} [data-stepper] (need 2+)`);
+  for (let i = 0; i < facts.steppers; i++) {
+    const s = steppers.nth(i);
+    const next = s.locator('[data-step="next"]').first(), prev = s.locator('[data-step="prev"]').first();
+    if (!(await next.count()) || !(await prev.count())) { problems.push(`stepper ${i + 1}: needs [data-step="prev"] and [data-step="next"]`); continue; }
+    if (!(await s.evaluate(el => el.getClientRects().length > 0))) {
+      // a stepper inside a predict reveal is shown only after a guess: answer its quiz first
+      const opt = s.locator('xpath=ancestor::*[@data-quiz][1]').locator('[data-option]').first();
+      if (await opt.count()) { await opt.scrollIntoViewIfNeeded(); await opt.click(); await page.waitForTimeout(150); }
+      if (!(await s.evaluate(el => el.getClientRects().length > 0))) { problems.push(`stepper ${i + 1}: not visible, even after answering its quiz`); continue; }
+    }
+    if (!(await s.locator('[data-s], [data-only]').count())) { problems.push(`stepper ${i + 1}: no [data-s] parts, so nothing in the figure changes`); continue; }
+    if (await next.isDisabled()) { await s.scrollIntoViewIfNeeded(); await prev.click(); await page.waitForTimeout(100); }
+    const before = await state(s);
+    await next.scrollIntoViewIfNeeded();
+    await next.click();
+    await page.waitForTimeout(150);
+    const after = await state(s);
+    if (after === before) { problems.push(`stepper ${i + 1}: clicking next changed nothing`); continue; }
+    await prev.click();
+    await page.waitForTimeout(150);
+    if ((await state(s)) !== before) problems.push(`stepper ${i + 1}: back did not return to the previous step`);
+  }
+
+  const sims = page.locator('[data-sim]');
+  facts.sims = await sims.count();
+  if (facts.sims < 1) problems.push('no [data-sim] live figure');
+  for (let i = 0; i < facts.sims; i++) {
+    const s = sims.nth(i), input = s.locator('[data-param]').first();
+    if (!(await input.count())) { problems.push(`sim ${i + 1}: no [data-param] input`); continue; }
+    const before = await s.locator('svg').first().innerHTML().catch(() => '');
+    await input.scrollIntoViewIfNeeded();
+    const changed = await input.evaluate(el => {
+      if (el.type === 'checkbox') el.checked = !el.checked;
+      else if (el.tagName === 'SELECT') el.selectedIndex = (el.selectedIndex + 1) % el.options.length;
+      else { const lo = +el.min || 0, hi = +(el.max || 100), v = +el.value; el.value = String(v === hi ? lo : hi); }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    });
+    await page.waitForTimeout(150);
+    if (changed && (await s.locator('svg').first().innerHTML().catch(() => '')) === before) problems.push(`sim ${i + 1}: changing its input did not change the figure`);
+  }
+
+  const quizzes = page.locator('[data-quiz]');
+  facts.quizzes = await quizzes.count();
+  facts.predicts = await page.locator('[data-quiz][data-predict]').count();
+  if (facts.quizzes < 8) problems.push(`only ${facts.quizzes} [data-quiz] (need 8+)`);
+  if (facts.predicts < 2) problems.push(`only ${facts.predicts} predict quizzes (need 2+ [data-quiz][data-predict])`);
+  let reacting = 0;
+  for (let i = 0; i < facts.quizzes; i++) {
+    const q = quizzes.nth(i);
+    const shape = await q.evaluate(el => {
+      const opts = [...el.querySelectorAll('[data-option]')], fb = el.querySelector('[data-feedback]');
+      const reveals = [...el.querySelectorAll('[data-reveal]')];
+      return { n: opts.length, correct: opts.filter(o => o.hasAttribute('data-correct')).length,
+        noWhy: opts.filter(o => !o.hasAttribute('data-correct') && (o.dataset.why || '').trim().length < 15).length,
+        id: !!el.getAttribute('id'), explain: fb ? fb.textContent.trim().length : 0,
+        predict: el.hasAttribute('data-predict'), reveals: reveals.length,
+      };
+    });
+    if (!shape.id) problems.push(`quiz ${i + 1}: needs an id (saved answers are keyed by it)`);
+    if (shape.explain < 20) problems.push(`quiz ${i + 1}: [data-feedback] explanation under 20 characters`);
+    if (earlyQuiz[i]) problems.push(`quiz ${i + 1}: feedback or reveal visible before answering`);
+    if (shape.predict && !shape.reveals) problems.push(`quiz ${i + 1}: predict quiz without a [data-reveal] outcome`);
+    if (shape.n < 2 || shape.correct !== 1) { problems.push(`quiz ${i + 1}: needs 2+ options and exactly one data-correct (has ${shape.n}, ${shape.correct})`); continue; }
+    if (shape.noWhy) problems.push(`quiz ${i + 1}: ${shape.noWhy} wrong option(s) without a data-why (15+ chars)`);
+    const opt = q.locator('[data-option]:not([data-correct])').first();
+    const fb = q.locator('[data-feedback]').first();
+    if (!(await fb.count())) { problems.push(`quiz ${i + 1}: no [data-feedback]`); continue; }
+    await opt.scrollIntoViewIfNeeded();
+    await opt.click();
+    await page.waitForTimeout(100);
+    if (await visible(fb)) reacting++; else problems.push(`quiz ${i + 1}: feedback not shown after a click`);
+    if (shape.predict && shape.reveals) {
+      const opened = await q.evaluate(el => [...el.querySelectorAll('[data-reveal]')].every(x => getComputedStyle(x).display !== 'none'));
+      if (!opened) problems.push(`quiz ${i + 1}: reveal still hidden after a guess`);
+    }
+  }
+  facts.quizzesReacting = reacting;
+  facts.recallQuizzes = await page.locator('[data-recall] [data-quiz]').count();
+  if (facts.recallQuizzes < 3) problems.push(`recall section has ${facts.recallQuizzes} quizzes (need a [data-recall] with 3+)`);
+
+  const ex = page.locator('[data-order], [data-fill]');
+  facts.exercises = await ex.count();
+  if (facts.exercises < 1) problems.push('no [data-order] or [data-fill] exercise');
+  for (let i = 0; i < facts.exercises; i++) {
+    const e = ex.nth(i), check = e.locator('[data-check]').first(), fb = e.locator('[data-feedback]').first();
+    if (!(await check.count()) || !(await fb.count())) { problems.push(`exercise ${i + 1}: needs [data-check] and [data-feedback]`); continue; }
+    if (earlyEx[i]) problems.push(`exercise ${i + 1}: feedback visible before checking`);
+    await check.scrollIntoViewIfNeeded();
+    await check.click();
+    await page.waitForTimeout(100);
+    const shown = await fb.evaluate(el => getComputedStyle(el).display !== 'none' && !el.hidden && el.textContent.trim().length > 5);
+    if (!shown) problems.push(`exercise ${i + 1}: check showed no feedback`);
+  }
+
+  facts.glossary = await page.locator('[data-tip]').count();
+  if (facts.glossary < 6) problems.push(`only ${facts.glossary} glossary terms (need 6+ [data-tip])`);
+  facts.practiceLinks = await page.locator('text=/bin\\/practice/').count();
+}

@@ -1,0 +1,673 @@
+{
+  "topic": "node",
+  "variant": 5,
+  "of": 5,
+  "title": "Node.js in production — variant 5",
+  "description": "CPU capacity planning, profiling stalls, warm start-up, conditional reloads, worker pools, cache invalidation, Lambda freezes, bulkheads, real cancellation, timeout sizing and shutdown sequencing.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "event-loop",
+      "name": "Event loop and blocking work",
+      "weight": 0.25
+    },
+    {
+      "id": "scaling",
+      "name": "Workers, processes and scaling out",
+      "weight": 0.2
+    },
+    {
+      "id": "streams-memory",
+      "name": "Streams, backpressure and memory",
+      "weight": 0.2
+    },
+    {
+      "id": "io",
+      "name": "Timeouts, cancellation and connections",
+      "weight": 0.2
+    },
+    {
+      "id": "ops",
+      "name": "Shutdown, failures and observability",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "node-v5-q01",
+      "domain": "event-loop",
+      "stem": "An ad-tech bidder must answer within 100 ms. Each bid needs about 30 ms of pure JS CPU, and peak traffic is 1 000 bids per second. A teammate proposes adding a worker-thread pool to each existing 1-vCPU pod \"so each bid gets faster\". Which plan meets the SLA?",
+      "options": [
+        {
+          "text": "Add the proposed worker-thread pool to each of the existing 1-vCPU pods.",
+          "correct": false,
+          "why": "Workers in a 1-vCPU pod share the same core, so per-bid CPU time and total capacity don't change; only the scheduling does."
+        },
+        {
+          "text": "Run ~45+ single-core processes, keeping utilization near 70%.",
+          "correct": true,
+          "why": "1 000 × 30 ms = 30 cores of work; at high utilization queueing alone breaks a 100 ms SLA, so you provision headroom. Threads or processes add capacity only with real cores behind them."
+        },
+        {
+          "text": "Chunk each bid with `setImmediate` so bids interleave fairly.",
+          "correct": false,
+          "why": "Interleaving makes every bid take longer to finish, and the total CPU needed is unchanged."
+        },
+        {
+          "text": "Run exactly 30 single-core processes, since that matches the CPU needed.",
+          "correct": false,
+          "why": "At 100% utilization queues grow without bound, so tail latency blows through 100 ms at the first burst."
+        }
+      ],
+      "explain": "Parallelism doesn't make one CPU-bound request faster; it adds capacity only when there are cores to run on. Size CPU work as rps × CPU per request, then add headroom, because latency rises sharply as utilization approaches 100%.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+      ]
+    },
+    {
+      "id": "node-v5-q02",
+      "domain": "event-loop",
+      "stem": "A telehealth API shows a 1.5 to 2 s stall a few times an hour on random pods. Event-loop delay alerts confirm the loop is blocked, but logs show nothing unusual, and the stall can't be reproduced locally. Which approach finds the code responsible?",
+      "options": [
+        {
+          "text": "Take a heap snapshot on a pod after the next stall.",
+          "correct": false,
+          "why": "A snapshot shows what is in memory, not what code ran during the stall, and taking it pauses the pod too."
+        },
+        {
+          "text": "CPU-profile a canary (`--cpu-prof` or continuous) around the stalls.",
+          "correct": true,
+          "why": "A CPU profile records which functions held the thread; lining it up with the loop-delay spikes names the blocking code."
+        },
+        {
+          "text": "Add a debug log line at the start and end of every handler and search for gaps.",
+          "correct": false,
+          "why": "It might narrow the route, but it costs a lot of logging and still won't name the function inside the handler."
+        },
+        {
+          "text": "Add more pods so each stall affects fewer users.",
+          "correct": false,
+          "why": "It dilutes the impact without finding or removing the cause."
+        }
+      ],
+      "explain": "Event-loop delay tells you that the loop was blocked; a CPU profile tells you by what. For intermittent production stalls, profile a canary (or run a low-overhead continuous profiler) and correlate with the delay metric.",
+      "refs": [
+        "https://nodejs.org/api/cli.html#--cpu-prof",
+        "https://nodejs.org/en/learn/diagnostics/poor-performance"
+      ]
+    },
+    {
+      "id": "node-v5-q03",
+      "domain": "event-loop",
+      "stem": "A healthcare SaaS loads a large FHIR SDK with a synchronous `require()` inside the first request handler that needs it, \"to keep start-up fast\". The `require` takes 1.2 s. After each deploy, the first minute shows a burst of timeouts on every endpoint, not just the FHIR ones. Which change fits?",
+      "options": [
+        {
+          "text": "Load the SDK at start-up, before the pod reports ready.",
+          "correct": true,
+          "why": "Paying the load cost before readiness means no request ever waits for it, and the synchronous module load no longer blocks live traffic."
+        },
+        {
+          "text": "Switch to a dynamic `await import()` inside the handler.",
+          "correct": false,
+          "why": "File reads may become asynchronous, but evaluating the big module still runs on the main thread during live traffic, and the first requests still wait for it."
+        },
+        {
+          "text": "Raise the client timeout for the first minute after a deploy.",
+          "correct": false,
+          "why": "It hides the errors but every request on the pod still waits for the 1.2 s load."
+        },
+        {
+          "text": "Run the FHIR endpoints on a separate port served by a worker thread.",
+          "correct": false,
+          "why": "A large restructuring to avoid a one-time load cost that start-up already absorbs."
+        }
+      ],
+      "explain": "Lazy loading moves cost from start-up, where nobody is waiting, to the first live request, where everyone is. Load heavy modules before the pod reports ready.",
+      "refs": [
+        "https://nodejs.org/api/modules.html#requireid"
+      ]
+    },
+    {
+      "id": "node-v5-q04",
+      "domain": "event-loop",
+      "stem": "Every pod of a travel-booking API fetches a 30 MB routing config and runs `JSON.parse` on it every 10 seconds, though the config changes about twice a day. p99 latency shows a 250 ms spike every 10 s, in sync with the reload. Which change fits best?",
+      "options": [
+        {
+          "text": "Parse the config in a worker thread and post the parsed object back to the main thread.",
+          "correct": false,
+          "why": "The parsed object still has to cross the thread boundary by structured clone, which costs main-thread time of the same order."
+        },
+        {
+          "text": "Reload only on change (conditional GET with `ETag`, or a push).",
+          "correct": true,
+          "why": "Twice-a-day changes mean almost every reload is a no-op; skipping unchanged configs removes the stall nearly every time it would happen."
+        },
+        {
+          "text": "Stagger the reload times across pods.",
+          "correct": false,
+          "why": "It spreads the spikes across time, so some pod is always spiking, without reducing the work."
+        },
+        {
+          "text": "Reload every 60 s instead of every 10 s.",
+          "correct": false,
+          "why": "Fewer spikes, but each one is the same size, and config changes take longer to arrive."
+        }
+      ],
+      "explain": "Periodic work multiplied by pods and frequency is easy to miss. Make refreshes conditional on actual change (ETags, versions, push notifications) so the expensive part runs only when there is something new.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/ETag"
+      ]
+    },
+    {
+      "id": "node-v5-q05",
+      "domain": "event-loop",
+      "stem": "A fraud-screening API checks each request's IP against a 1.2 million-entry blocklist with `blocklist.includes(ip)` on an array. It handles 3 000 rps across 10 pods, and CPU profiles show 70% of time in `Array.prototype.includes`. Which change fits?",
+      "options": [
+        {
+          "text": "Move the check into a worker-thread pool.",
+          "correct": false,
+          "why": "The loop stays free, but the linear scans still cost the same CPU, now on more threads."
+        },
+        {
+          "text": "Sort the array and binary-search it per request.",
+          "correct": false,
+          "why": "That works (O(log n)), but a `Set` gives O(1) lookups without keeping the array sorted on every update."
+        },
+        {
+          "text": "Load the blocklist into a `Set` and use `has()`.",
+          "correct": true,
+          "why": "A `Set` lookup is constant time, so each check drops from scanning up to 1.2 million entries to a single hash lookup."
+        },
+        {
+          "text": "Cache each IP's result in a `Map` for 5 minutes.",
+          "correct": false,
+          "why": "Helps repeat IPs, but every new IP still pays the full scan, and the cache grows with traffic."
+        }
+      ],
+      "explain": "On a single-threaded server, algorithmic cost per request is the capacity. Profile, and pick data structures that match the access pattern before adding threads or pods.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Set/has"
+      ]
+    },
+    {
+      "id": "node-v5-q06",
+      "domain": "scaling",
+      "stem": "A document API generates watermarked PDFs by calling `new Worker('./watermark.js')` for each request and terminating it afterwards. At 150 rps, pods use 3 GB of memory, and each watermark takes 60 ms, of which 40 ms is worker start-up. Which change fits?",
+      "options": [
+        {
+          "text": "A fixed, long-lived worker pool (e.g. Piscina) sized to the CPUs.",
+          "correct": true,
+          "why": "Workers start once; each task pays only its 20 ms of real work, and memory is capped by the pool size instead of the request rate."
+        },
+        {
+          "text": "Run the watermark on the main thread, since it's only 20 ms of work.",
+          "correct": false,
+          "why": "At 150 rps that is 3 s of CPU per second on one loop, which is impossible for one thread and blocks every request."
+        },
+        {
+          "text": "Raise `resourceLimits` so each worker gets a smaller heap.",
+          "correct": false,
+          "why": "Smaller heaps reduce memory per worker, but start-up cost per request and unbounded worker count remain."
+        },
+        {
+          "text": "Use `child_process.fork` per request instead, for better isolation.",
+          "correct": false,
+          "why": "A new process per request costs even more to start than a worker thread."
+        }
+      ],
+      "explain": "Worker threads are expensive to start (a new V8 isolate and event loop). Create them once and reuse them in a bounded pool; per-request creation turns start-up time and memory into a per-request cost.",
+      "refs": [
+        "https://nodejs.org/api/worker_threads.html",
+        "https://github.com/piscinajs/piscina"
+      ]
+    },
+    {
+      "id": "node-v5-q07",
+      "domain": "scaling",
+      "stem": "A multi-tenant SaaS caches tenant settings in each pod's memory for 10 minutes. When an admin disables a feature for a tenant, some requests keep using the old setting for up to 10 minutes, depending on which of the 16 pods serves them. The business wants changes applied within a few seconds. Which approach fits?",
+      "options": [
+        {
+          "text": "Drop the TTL to 5 s on every pod.",
+          "correct": false,
+          "why": "It meets the deadline, but every pod now reloads every tenant's settings constantly, multiplying database load."
+        },
+        {
+          "text": "Don't cache at all; read settings from the database on every request.",
+          "correct": false,
+          "why": "Always fresh, but it adds a database read to every request, which the cache was there to avoid."
+        },
+        {
+          "text": "Publish an invalidation event on change that every pod subscribes to, with the TTL kept as a backstop.",
+          "correct": true,
+          "why": "Changes propagate in milliseconds, the cache still serves almost every read, and the TTL bounds staleness if a pod misses a message."
+        },
+        {
+          "text": "Use sticky sessions per tenant so one pod owns each tenant's cache.",
+          "correct": false,
+          "why": "Stickiness would also need cache invalidation on the owning pod, and it creates hot spots for big tenants."
+        }
+      ],
+      "explain": "Per-replica caches drift. Push invalidations to every replica when data changes, and keep a TTL as a safety net for missed messages; that combination gives freshness without giving up the cache.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/interact/pubsub/"
+      ]
+    },
+    {
+      "id": "node-v5-q08",
+      "domain": "scaling",
+      "stem": "A clinic-booking API moved to AWS Lambda on the Node 24 runtime. To save latency, it records metrics in memory and flushes them in a `setTimeout(flush, 5000)`. Dashboards now show large gaps, and some metrics turn up minutes late with the wrong timestamps. Which change fits?",
+      "options": [
+        {
+          "text": "Shorten the flush timer to 500 ms.",
+          "correct": false,
+          "why": "Lambda can freeze the environment as soon as the response is returned, so any timer may not run until the next invocation, if there is one."
+        },
+        {
+          "text": "Flush (or emit via EMF logs) before the handler returns.",
+          "correct": true,
+          "why": "Work finished before returning is guaranteed to complete; log-based metrics avoid a network call on the response path."
+        },
+        {
+          "text": "Keep the timer and set `context.callbackWaitsForEmptyEventLoop = true`.",
+          "correct": false,
+          "why": "That applies to callback-style handlers; with async handlers the response is sent when the promise resolves, and the environment can still freeze."
+        },
+        {
+          "text": "Move metrics to a `process.on('beforeExit')` handler.",
+          "correct": false,
+          "why": "Lambda freezes the environment instead of exiting, so `beforeExit` doesn't fire at the end of each invocation."
+        }
+      ],
+      "explain": "Serverless runtimes freeze the process between invocations; background timers and fire-and-forget promises stop with it. Finish work (or emit it synchronously, such as through logs) before returning.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html",
+        "https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html"
+      ]
+    },
+    {
+      "id": "node-v5-q09",
+      "domain": "scaling",
+      "stem": "A startup moved its Node API from a laptop-sized VM to a single 16-vCPU VM to handle a launch. Throughput barely improved, and `top` shows one core near 100% and the rest nearly idle. They want to stay on this one VM for now. Which change uses the hardware?",
+      "options": [
+        {
+          "text": "Raise `UV_THREADPOOL_SIZE` to 16.",
+          "correct": false,
+          "why": "The libuv pool runs native async work (fs, crypto, zlib); the request handlers' JS still runs on one thread."
+        },
+        {
+          "text": "Raise `--max-old-space-size` so V8 has more room.",
+          "correct": false,
+          "why": "Memory isn't the constraint; one JS thread is."
+        },
+        {
+          "text": "One Node process per core (`cluster`, or containers behind a proxy).",
+          "correct": true,
+          "why": "Each process has its own event loop, so 16 processes can use 16 cores; the app must already keep shared state outside the process."
+        },
+        {
+          "text": "Convert every request handler so that its work runs inside a worker thread.",
+          "correct": false,
+          "why": "Workers help with CPU-heavy tasks, but turning every handler into a worker task adds hand-off cost for I/O-bound requests."
+        }
+      ],
+      "explain": "One Node process uses one core for JavaScript. Scale on a big machine with one process per core (cluster or containers), and on a fleet with more instances; both require stateless processes.",
+      "refs": [
+        "https://nodejs.org/api/cluster.html"
+      ]
+    },
+    {
+      "id": "node-v5-q10",
+      "domain": "streams-memory",
+      "stem": "An audit-export endpoint streams database rows through a ZIP archiver to the client using `.pipe()`. When users cancel large downloads, the database connection stays checked out, the cursor keeps reading, and after a few dozen cancellations the pool is exhausted. Which change fixes it?",
+      "options": [
+        {
+          "text": "Add a `res.on('close')` handler that calls `cursor.close()`.",
+          "correct": false,
+          "why": "It handles this one stage, but the archiver and other streams still aren't torn down, and each new stage needs another manual handler."
+        },
+        {
+          "text": "Lower the pool's `idleTimeoutMillis`.",
+          "correct": false,
+          "why": "The connection isn't idle, it's busy reading for a client who left, so the timeout never applies."
+        },
+        {
+          "text": "Use `await pipeline(cursorStream, archive, res)`.",
+          "correct": true,
+          "why": "When the response closes early, `pipeline` destroys every stream in the chain, so the cursor stops and its connection goes back to the pool."
+        },
+        {
+          "text": "Buffer the ZIP fully before sending it.",
+          "correct": false,
+          "why": "No abandoned cursors, but memory now scales with export size and the client waits for the whole file."
+        }
+      ],
+      "explain": "Cancellation should flow backwards through a stream chain to the source that holds resources. `pipeline` does that: one stage's error or early close destroys the rest, which releases cursors, file handles and connections.",
+      "refs": [
+        "https://nodejs.org/api/stream.html#streampipelinesource-transforms-destination-options"
+      ]
+    },
+    {
+      "id": "node-v5-q11",
+      "domain": "streams-memory",
+      "stem": "A gateway stores per-request metadata in a module-level `Map` keyed by the `req` object, deleting the entry in the response's `'finish'` handler. Requests that the client aborts never emit `'finish'`, and after a week of mobile traffic the heap holds millions of request objects. Which change fixes it most robustly?",
+      "options": [
+        {
+          "text": "Delete on `'close'` as well as `'finish'`.",
+          "correct": false,
+          "why": "It covers this path, but any future code path that ends a request differently leaks again; cleanup still depends on events firing."
+        },
+        {
+          "text": "A `WeakMap` keyed by `req`, or `AsyncLocalStorage`.",
+          "correct": true,
+          "why": "A `WeakMap` entry disappears when its key is collected, and ALS context ends with the request, so no cleanup event is needed."
+        },
+        {
+          "text": "Sweep the map every minute and delete entries older than 5 minutes.",
+          "correct": false,
+          "why": "It bounds the leak, but adds a timer, a timestamp per entry and a 5-minute window of garbage."
+        },
+        {
+          "text": "Raise the heap limit and restart pods weekly.",
+          "correct": false,
+          "why": "It hides the leak and turns it into a scheduled outage."
+        }
+      ],
+      "explain": "Side tables keyed by objects with their own lifetime should hold them weakly (`WeakMap`) or use a scoped mechanism (`AsyncLocalStorage`) so cleanup can't be forgotten. Event-based cleanup leaks on every path the events miss.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/WeakMap",
+        "https://nodejs.org/api/async_context.html"
+      ]
+    },
+    {
+      "id": "node-v5-q12",
+      "domain": "streams-memory",
+      "stem": "A satellite-imagery service reads 200 MB tiles from a socket. The code shown takes 40 s of CPU per tile and creates gigabytes of garbage, although the network delivers the tile in 2 s. Which change fixes it?",
+      "code": "let tile = Buffer.alloc(0);\nfor await (const chunk of socket) {\n  tile = Buffer.concat([tile, chunk]);   // ~64 KiB chunks\n}\nawait store(tile);",
+      "options": [
+        {
+          "text": "Raise the stream's `highWaterMark` so chunks are bigger.",
+          "correct": false,
+          "why": "Fewer, bigger chunks reduce the number of copies, but each concat still copies everything so far."
+        },
+        {
+          "text": "Use `Buffer.allocUnsafe` for the accumulated buffer.",
+          "correct": false,
+          "why": "Skipping zero-fill saves a little, but the repeated full copies remain."
+        },
+        {
+          "text": "Collect the chunks in an array and call `Buffer.concat` once, or stream the tile onward.",
+          "correct": true,
+          "why": "One final concat copies each byte once; the loop shown copies the whole accumulated buffer on every chunk, which is quadratic."
+        },
+        {
+          "text": "Run the loop in a worker thread.",
+          "correct": false,
+          "why": "It moves 40 s of wasted copying to another thread without removing it."
+        }
+      ],
+      "explain": "Growing a buffer by concatenating on every chunk copies everything accumulated so far each time: O(n²) CPU and garbage. Collect chunks and concatenate once, or better, process the data as a stream.",
+      "refs": [
+        "https://nodejs.org/api/buffer.html#static-method-bufferconcatlist-totallength"
+      ]
+    },
+    {
+      "id": "node-v5-q13",
+      "domain": "io",
+      "stem": "A checkout BFF limits all outbound HTTP calls with one shared `p-limit(100)`. During a sale, the recommendations service slowed to 10 s per call. Within a minute, all 100 slots held recommendation calls, and payment and inventory calls queued behind them, so checkouts failed. Which change fits?",
+      "options": [
+        {
+          "text": "Raise the shared limit to 1 000.",
+          "correct": false,
+          "why": "Slow recommendation calls fill it again, just later, and the higher limit lets you overload your own process."
+        },
+        {
+          "text": "Retry payment calls that waited more than 2 s.",
+          "correct": false,
+          "why": "Retries rejoin the same full queue."
+        },
+        {
+          "text": "Per-dependency concurrency limits and timeouts.",
+          "correct": true,
+          "why": "Separate pools (bulkheads) mean a slow dependency can exhaust only its own slots, and its timeout bounds how long each slot is held."
+        },
+        {
+          "text": "Add a cache in front of the recommendations service.",
+          "correct": false,
+          "why": "Helpful for recommendations, but another slow dependency would cause the same cross-blocking."
+        }
+      ],
+      "explain": "Shared limits couple failure domains. Give each downstream its own concurrency limit and timeout (bulkheads), so a slow, non-critical dependency can't starve critical ones.",
+      "refs": [
+        "https://learn.microsoft.com/en-us/azure/architecture/patterns/bulkhead"
+      ]
+    },
+    {
+      "id": "node-v5-q14",
+      "domain": "io",
+      "stem": "A flight-search service gives each airline call a deadline with the helper shown. During an airline outage the searches return on time, but the service's open sockets and memory keep growing, and the airline's API still sees the full request volume. Which change fixes it?",
+      "code": "const withTimeout = (p, ms) =>\n  Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))]);\n\nconst res = await withTimeout(fetch(airlineUrl), 3000);",
+      "options": [
+        {
+          "text": "Shorten the timeout from 3 s to 1 s.",
+          "correct": false,
+          "why": "The race resolves sooner, but the fetch is still never cancelled."
+        },
+        {
+          "text": "Pass `AbortSignal.timeout(3000)` to `fetch` instead.",
+          "correct": true,
+          "why": "`Promise.race` stops waiting but cancels nothing. A signal actually aborts the request and its body, releasing the socket."
+        },
+        {
+          "text": "Lower the agent's `maxSockets` so the number of open sockets stays bounded.",
+          "correct": false,
+          "why": "Sockets are bounded, but abandoned requests now hold the slots and new searches queue behind them."
+        },
+        {
+          "text": "Add a circuit breaker and keep the race.",
+          "correct": false,
+          "why": "The breaker stops new calls once open, but every call made before it opens still runs to completion in the background."
+        }
+      ],
+      "explain": "A timeout that only stops waiting is not cancellation. Pass an `AbortSignal` to the operation so the work, the socket and the body read actually stop.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#static-method-abortsignaltimeoutdelay"
+      ]
+    },
+    {
+      "id": "node-v5-q15",
+      "domain": "io",
+      "stem": "A notification sender retries failed sends with exponential backoff up to 60 s using `await setTimeout(delay)` from `node:timers/promises`. On SIGTERM it stops accepting work, but pods take the full 30 s grace period and are SIGKILLed because of sleeping retry loops. Which change fits?",
+      "options": [
+        {
+          "text": "Cap the backoff at 5 s during shutdown.",
+          "correct": false,
+          "why": "It shortens the sleeps, but each loop still runs to completion before the process can exit."
+        },
+        {
+          "text": "Pass `AbortSignal.any([shutdownSignal, deadline])` to the sleep and the send, and stop retrying when it aborts.",
+          "correct": true,
+          "why": "The `timers/promises` sleep accepts a signal and rejects on abort, so shutdown cancels sleeps and in-flight sends at once and the process exits promptly."
+        },
+        {
+          "text": "Call `process.exit(0)` on SIGTERM.",
+          "correct": false,
+          "why": "It exits at once, but drops work mid-send without recording what was or wasn't sent."
+        },
+        {
+          "text": "Raise the grace period to 120 s.",
+          "correct": false,
+          "why": "Deploys get slower, and retries still sleep past the point where the work matters."
+        }
+      ],
+      "explain": "Every wait in a long-lived process should be cancellable. Thread one signal (shutdown combined with deadline via `AbortSignal.any`) through sleeps, retries and I/O so shutdown is immediate and orderly.",
+      "refs": [
+        "https://nodejs.org/api/timers.html#timerspromisessettimeoutdelay-value-options",
+        "https://nodejs.org/api/globals.html#static-method-abortsignalanysignals"
+      ]
+    },
+    {
+      "id": "node-v5-q16",
+      "domain": "io",
+      "stem": "A pharmacy API calls an inventory service whose latency is p50 40 ms, p99 250 ms and p99.9 600 ms. The client timeout is 100 ms with 2 retries, and the caller's own budget is 1 s. The inventory team reports that about 3% of its traffic is retries and asks you to fix it. Which change fits?",
+      "options": [
+        {
+          "text": "Raise the timeout to just above p99.9 (about 650 ms) and allow one retry only if the remaining budget allows it.",
+          "correct": true,
+          "why": "A timeout below p99 abandons normal slow requests and retries them, adding load; above the high percentiles, timeouts mean real failures, and one retry still fits the 1 s budget."
+        },
+        {
+          "text": "Keep 100 ms but remove the retries.",
+          "correct": false,
+          "why": "No retry load, but about 3% of requests now fail although the service would have answered in time."
+        },
+        {
+          "text": "Keep 100 ms and add jitter to the retries.",
+          "correct": false,
+          "why": "Jitter spreads retries in time, but the 3% extra load stays."
+        },
+        {
+          "text": "Set the timeout to 10 s so nothing times out.",
+          "correct": false,
+          "why": "It removes retries but lets truly stuck calls hold resources far past the caller's 1 s budget."
+        }
+      ],
+      "explain": "Choose timeouts from the downstream's latency distribution and your own budget: above the high percentiles of normal behaviour, below what the caller can afford. Timeouts under p99 turn normal slowness into retry load.",
+      "refs": [
+        "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
+      ]
+    },
+    {
+      "id": "node-v5-q17",
+      "domain": "ops",
+      "stem": "A SaaS API's shutdown handler is `process.on('SIGTERM', () => process.exit(0))`. Each deploy shows a spike of 502s and a few half-written records from requests that were mid-transaction. Which shutdown sequence fits?",
+      "options": [
+        {
+          "text": "Keep the handler and set `maxUnavailable: 0` so capacity stays up.",
+          "correct": false,
+          "why": "Capacity stays up, but every terminating pod still kills its in-flight requests mid-transaction."
+        },
+        {
+          "text": "Remove the handler so Node's default SIGTERM behaviour takes over.",
+          "correct": false,
+          "why": "The default also ends the process immediately, with the same result."
+        },
+        {
+          "text": "Fail readiness, wait briefly, stop accepting, finish in-flight work, close pools, then exit, with a hard deadline.",
+          "correct": true,
+          "why": "That order lets traffic move away, lets started work finish and commit, releases database connections cleanly, and still exits before SIGKILL."
+        },
+        {
+          "text": "Exit with code 1 so Kubernetes knows to retry the requests.",
+          "correct": false,
+          "why": "Kubernetes doesn't retry HTTP requests; the exit code changes nothing for in-flight clients."
+        }
+      ],
+      "explain": "Graceful shutdown is an ordered sequence: leave the load balancer, stop intake, drain in-flight work, release resources, exit, with a deadline as backstop. `process.exit` on SIGTERM skips all of it.",
+      "refs": [
+        "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination",
+        "https://nodejs.org/api/http.html#serverclosecallback"
+      ]
+    },
+    {
+      "id": "node-v5-q18",
+      "domain": "ops",
+      "stem": "A pod runs both an HTTP API and a Kafka consumer that writes to Postgres. You are writing its SIGTERM handler. Which two steps belong in it? (Choose two.)",
+      "options": [
+        {
+          "text": "Stop the consumer from fetching, finish the current batch, and commit its offsets",
+          "correct": true,
+          "why": "Committing only processed offsets before leaving the group means the next owner of the partitions resumes exactly after finished work."
+        },
+        {
+          "text": "Fail readiness, close the listener after a short delay, and let in-flight HTTP requests finish",
+          "correct": true,
+          "why": "Traffic moves to other pods, and requests already accepted complete normally."
+        },
+        {
+          "text": "Call `server.closeAllConnections()` first so the pod exits quickly",
+          "correct": false,
+          "why": "It cuts in-flight requests, which is exactly what a graceful shutdown should avoid."
+        },
+        {
+          "text": "Commit the offsets of every fetched message, processed or not, before stopping",
+          "correct": false,
+          "why": "Committing unprocessed offsets loses those messages: the next consumer skips them."
+        },
+        {
+          "text": "Ignore SIGTERM and wait for SIGKILL so all work finishes",
+          "correct": false,
+          "why": "SIGKILL ends everything mid-flight at the end of the grace period, with no draining or commits."
+        }
+      ],
+      "explain": "Each input needs its own drain step: HTTP stops accepting and finishes requests, consumers stop fetching and commit only what they processed. Commit after processing, never before.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#consumerconfigs_enable.auto.commit",
+        "https://nodejs.org/api/http.html#serverclosecallback"
+      ]
+    },
+    {
+      "id": "node-v5-q19",
+      "domain": "ops",
+      "stem": "After a refactor, an e-commerce API calls `audit.log(event)` without `await` (\"fire and forget, it's just auditing\"). When the audit database had a 30 s blip, every API pod crashed with exit code 1 and restarted, turning an audit hiccup into a full outage. Which fix keeps auditing non-blocking but safe?",
+      "options": [
+        {
+          "text": "Add `await` so audit failures fail the request instead.",
+          "correct": false,
+          "why": "No crash, but now the audit store's latency and errors are on every request's critical path."
+        },
+        {
+          "text": "Attach a handler: `audit.log(event).catch(report)`.",
+          "correct": true,
+          "why": "A handled rejection doesn't crash the process; the request stays non-blocking, and failures are counted or retried somewhere visible."
+        },
+        {
+          "text": "Set `--unhandled-rejections=warn` on all pods.",
+          "correct": false,
+          "why": "It stops this crash but also hides every other unhandled rejection in the service."
+        },
+        {
+          "text": "Wrap the call site in `try/catch`.",
+          "correct": false,
+          "why": "Without `await`, the rejection happens after the try block has finished, so the catch never runs."
+        }
+      ],
+      "explain": "A fire-and-forget promise still needs a rejection handler, or Node's default crashes the process. Decouple non-critical side effects with `.catch` (or a queue), never by leaving the promise unhandled.",
+      "refs": [
+        "https://nodejs.org/api/cli.html#--unhandled-rejectionsmode"
+      ]
+    },
+    {
+      "id": "node-v5-q20",
+      "domain": "ops",
+      "stem": "A video-analytics API has legitimate CPU bursts that block its loop for up to 3 s. The liveness probe uses `timeoutSeconds: 1, periodSeconds: 5, failureThreshold: 1`. During traffic peaks, pods are restarted mid-burst; the survivors take on their load, block longer, and are restarted too. Which probe change fits?",
+      "options": [
+        {
+          "text": "Make liveness tolerate the worst legitimate stall (for example timeout 5 s, failure threshold 3), and use readiness to shed traffic.",
+          "correct": true,
+          "why": "Liveness should catch only a truly wedged process; readiness can take a busy pod out of rotation without killing its in-flight work."
+        },
+        {
+          "text": "Remove the liveness probe.",
+          "correct": false,
+          "why": "A pod that truly deadlocks would never be restarted."
+        },
+        {
+          "text": "Serve `/health` from a worker thread so it always answers in time.",
+          "correct": false,
+          "why": "The probe then says alive even when the main loop is wedged for good, which defeats it."
+        },
+        {
+          "text": "Make the HPA scale on probe failures.",
+          "correct": false,
+          "why": "Probe failures aren't an HPA metric, and the restarts would continue."
+        }
+      ],
+      "explain": "Aggressive liveness probes turn overload into a restart cascade, because each restart moves load to the survivors. Set liveness to catch only real hangs, and use readiness and autoscaling to handle load.",
+      "refs": [
+        "https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/"
+      ]
+    }
+  ]
+}

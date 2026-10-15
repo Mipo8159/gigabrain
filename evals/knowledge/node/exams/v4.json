@@ -1,0 +1,669 @@
+{
+  "topic": "node",
+  "variant": 4,
+  "of": 5,
+  "title": "Node.js in production — variant 4",
+  "description": "Untrusted input sizes, heartbeats on a blocked loop, async crypto, cloning cost, presence and idempotency across replicas, pool timeouts, consumer backpressure, decompression bombs, fetch failure semantics, hedging and metric cardinality.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "event-loop",
+      "name": "Event loop and blocking work",
+      "weight": 0.25
+    },
+    {
+      "id": "scaling",
+      "name": "Workers, processes and scaling out",
+      "weight": 0.2
+    },
+    {
+      "id": "streams-memory",
+      "name": "Streams, backpressure and memory",
+      "weight": 0.2
+    },
+    {
+      "id": "io",
+      "name": "Timeouts, cancellation and connections",
+      "weight": 0.2
+    },
+    {
+      "id": "ops",
+      "name": "Shutdown, failures and observability",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "node-v4-q01",
+      "domain": "event-loop",
+      "stem": "A smart-meter platform ingests 40 000 small JSON readings per second across 20 Node pods. A firmware bug makes a few thousand meters send their whole 50 MB history as one JSON body. Each one costs about 600 ms in `JSON.parse`, and readings from healthy meters on that pod time out. Which change protects ingestion?",
+      "options": [
+        {
+          "text": "Enforce a body size limit and reject oversized bodies with 413.",
+          "correct": true,
+          "why": "Rejecting by size happens before any parsing, so a buggy or hostile client can't buy 600 ms of the loop per request; history uploads can go through a separate streaming path."
+        },
+        {
+          "text": "Parse every body in a worker-thread pool so the main loop never parses JSON at all.",
+          "correct": false,
+          "why": "Small readings would then pay a clone and hand-off each, and the 50 MB bodies would still eat the pool's cores."
+        },
+        {
+          "text": "Retry the timed-out healthy readings on the meters with exponential backoff.",
+          "correct": false,
+          "why": "Retries add load while the pods are still stalled by the large bodies; nothing bounds the bad requests."
+        },
+        {
+          "text": "Add pods until each one receives fewer large bodies per minute.",
+          "correct": false,
+          "why": "Each large body still blocks whichever pod gets it for 600 ms; you just pay for more pods."
+        }
+      ],
+      "explain": "Synchronous parse cost scales with input size, and the client chooses the size. Put size limits in front of every parser on the request path, and route legitimate bulk data through a streaming path.",
+      "refs": [
+        "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+      ]
+    },
+    {
+      "id": "node-v4-q02",
+      "domain": "event-loop",
+      "stem": "A fleet-tracking service consumes GPS events with a JavaScript Kafka client whose heartbeats run on the Node event loop. Its batch handler computes route statistics for 20 000 events in one synchronous loop, about 15 s of CPU. Consumers keep getting kicked out of the group, partitions rebalance every few minutes, and lag grows. Which change fits?",
+      "options": [
+        {
+          "text": "Raise the session timeout to 5 minutes so slow batches are tolerated.",
+          "correct": false,
+          "why": "It stops the kicks but a genuinely dead consumer now goes unnoticed for 5 minutes, and the loop is still blocked for 15 s at a time."
+        },
+        {
+          "text": "Move the statistics to a worker pool and keep batches small.",
+          "correct": true,
+          "why": "With CPU work off the loop, heartbeats and fetches run on time, so the group stays stable; smaller batches also shorten the time between commits."
+        },
+        {
+          "text": "Add more consumer instances than there are partitions to share the CPU.",
+          "correct": false,
+          "why": "Consumers beyond the partition count sit idle, and each active one still blocks its own loop."
+        },
+        {
+          "text": "Commit offsets before processing so a rebalance loses no progress.",
+          "correct": false,
+          "why": "It changes delivery semantics to at-most-once, losing events on a crash, and doesn't stop the rebalances."
+        }
+      ],
+      "explain": "Anything that runs on the event loop, including client heartbeats, stops when you block it. A blocked loop looks like a dead process to the systems around it: group coordinators, load balancers, liveness probes. Keep long CPU work off the loop.",
+      "refs": [
+        "https://nodejs.org/api/worker_threads.html",
+        "https://kafka.apache.org/documentation/#consumerconfigs_session.timeout.ms"
+      ]
+    },
+    {
+      "id": "node-v4-q03",
+      "domain": "event-loop",
+      "stem": "To report the running version, a logistics API's `/health` handler calls `execSync('git rev-parse HEAD')`. Kubernetes probes it every 2 s on each pod, and the call takes 30 to 80 ms. Under load, p99 latency shows a sawtooth that matches the probe period. Which fix is right?",
+      "options": [
+        {
+          "text": "Use the async `exec` so the probe doesn't block the loop.",
+          "correct": false,
+          "why": "It no longer blocks the loop, but it still spawns a process every 2 s per pod for a value that never changes while the process runs."
+        },
+        {
+          "text": "Read the commit once, from a build-time env var.",
+          "correct": true,
+          "why": "The version is fixed for the life of the process, so reading it once (at build or start-up) makes the health check free."
+        },
+        {
+          "text": "Lower the probe frequency to every 30 s.",
+          "correct": false,
+          "why": "Fewer stalls, but each probe still blocks for up to 80 ms, and slower probes detect real failures later."
+        },
+        {
+          "text": "Move `/health` to a separate port served by a worker thread.",
+          "correct": false,
+          "why": "It isolates the probe, but now the probe no longer tests the main loop it is supposed to check."
+        }
+      ],
+      "explain": "Health endpoints run constantly, so they must be nearly free and must never do synchronous work. Values fixed for the life of the process are computed once at build or start-up.",
+      "refs": [
+        "https://nodejs.org/api/child_process.html#synchronous-process-creation"
+      ]
+    },
+    {
+      "id": "node-v4-q04",
+      "domain": "event-loop",
+      "stem": "A B2B messaging platform creates an RSA-4096 key pair for each new tenant with `crypto.generateKeyPairSync`, inside the onboarding request. Key generation takes 300 ms to 2 s. A partner onboarded 500 tenants through the API in one minute, and all other traffic on the affected pods stalled. Which change fits?",
+      "options": [
+        {
+          "text": "Use async `crypto.generateKeyPair`, and bound how many run at once.",
+          "correct": true,
+          "why": "The async version generates keys on the libuv threadpool, so the loop stays free; a concurrency bound stops onboarding bursts from monopolising the pool."
+        },
+        {
+          "text": "Switch to RSA-2048 to make each key cheaper to generate.",
+          "correct": false,
+          "why": "It reduces the cost per key but leaves synchronous CPU work on the request path and changes the security level."
+        },
+        {
+          "text": "Generate keys in `process.nextTick` so the response is sent first.",
+          "correct": false,
+          "why": "`nextTick` runs before the loop continues, so the block still happens immediately after."
+        },
+        {
+          "text": "Rate-limit onboarding to 10 tenants per minute per partner account.",
+          "correct": false,
+          "why": "Rate limiting caps the total, but each synchronous generation still blocks its pod for up to 2 s."
+        }
+      ],
+      "explain": "Node's `*Sync` crypto, zlib and fs APIs run on the main thread. The async variants move the work to libuv's threadpool, which is also finite, so bound concurrency for expensive operations and keep `*Sync` calls out of request paths.",
+      "refs": [
+        "https://nodejs.org/api/crypto.html#cryptogeneratekeypairtype-options-callback"
+      ]
+    },
+    {
+      "id": "node-v4-q05",
+      "domain": "event-loop",
+      "stem": "A collaborative-whiteboard server keeps each board's state (about 5 MB of objects) in memory and runs `structuredClone(board)` on every edit \"to avoid accidental mutation\". Boards get 200 edits per second at peak. Event-loop utilization is 0.95 and GC time is high. Which change addresses the cause?",
+      "options": [
+        {
+          "text": "Replace `structuredClone` with `JSON.parse(JSON.stringify(board))`, which is faster for plain data.",
+          "correct": false,
+          "why": "Still a full deep copy of 5 MB per edit; it may even be slower, and it drops non-JSON types."
+        },
+        {
+          "text": "Run the clones in a worker thread so the main loop stays free.",
+          "correct": false,
+          "why": "Sending the board to a worker is itself a structured clone on the main thread."
+        },
+        {
+          "text": "Apply edits as small patches, or use structural sharing so only the changed path is copied.",
+          "correct": true,
+          "why": "A per-edit cost proportional to the edit, not the board, removes both the CPU and the garbage that drives GC."
+        },
+        {
+          "text": "Raise `--max-semi-space-size` so short-lived clones are collected more cheaply.",
+          "correct": false,
+          "why": "It might trim GC time a little, but the 5 MB copy per edit, which is the CPU cost, remains."
+        }
+      ],
+      "explain": "Deep copies scale with the size of the whole structure, not the change. At high rates they burn CPU and create garbage that costs GC time. Make the cost of an update proportional to the update.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#structuredclonevalue-options"
+      ]
+    },
+    {
+      "id": "node-v4-q06",
+      "domain": "scaling",
+      "stem": "A team chat app shows who is online. Each Node pod adds users to a `Set` on WebSocket connect and removes them on disconnect. With 12 pods, users see each other online only when connected to the same pod, and after a pod crash its users appear online forever on the pods that synced with it. Which design fits?",
+      "options": [
+        {
+          "text": "Broadcast every connect and disconnect to all pods and let each keep a full copy of the set.",
+          "correct": false,
+          "why": "Copies drift: a crashed pod never sends its disconnects, so its users stay online in every copy."
+        },
+        {
+          "text": "Store presence in Redis with a short TTL that each connection's heartbeat refreshes.",
+          "correct": true,
+          "why": "A shared store gives one view for all pods, and expiry removes users whose pod died without cleaning up."
+        },
+        {
+          "text": "Use sticky sessions so each user always reaches the same pod.",
+          "correct": false,
+          "why": "Stickiness pins a user's connection, not the view of other users, who are on other pods."
+        },
+        {
+          "text": "Query every pod over HTTP for its local set when a user opens the contact list.",
+          "correct": false,
+          "why": "It works at 12 pods, but each contact-list load fans out to every pod, and a crashed pod's state is just missing."
+        }
+      ],
+      "explain": "Shared, short-lived state such as presence belongs in a shared store with expiry. TTL plus heartbeat is what makes the state self-healing when a replica dies without cleaning up.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/expire/"
+      ]
+    },
+    {
+      "id": "node-v4-q07",
+      "domain": "scaling",
+      "stem": "A support-ticket service is going from 1 pod to 10 behind a round-robin load balancer. Which two pieces of its current code will behave incorrectly once it runs as 10 replicas? (Choose two.)",
+      "options": [
+        {
+          "text": "A `setInterval` that closes stale tickets and sends a \"closed\" e-mail for each",
+          "correct": true,
+          "why": "Every replica runs the timer, so each stale ticket gets closed and e-mailed up to 10 times."
+        },
+        {
+          "text": "A module-level `Map` that de-duplicates incoming webhook ids",
+          "correct": true,
+          "why": "Retried deliveries often land on a different pod, which has never seen the id, so duplicates get processed."
+        },
+        {
+          "text": "A regex compiled once at module load and reused by every request",
+          "correct": false,
+          "why": "Read-only per-process data is identical on every replica, so duplicating it is harmless."
+        },
+        {
+          "text": "A temp file written and deleted within a single upload request",
+          "correct": false,
+          "why": "The file lives only for the request that created it on that pod, so no other replica needs it."
+        },
+        {
+          "text": "Request-scoped memoization of permission lookups via `AsyncLocalStorage`",
+          "correct": false,
+          "why": "It lasts only for one request on one pod, so no cross-replica consistency is needed."
+        }
+      ],
+      "explain": "Before scaling out, sort in-process state into per-request (fine), read-only per-process (fine), and shared or long-lived mutable state or side effects (broken). The last group goes to a shared store, a single scheduler, or idempotent design.",
+      "refs": [
+        "https://12factor.net/processes"
+      ]
+    },
+    {
+      "id": "node-v4-q08",
+      "domain": "scaling",
+      "stem": "A payments webhook endpoint runs on 6 pods. The provider retries any delivery not acknowledged within 5 s, and twice last month the same `payment.succeeded` event was processed concurrently on two pods, crediting the customer twice. Which change prevents double processing?",
+      "options": [
+        {
+          "text": "Acknowledge the webhook immediately, before processing, so it is never retried.",
+          "correct": false,
+          "why": "It stops retries but a crash after the ack loses the event entirely."
+        },
+        {
+          "text": "A unique constraint on the event id, in the same transaction as the credit.",
+          "correct": true,
+          "why": "The database admits only one transaction per event id, whichever pod gets there first; the duplicate fails the insert and becomes a no-op."
+        },
+        {
+          "text": "Use an in-process lock keyed by event id around the handler.",
+          "correct": false,
+          "why": "The duplicate arrives at a different pod, which has its own locks, so both proceed."
+        },
+        {
+          "text": "Route all webhooks to one pod with sticky routing on the event id.",
+          "correct": false,
+          "why": "It creates a single point of failure, and retries during that pod's restart still race."
+        }
+      ],
+      "explain": "With many replicas and at-least-once delivery, duplicates are certain. Make the effect idempotent where the data lives: a unique key on the event id, committed in the same transaction as the side effect.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/ddl-constraints.html#DDL-CONSTRAINTS-UNIQUE-CONSTRAINTS"
+      ]
+    },
+    {
+      "id": "node-v4-q09",
+      "domain": "scaling",
+      "stem": "During a Postgres slowdown, a parcel-locker API's memory climbed until pods were OOMKilled, and no request ever returned an error: they just waited. It uses `new pg.Pool({ max: 10 })` with default settings. Which change makes the service fail fast instead?",
+      "options": [
+        {
+          "text": "Raise `max` to 50 so more queries run at once.",
+          "correct": false,
+          "why": "More connections put more load on an already slow database and only delay the queue's growth."
+        },
+        {
+          "text": "Set `idleTimeoutMillis` to 1 s so pooled connections are recycled faster.",
+          "correct": false,
+          "why": "That closes idle connections; during a slowdown no connection is idle, so nothing changes."
+        },
+        {
+          "text": "Set `connectionTimeoutMillis`; answer 503 when acquiring times out.",
+          "correct": true,
+          "why": "The default is to wait forever for a free connection; a bounded acquire time turns an invisible queue into fast, visible errors."
+        },
+        {
+          "text": "Add a retry around every query.",
+          "correct": false,
+          "why": "Retries add more waiters to the same saturated pool."
+        }
+      ],
+      "explain": "Every queue needs a bound and a timeout, including the hidden one inside a connection pool. node-postgres waits for a free connection indefinitely by default, so an overloaded database turns into memory growth instead of errors.",
+      "refs": [
+        "https://node-postgres.com/apis/pool"
+      ]
+    },
+    {
+      "id": "node-v4-q10",
+      "domain": "streams-memory",
+      "stem": "A clickstream service consumes Kafka messages and forwards each to an analytics HTTP API. The handler does `pending.push(send(msg))` and returns immediately; a timer awaits the array every second. When the analytics API slows to 2 s per call, memory grows by gigabytes and the pod is OOMKilled. Which change fits?",
+      "options": [
+        {
+          "text": "Increase the send timeout to 10 s.",
+          "correct": false,
+          "why": "Slower completion means even more pending sends piling up in memory."
+        },
+        {
+          "text": "Bound in-flight sends and stop consuming while the bound is reached.",
+          "correct": true,
+          "why": "Capping in-flight work and pausing consumption (or awaiting before taking more) passes the sink's slowness back to Kafka, where the backlog is stored safely on disk."
+        },
+        {
+          "text": "Write the pending messages to local disk when memory gets high.",
+          "correct": false,
+          "why": "It adds a second, fragile buffer on an ephemeral disk; Kafka is already a durable buffer."
+        },
+        {
+          "text": "Use `Promise.allSettled` on the array every 100 ms instead of every second.",
+          "correct": false,
+          "why": "How often you check doesn't limit how many sends start."
+        }
+      ],
+      "explain": "Backpressure means the slowest stage sets the pace. A consumer that accepts work faster than its sink finishes it must bound in-flight work and stop pulling; let the broker hold the backlog instead of the heap.",
+      "refs": [
+        "https://nodejs.org/en/learn/modules/backpressuring-in-streams"
+      ]
+    },
+    {
+      "id": "node-v4-q11",
+      "domain": "streams-memory",
+      "stem": "A feature-flag SDK exposes a long-lived `flags` EventEmitter. A middleware calls `flags.on('change', () => recompute(req))` on every request to keep the request's view fresh. After a day, logs show `MaxListenersExceededWarning`, heap snapshots show millions of `req` objects retained, and memory climbs steadily. Which fix is right?",
+      "options": [
+        {
+          "text": "Call `flags.setMaxListeners(0)` so the emitter stops warning about listeners.",
+          "correct": false,
+          "why": "It silences the warning; every request still leaves a listener that keeps its `req` alive."
+        },
+        {
+          "text": "One start-up listener updating shared state that requests read.",
+          "correct": true,
+          "why": "One process-wide subscription has a fixed cost, and requests read the current flags without leaving anything behind."
+        },
+        {
+          "text": "Use `flags.once('change', …)` so each listener removes itself.",
+          "correct": false,
+          "why": "Listeners are removed only after a change event; between changes, listeners from every request accumulate."
+        },
+        {
+          "text": "Recreate the `flags` emitter every hour to drop old listeners.",
+          "correct": false,
+          "why": "It periodically discards listeners, including legitimate ones, and the leak returns within the hour."
+        }
+      ],
+      "explain": "Subscribing to a long-lived emitter from short-lived scopes (requests, jobs) leaks unless you unsubscribe; the closures keep their whole scope alive. Prefer one long-lived subscription that updates state read per request.",
+      "refs": [
+        "https://nodejs.org/api/events.html#emittersetmaxlistenersn"
+      ]
+    },
+    {
+      "id": "node-v4-q12",
+      "domain": "streams-memory",
+      "stem": "A finance platform generates month-end reconciliation CSVs (up to 3 GB) by appending rows to a string, then uploading the string to S3. Pods need 8 GiB of memory for the job, and it still crashes on the largest tenants. Which change fits?",
+      "options": [
+        {
+          "text": "Build an array of rows and `join('')` once at the end.",
+          "correct": false,
+          "why": "It is faster than repeated concatenation, but the whole file is still held in memory at once."
+        },
+        {
+          "text": "Run the job in a worker thread with a larger `resourceLimits` heap.",
+          "correct": false,
+          "why": "It isolates the crash, but the same 3 GB string still has to fit somewhere."
+        },
+        {
+          "text": "Stream DB cursor rows into a multipart S3 upload via `pipeline`.",
+          "correct": true,
+          "why": "Rows flow through a bounded buffer and leave as parts, so memory stays at a few parts regardless of file size."
+        },
+        {
+          "text": "Split tenants across more pods so each pod generates fewer reports.",
+          "correct": false,
+          "why": "The largest single report still has to fit in one pod's memory."
+        }
+      ],
+      "explain": "When an output can be larger than memory, never materialize it. Stream from source to sink (cursor, transform, multipart upload) so memory is bounded by buffer sizes, not data size.",
+      "refs": [
+        "https://nodejs.org/api/stream.html#streampipelinesource-transforms-destination-options",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/mpuoverview.html"
+      ]
+    },
+    {
+      "id": "node-v4-q13",
+      "domain": "streams-memory",
+      "stem": "A log-shipping endpoint accepts gzip-compressed batches and calls `await gunzip(body)` (the promisified `zlib.gunzip`) before parsing. Bodies are capped at 10 MB. A pentester sent a 10 MB file that decompresses to 10 GB, and the pod died. Which change fits?",
+      "options": [
+        {
+          "text": "Lower the compressed body cap to 1 MB.",
+          "correct": false,
+          "why": "Compression ratios over 1000:1 are easy to craft, so 1 MB can still expand to gigabytes."
+        },
+        {
+          "text": "Decompress in a worker thread.",
+          "correct": false,
+          "why": "The worker's memory is part of the same process, and the decompressed data is still huge."
+        },
+        {
+          "text": "Bound the output with `maxOutputLength`, or stream through gunzip with a byte counter that aborts.",
+          "correct": true,
+          "why": "The limit has to apply to decompressed bytes; `maxOutputLength` or a counting stream stops expansion as soon as it passes the bound."
+        },
+        {
+          "text": "Check the ratio by gunzipping once to measure, then again to process.",
+          "correct": false,
+          "why": "Measuring requires doing the dangerous decompression first."
+        }
+      ],
+      "explain": "A size limit on compressed input says little about the decompressed size. Put the bound on output bytes (`maxOutputLength`, or a counting stream) for anything that expands untrusted data.",
+      "refs": [
+        "https://nodejs.org/api/zlib.html#class-options"
+      ]
+    },
+    {
+      "id": "node-v4-q14",
+      "domain": "io",
+      "stem": "A shipping-rates service wraps calls to a carrier API in a circuit breaker that opens after 50% failures. During a carrier incident, the API returned 503 to every call for 20 minutes, yet the breaker never opened and every request waited for it. The call is `breaker.fire(() => fetch(url))`. Which change fixes it?",
+      "options": [
+        {
+          "text": "Lower the breaker's failure threshold to 10%.",
+          "correct": false,
+          "why": "The breaker sees 0% failures, so no threshold would trip it."
+        },
+        {
+          "text": "Add a timeout so slow calls count as failures.",
+          "correct": false,
+          "why": "Useful in general, but these calls answered quickly with 503 and still counted as successes."
+        },
+        {
+          "text": "Throw on `!res.ok` (5xx, 429) inside the wrapped function.",
+          "correct": true,
+          "why": "`fetch` resolves on any HTTP status; only network errors reject. Converting failure statuses to errors lets the breaker count them."
+        },
+        {
+          "text": "Retry every 503 three times before returning.",
+          "correct": false,
+          "why": "Retries triple the load on a failing carrier and still never trip the breaker."
+        }
+      ],
+      "explain": "`fetch` rejects only on network failure; 4xx and 5xx responses resolve normally. Anything that counts failures (breakers, retries, metrics) must decide which statuses are failures and convert them explicitly.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#fetch"
+      ]
+    },
+    {
+      "id": "node-v4-q15",
+      "domain": "io",
+      "stem": "An order service calls an internal Go service through Node's `fetch` with default settings, about 20 requests per second. The Go server closes idle keep-alive connections after 2 s. Logs show a steady trickle of `TypeError: fetch failed` with cause `ECONNRESET` on the first request after a quiet moment. Which change fits?",
+      "options": [
+        {
+          "text": "Disable keep-alive by sending `Connection: close`.",
+          "correct": false,
+          "why": "No more stale sockets, but every request pays a new connection."
+        },
+        {
+          "text": "Make the Go server's idle timeout 60 s.",
+          "correct": false,
+          "why": "It may work if you own that service, but it trades the race for more idle connections on the server."
+        },
+        {
+          "text": "Set the client's keep-alive timeout below 2 s via an undici `Agent`, and retry idempotent requests once on `ECONNRESET`.",
+          "correct": true,
+          "why": "undici keeps idle sockets for 4 s by default, longer than the server's 2 s, so it sometimes reuses a socket the server is closing. A shorter client timeout removes most of the race, and one safe retry covers the rest. (A server `Keep-Alive: timeout=` hint would override that 4 s default; Go sends none here.)"
+        },
+        {
+          "text": "Increase the fetch timeout to 30 s.",
+          "correct": false,
+          "why": "The error is an immediate reset, not slowness; a longer timeout changes nothing."
+        }
+      ],
+      "explain": "Keep-alive is safe only when the client gives up idle sockets before the server does. Match timeouts (client below server), and make idempotent calls retry once on a reset of a reused connection.",
+      "refs": [
+        "https://undici.nodejs.org/#/docs/api/Agent",
+        "https://nodejs.org/api/globals.html#fetch"
+      ]
+    },
+    {
+      "id": "node-v4-q16",
+      "domain": "io",
+      "stem": "A payments gateway logs outbound failures as `logger.error({ msg: err.message })`. During an incident, the logs show thousands of `fetch failed` lines and on-call can't tell whether DNS, TLS, refused connections or resets were the problem. Which logging change gives them that?",
+      "options": [
+        {
+          "text": "Log `err.stack` as well.",
+          "correct": false,
+          "why": "The stack points into undici internals; it doesn't name the network failure."
+        },
+        {
+          "text": "Log `err.cause`: its `code` (`ENOTFOUND`, `ECONNRESET`…) and message.",
+          "correct": true,
+          "why": "`fetch` wraps the real network error in a `TypeError('fetch failed')`; the specific failure is in `.cause`."
+        },
+        {
+          "text": "Switch from `fetch` to `axios`, which gives better error messages.",
+          "correct": false,
+          "why": "Changing HTTP client is a large migration to fix one logging line."
+        },
+        {
+          "text": "Turn on `NODE_DEBUG=net,http` in production to see socket-level detail.",
+          "correct": false,
+          "why": "Very noisy and costly in production, and it doesn't attach the cause to the failing request's log line."
+        }
+      ],
+      "explain": "Node's `fetch` reports every network failure as `TypeError: fetch failed`; the real reason (DNS, refused, reset, TLS) is on `err.cause`. Always log the cause chain for outbound errors.",
+      "refs": [
+        "https://nodejs.org/api/globals.html#fetch"
+      ]
+    },
+    {
+      "id": "node-v4-q17",
+      "domain": "io",
+      "stem": "A product page calls a replicated pricing cache whose p50 is 5 ms but whose p99 is 400 ms because of occasional slow replicas. The page's p99 budget is 100 ms, reads are idempotent, and the cache team accepts about 5% extra load. Which pattern fits?",
+      "options": [
+        {
+          "text": "Set a 50 ms timeout and retry once on timeout.",
+          "correct": false,
+          "why": "A retry fires only after the full 50 ms wait, so slow calls cost 50 ms plus a second call, and it fails outright if both are slow."
+        },
+        {
+          "text": "Send every read to two replicas and use the first answer.",
+          "correct": false,
+          "why": "It cuts tail latency but doubles cache load, far beyond the 5% budget."
+        },
+        {
+          "text": "Raise the HTTP agent's `maxSockets` so requests don't queue.",
+          "correct": false,
+          "why": "The latency comes from slow replicas, not from client-side queueing."
+        },
+        {
+          "text": "Hedge: if no answer by about p95 (say 15 ms), send a second request and abort the loser.",
+          "correct": true,
+          "why": "Only the slowest ~5% of reads get a second request, which fits the load budget, and aborting the loser with its `AbortController` frees its socket."
+        }
+      ],
+      "explain": "Hedged requests trade a small, bounded amount of extra load for a much shorter tail: wait about p95, then send a backup to another replica and cancel whichever loses. They only suit idempotent reads.",
+      "refs": [
+        "https://research.google/pubs/the-tail-at-scale/"
+      ]
+    },
+    {
+      "id": "node-v4-q18",
+      "domain": "ops",
+      "stem": "To stop crash loops caused by stray promise rejections, a team started all services with `--unhandled-rejections=warn`. The crashes stopped, but now some requests hang until the client times out, and a nightly job sometimes reports success after silently skipping work. Which approach is right?",
+      "options": [
+        {
+          "text": "Keep `warn` and add a `process.on('unhandledRejection')` handler that logs to Sentry.",
+          "correct": false,
+          "why": "Better visibility, but the process still continues after unknown failures, so hangs and silent skips remain."
+        },
+        {
+          "text": "Use `--unhandled-rejections=none` to remove the warning noise as well.",
+          "correct": false,
+          "why": "It hides the failures completely; the hangs and wrong results continue."
+        },
+        {
+          "text": "Wrap every async function in a try/catch that returns `null` on error.",
+          "correct": false,
+          "why": "It swaps crashes for silent nulls, which is the same silent-failure problem spread across the code."
+        },
+        {
+          "text": "Restore the default `throw`, fix the unhandled paths, and let the orchestrator restart crashed pods.",
+          "correct": true,
+          "why": "An unhandled rejection means a code path nobody handles; crashing makes it visible and restarts from a known state, and fixing each path stops the loop."
+        }
+      ],
+      "explain": "An unhandled rejection is a bug report. The default (`throw`) turns it into a visible crash and a clean restart; downgrading it trades crashes for hung requests and silently wrong results.",
+      "refs": [
+        "https://nodejs.org/api/cli.html#--unhandled-rejectionsmode",
+        "https://nodejs.org/api/process.html#event-unhandledrejection"
+      ]
+    },
+    {
+      "id": "node-v4-q19",
+      "domain": "ops",
+      "stem": "A video-transcoding worker pulls jobs from SQS, and each job takes 2 to 10 minutes. On every deploy, pods get SIGTERM and are SIGKILLed 30 s later; the interrupted jobs reappear after the visibility timeout and restart from zero, so some videos are processed three times. Which shutdown design fits?",
+      "options": [
+        {
+          "text": "Ignore SIGTERM so the worker keeps going until it finishes.",
+          "correct": false,
+          "why": "Kubernetes sends SIGKILL at the end of the grace period anyway, so the job is still cut."
+        },
+        {
+          "text": "On SIGTERM stop pulling, then checkpoint progress so the next run resumes, within a grace period sized to the checkpoint.",
+          "correct": true,
+          "why": "Stopping intake prevents new work, and checkpointing makes an interrupted job resumable and idempotent, so a cut costs minutes instead of a full re-run."
+        },
+        {
+          "text": "Set `terminationGracePeriodSeconds` to 15 minutes.",
+          "correct": false,
+          "why": "It works for most jobs but makes every rollout wait up to 15 minutes per pod, and crashes still restart jobs from zero."
+        },
+        {
+          "text": "Delete the SQS message as soon as a job starts.",
+          "correct": false,
+          "why": "Interrupted jobs are then lost, not repeated."
+        }
+      ],
+      "explain": "Long-running workers need two things: stop taking new work on SIGTERM, and make in-flight work resumable (checkpoints, idempotent steps). Grace periods should cover a checkpoint, not a whole job.",
+      "refs": [
+        "https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination",
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html"
+      ]
+    },
+    {
+      "id": "node-v4-q20",
+      "domain": "ops",
+      "stem": "A delivery API added a Prometheus histogram `http_request_duration_seconds` with labels `route`, `status` and `userId`, using prom-client. Over a week, pod memory grew steadily, `/metrics` responses reached 200 MB and took seconds to serialize, and the Prometheus server ran short of memory. Which change fits?",
+      "options": [
+        {
+          "text": "Scrape `/metrics` less often.",
+          "correct": false,
+          "why": "The series still exist in process memory and in Prometheus; fewer scrapes only reduce how often you pay to serialize them."
+        },
+        {
+          "text": "Reset the registry every hour.",
+          "correct": false,
+          "why": "It loses data and breaks counter semantics while the cardinality returns within the hour."
+        },
+        {
+          "text": "Keep `userId` but switch from a histogram to a summary to cut the bucket series.",
+          "correct": false,
+          "why": "A summary per user still creates one series set per user."
+        },
+        {
+          "text": "Drop `userId`; keep bounded labels (route template, status class).",
+          "correct": true,
+          "why": "Every distinct label set is a separate series in the process and in Prometheus; bounded labels keep the series count fixed."
+        }
+      ],
+      "explain": "Metric labels must have bounded cardinality: route templates, status classes, regions. Per-user or per-request ids belong in logs and traces, not metric labels.",
+      "refs": [
+        "https://prometheus.io/docs/practices/naming/#labels"
+      ]
+    }
+  ]
+}

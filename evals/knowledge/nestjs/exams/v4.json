@@ -1,0 +1,673 @@
+{
+  "topic": "nestjs",
+  "variant": 4,
+  "of": 5,
+  "title": "NestJS at scale — variant 4",
+  "description": "Marketplace, banking, streaming, HR and gaming: what to extract first, REQUEST bubbling, events vs transactions, DI-aware global enhancers, tenant context, timeouts, filter scope, Kafka commits and config rotation.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "modules",
+      "name": "Module boundaries, DI and scopes",
+      "weight": 0.25
+    },
+    {
+      "id": "pipeline",
+      "name": "Request pipeline and cross-cutting concerns",
+      "weight": 0.2
+    },
+    {
+      "id": "messaging",
+      "name": "Microservices, transports and CQRS",
+      "weight": 0.2
+    },
+    {
+      "id": "operations",
+      "name": "Config, secrets, lifecycle and shutdown",
+      "weight": 0.15
+    },
+    {
+      "id": "seams",
+      "name": "Testing seams, hexagonal structure and builds",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "nestjs-v4-q01",
+      "domain": "modules",
+      "stem": "A marketplace monolith (50 modules, 9 teams) must move one module into its own service this quarter to prove the approach. Candidates: `UsersModule` (imported by 41 modules), `SearchModule` (imported by 12, reads the catalog tables directly), `NotificationsModule` (imported by nothing; it only handles domain events and calls email and push providers), and `PricingModule` (imported by 9, shares a transaction with checkout). Which should go first?",
+      "options": [
+        {
+          "text": "`UsersModule`, because extracting the most-used module delivers the biggest win",
+          "correct": false,
+          "why": "Tempting for impact, but 41 importers turn every in-process call into a network call at once; it's the riskiest first cut."
+        },
+        {
+          "text": "`NotificationsModule`",
+          "correct": true,
+          "why": "Nothing imports it and it already talks through events, so the cut is just moving event delivery onto a broker."
+        },
+        {
+          "text": "`PricingModule`, because it has few importers",
+          "correct": false,
+          "why": "Few importers, but it shares a transaction with checkout; splitting it means replacing a local transaction with a distributed workflow."
+        },
+        {
+          "text": "`SearchModule`, because search scales differently from the rest of the app",
+          "correct": false,
+          "why": "A good later candidate, but it reads another module's tables directly, so it first needs a data contract."
+        }
+      ],
+      "explain": "Extract first the module with the lowest fan-in that already communicates asynchronously and owns its data. The module graph (imports, shared tables, shared transactions) tells you the cost of each cut.",
+      "refs": [
+        "https://docs.nestjs.com/modules",
+        "https://docs.nestjs.com/microservices/basics"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q02",
+      "domain": "modules",
+      "stem": "An HR SaaS `FeatureFlagService` loads all flags into memory in `onModuleInit` and is used by about 90 providers. To support per-user targeting, a developer injected `REQUEST` into it to read the current user. Since then, every flag returns its default value and p95 latency rose from 40 ms to 70 ms. What explains both symptoms, and what is the fix?",
+      "options": [
+        {
+          "text": "Flags are cached per module; mark the service `@Global()` so all modules share one cache",
+          "correct": false,
+          "why": "Global would not change anything here: the service is no longer a singleton at all, and its init hook no longer runs."
+        },
+        {
+          "text": "Request scope skips `onModuleInit` and bubbles; keep a singleton with `isEnabled(flag, user)`",
+          "correct": true,
+          "why": "Request-scoped instances skip `onModuleInit`, so the cache is never loaded, and scope bubbling rebuilds every dependent per request; passing the user as an argument fixes both."
+        },
+        {
+          "text": "The `REQUEST` object is not available yet in `onModuleInit`; load flags lazily on the first `isEnabled` call instead",
+          "correct": false,
+          "why": "Lazy loading would fill the cache per request instance, adding a flag fetch to every request, and the 90 providers would remain request-scoped."
+        },
+        {
+          "text": "Make the service `Scope.TRANSIENT` so each consumer has its own flags",
+          "correct": false,
+          "why": "Transient instances are per consumer, not per request, so the user they read would be wrong for most requests."
+        }
+      ],
+      "explain": "Injecting `REQUEST` makes a provider request-scoped and the scope bubbles to everything that depends on it; request-scoped instances also skip `onModuleInit`. Per-request data should travel as method arguments or through async context.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/injection-scopes#scope-hierarchy",
+        "https://docs.nestjs.com/fundamentals/lifecycle-events"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q03",
+      "domain": "modules",
+      "stem": "In a ticket marketplace, placing an order must insert the order and decrement seat inventory atomically; overselling a sold-out concert is the worst failure. `OrdersModule` already imports `CatalogModule`, and Catalog never needs Orders. An architect proposes that Orders emit `OrderPlaced` with `@nestjs/event-emitter` and Catalog decrement inventory in a listener, \"to decouple the modules\". What do you recommend?",
+      "options": [
+        {
+          "text": "Accept the proposal; events are always the better way to connect modules",
+          "correct": false,
+          "why": "Events decouple, but they hide a hard atomicity rule behind an emitter: whether the decrement joins the order's transaction now depends on listener options and context plumbing, and the next change can break it silently."
+        },
+        {
+          "text": "Keep the direct call: Orders uses Catalog's exported service inside the same transaction",
+          "correct": true,
+          "why": "The dependency already runs one way and the rule needs atomicity, so a synchronous call in one transaction is the right coupling."
+        },
+        {
+          "text": "Accept the proposal, but make the listener `async: true` so it doesn't slow down checkout",
+          "correct": false,
+          "why": "Asynchronous handling widens the window between the order and the decrement, making oversell more likely."
+        },
+        {
+          "text": "Merge Catalog into Orders so the transaction is local to one module",
+          "correct": false,
+          "why": "The transaction is already local; merging loses a boundary that other modules rely on, for no gain."
+        }
+      ],
+      "explain": "Use events to remove dependencies that point the wrong way or to cross boundaries where eventual consistency is acceptable. When an invariant spans two modules and the dependency is already one-way, a direct call inside one transaction is the correct design.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/events",
+        "https://docs.nestjs.com/techniques/database#transactions"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q04",
+      "domain": "modules",
+      "stem": "A bank's API registers an `AuditInterceptor` with `app.useGlobalInterceptors(new AuditInterceptor(...))` in `main.ts`. Because it can't get the `AuditRepository` from DI there, a developer constructed one with `new AuditRepository(new DataSource(config))`. Postgres now shows a second connection pool from every pod, 400 pods in total, and audit writes don't join the request transaction. What is the right fix?",
+      "options": [
+        {
+          "text": "Register it with `APP_INTERCEPTOR` in a module that imports the audit module",
+          "correct": true,
+          "why": "Nest builds it in the module tree, so it injects the existing `AuditRepository` and pool, and tests build it the same way."
+        },
+        {
+          "text": "Use `app.get(AuditRepository)` in `main.ts` and pass the result into the constructor",
+          "correct": false,
+          "why": "It reuses the pool in production, but the interceptor still lives only in `main.ts`, so tests and other entry points don't get auditing."
+        },
+        {
+          "text": "Lower the second pool to 2 connections per pod to stay within `max_connections`",
+          "correct": false,
+          "why": "It reduces the damage, but keeps 800 extra connections and audit writes still bypass the request's transaction."
+        },
+        {
+          "text": "Make `AuditRepository` `@Global()` so `main.ts` can see it",
+          "correct": false,
+          "why": "Global affects module visibility, not code outside the container; a `new` in `main.ts` still bypasses DI."
+        }
+      ],
+      "explain": "Enhancers created with `new` in `main.ts` sit outside DI. When they need dependencies, register them with the `APP_*` tokens so they share the container's instances and lifecycle.",
+      "refs": [
+        "https://docs.nestjs.com/interceptors#binding-interceptors"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q05",
+      "domain": "modules",
+      "stem": "A multiplayer game's Nest WebSocket gateway keeps a singleton `Map` of connected players per match. The game now runs 10 pods behind a load balancer, and players in the same match are often connected to different pods. Broadcasts reach only players on the sending pod. What should change?",
+      "options": [
+        {
+          "text": "Use sticky sessions so each player always reconnects to the same pod",
+          "correct": false,
+          "why": "Stickiness keeps one player on one pod, but players of one match still sit on different pods."
+        },
+        {
+          "text": "Make the gateway's state provider request-scoped so each connection gets fresh state",
+          "correct": false,
+          "why": "That makes state per request, the opposite of shared; it doesn't cross pods either."
+        },
+        {
+          "text": "Use a Redis-backed Socket.IO adapter, and keep match membership in a shared store",
+          "correct": true,
+          "why": "The adapter relays broadcasts between pods over Redis, so a room emit reaches players on every pod."
+        },
+        {
+          "text": "Route all players of a match to one pod by hashing the match ID at the load balancer",
+          "correct": false,
+          "why": "It can work, but players must know their match before connecting, and a hot match overloads one pod."
+        }
+      ],
+      "explain": "A Nest singleton is one per process, not one per cluster. State or fan-out that must span pods needs a shared medium, such as the Redis adapter for WebSockets.",
+      "refs": [
+        "https://docs.nestjs.com/websockets/adapter"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q06",
+      "domain": "pipeline",
+      "stem": "A B2B HR platform is multi-tenant in one database; every repository adds `WHERE tenant_id = :tenant` using a value read from `nestjs-cls`. The tenant must come from the verified JWT claim, never from client input. Today a middleware sets it from the `X-Tenant-Id` header before routing, and the global `JwtAuthGuard` runs afterwards. Where should the tenant be set?",
+      "options": [
+        {
+          "text": "Keep the middleware, but also check that the header matches the JWT inside each repository",
+          "correct": false,
+          "why": "It catches spoofing, but every repository repeats the check, and one that forgets it leaks data."
+        },
+        {
+          "text": "In the JWT guard, after verification, write the claim into CLS",
+          "correct": true,
+          "why": "The value is set only from a verified token, before interceptors, pipes and the handler run, and the CLS store already exists from the middleware."
+        },
+        {
+          "text": "In a request-scoped `TenantService` constructed from `REQUEST.headers`",
+          "correct": false,
+          "why": "It still trusts the header, and request scope bubbles through every repository."
+        },
+        {
+          "text": "In a global interceptor that decodes the JWT payload without verifying it, for speed",
+          "correct": false,
+          "why": "Decoding without verification trusts a forgeable claim, which is the same weakness as the header."
+        }
+      ],
+      "explain": "Request context is only as trustworthy as the stage that writes it. Write security-relevant context, such as tenant or user, at the point where it has been verified, normally in the auth guard, and read it everywhere else.",
+      "refs": [
+        "https://docs.nestjs.com/recipes/async-local-storage",
+        "https://docs.nestjs.com/guards"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q07",
+      "domain": "pipeline",
+      "stem": "A bank adds a global `TimeoutInterceptor` that applies RxJS `timeout(5000)` and maps the error to a 504. Under load, `POST /transfers` calls sometimes take 7 s; clients get 504, retry, and customers are charged twice. Logs show the first attempt's database writes completing after the 504. Which change fixes the double charge?",
+      "options": [
+        {
+          "text": "Lower the timeout to 2 s so slow transfers fail before they write",
+          "correct": false,
+          "why": "It shifts the race; some transfers still write after the client was told they failed, and more requests fail."
+        },
+        {
+          "text": "Have the interceptor also roll back the transaction when the timeout fires",
+          "correct": false,
+          "why": "The interceptor holds no handle to the transaction, and the commit may already have happened."
+        },
+        {
+          "text": "Exclude `/transfers` from the interceptor so it never times out",
+          "correct": false,
+          "why": "Clients and load balancers will still time out and retry, so duplicates remain; only the 504s disappear."
+        },
+        {
+          "text": "Make transfers idempotent with a client-supplied idempotency key",
+          "correct": true,
+          "why": "Unsubscribing does not cancel the handler's work; idempotency makes retries safe whatever the timing."
+        }
+      ],
+      "explain": "An RxJS timeout in an interceptor stops waiting; it does not stop the work behind the promise. Any operation that a client may retry after a timeout must be idempotent.",
+      "refs": [
+        "https://docs.nestjs.com/interceptors#more-operators"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q08",
+      "domain": "pipeline",
+      "stem": "A video streaming API has a global `SentryFilter` that reports every unexpected error. The billing team added `@UseFilters(BillingErrorFilter)` with `@Catch()` on `BillingController` to format payment errors for the apps. Two weeks later, a null-pointer bug in billing produced 9,000 500s and not one Sentry event. Why, and what is the fix?",
+      "options": [
+        {
+          "text": "Controller filters run after global filters and overwrite the report; register `SentryFilter` at controller level too",
+          "correct": false,
+          "why": "Only one filter handles each error, so adding Sentry at controller level would just compete with the billing filter."
+        },
+        {
+          "text": "Sentry needs to be initialised before the controller filter is created; move `Sentry.init()` into `main.ts`",
+          "correct": false,
+          "why": "Initialisation was fine; the global filter never received these errors."
+        },
+        {
+          "text": "The controller's catch-all takes every billing error; narrow its `@Catch()`",
+          "correct": true,
+          "why": "Filters are tried from the narrowest scope outward and only one handles an error; a narrow `@Catch` lets everything else reach the global filter."
+        },
+        {
+          "text": "Exceptions from async handlers bypass filters; wrap the billing handlers in `try/catch`",
+          "correct": false,
+          "why": "Nest's filters handle errors from async handlers; the issue is which filter took them."
+        }
+      ],
+      "explain": "Only one exception filter handles an error, starting from the method, then the controller, then global. A broad `@Catch()` at a narrow scope silently steals errors from global reporting; keep local filters narrow.",
+      "refs": [
+        "https://docs.nestjs.com/exception-filters#binding-filters"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q09",
+      "domain": "pipeline",
+      "stem": "A marketplace's `POST /catalog/import` accepts up to 50,000 nested product objects. Profiling shows that the global class-validator `ValidationPipe` spends about 1.2 s of CPU on that body, and p99 for every other route on the same pod jumps to 1.4 s while an import is validated. Imports happen about 200 times an hour. What is the best change?",
+      "options": [
+        {
+          "text": "Enqueue the import and validate it in a worker process",
+          "correct": true,
+          "why": "The API answers quickly with a job ID, and the heavy validation no longer blocks unrelated requests."
+        },
+        {
+          "text": "Increase the API's pod count so imports land on different pods",
+          "correct": false,
+          "why": "Each import still freezes whichever pod receives it, so p99 for those pods' other requests remains bad."
+        },
+        {
+          "text": "Disable validation for the import route with a custom pipe that returns the value unchanged",
+          "correct": false,
+          "why": "It removes the CPU cost by accepting unvalidated catalog data, which corrupts listings."
+        },
+        {
+          "text": "Raise the body size limit and the request timeout for that route",
+          "correct": false,
+          "why": "It lets larger imports through, making the stalls longer, not shorter."
+        }
+      ],
+      "explain": "Node runs JavaScript on one thread per process; CPU-heavy work in a request blocks every other request on that pod. Move bulk, CPU-bound processing to a queue and worker, and keep the API path short.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/queues",
+        "https://docs.nestjs.com/techniques/validation"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q10",
+      "domain": "messaging",
+      "stem": "A video platform's `@EventPattern('upload.completed')` Kafka handler starts a transcoding job. To make the consumer faster, a developer stopped awaiting the work. After a node failure, 300 uploads were never transcoded, and their offsets had already been committed. What is the fix?",
+      "code": "@EventPattern('upload.completed')\nhandle(@Payload() e: UploadCompleted) {\n  // \"faster\": no await\n  this.transcoder.start(e.videoId, e.profiles);\n}",
+      "options": [
+        {
+          "text": "Disable auto-commit and commit offsets on a 5-second timer",
+          "correct": false,
+          "why": "A timer still commits offsets whose work may not have finished, so a crash loses messages the same way."
+        },
+        {
+          "text": "Await the job's promise so the offset moves only after it",
+          "correct": true,
+          "why": "Nest treats the message as handled when the handler's promise resolves, so the offset moves only after the job is safely started."
+        },
+        {
+          "text": "Add more partitions to increase consumer parallelism and compensate for awaiting",
+          "correct": false,
+          "why": "More partitions help throughput later, but don't address offsets committed for unfinished work."
+        },
+        {
+          "text": "Increase the topic's replication factor to 3 so committed messages survive the node failure",
+          "correct": false,
+          "why": "Replication protects the broker's data, not the consumer's unfinished work."
+        }
+      ],
+      "explain": "The handler's returned promise is the signal that a message is done. Fire-and-forget inside a consumer converts at-least-once into at-most-once; for speed, scale partitions and consumers, not unawaited work.",
+      "refs": [
+        "https://docs.nestjs.com/microservices/kafka"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q11",
+      "domain": "messaging",
+      "stem": "A streaming site's recommendations gateway calls a ranking microservice over TCP with `await firstValueFrom(this.ranking.send('rank', ctx))`. The ranking service froze during a GC storm; within a minute every gateway request was hanging, the gateway pods hit their memory limit and were killed, and the home page went down. The page can render a default list if ranking fails. What should the gateway do?",
+      "options": [
+        {
+          "text": "Retry `send()` three times with exponential backoff",
+          "correct": false,
+          "why": "Retrying a frozen dependency multiplies the hanging calls and makes the memory spike worse."
+        },
+        {
+          "text": "Increase gateway memory so more pending requests fit",
+          "correct": false,
+          "why": "It delays the crash but still lets every request wait indefinitely."
+        },
+        {
+          "text": "Switch from `send()` to `emit()` so the gateway never waits",
+          "correct": false,
+          "why": "`emit()` returns no result, so the page could never show personal recommendations at all."
+        },
+        {
+          "text": "A `timeout()`, a default-list fallback and a circuit breaker",
+          "correct": true,
+          "why": "Every call is bounded, the page degrades gracefully, and the breaker stops sending traffic to a dependency that is down."
+        }
+      ],
+      "explain": "Every remote call needs a deadline and a planned failure response. Nest's `ClientProxy.send()` has no default timeout, so add one, and pair it with a fallback and a circuit breaker.",
+      "refs": [
+        "https://docs.nestjs.com/microservices/basics#timeouts"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q12",
+      "domain": "messaging",
+      "stem": "A marketplace uses `@nestjs/cqrs`: commands write to the Postgres primary and queries read from a replica that lags 1–3 s. A seller changes a price, the page reloads, and the old price shows; sellers file 400 support tickets a week. Buyers don't need instant consistency. What is the most targeted fix?",
+      "options": [
+        {
+          "text": "Route every query, from sellers and buyers alike, to the Postgres primary",
+          "correct": false,
+          "why": "It fixes sellers but moves all buyer read traffic onto the primary, which is why the replica exists."
+        },
+        {
+          "text": "Wait 3 seconds after each command before returning",
+          "correct": false,
+          "why": "It slows every write and still fails whenever lag exceeds 3 s."
+        },
+        {
+          "text": "Read-your-writes for the seller only: return new state, read the primary briefly",
+          "correct": true,
+          "why": "Only the writer needs read-your-writes; buyers keep using the replica."
+        },
+        {
+          "text": "Publish an event and update a cache that queries read first",
+          "correct": false,
+          "why": "It adds another eventually consistent copy, with the same lag problem in a new place."
+        }
+      ],
+      "explain": "Separating reads and writes trades consistency for scale. Give read-your-writes only to the actor who just wrote, through the command's result or a short primary-read window, instead of making all reads strong.",
+      "refs": [
+        "https://docs.nestjs.com/recipes/cqrs"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q13",
+      "domain": "messaging",
+      "stem": "A bank's ledger service consumes `transfer.posted` from Kafka with Nest at-least-once. Each event debits one account and credits another, and two events for the same account must never be applied out of order. Which two practices are required? (Choose two.)",
+      "options": [
+        {
+          "text": "Store each event ID under a unique constraint in the same database transaction as the postings",
+          "correct": true,
+          "why": "Redelivered events are rejected by the constraint, so duplicates never post twice."
+        },
+        {
+          "text": "Key events by account ID so all events for one account land on one partition",
+          "correct": true,
+          "why": "Kafka keeps order only within a partition; keying by account preserves per-account order."
+        },
+        {
+          "text": "Commit the offset before writing the postings to avoid redelivery",
+          "correct": false,
+          "why": "That makes processing at-most-once: a crash after the commit loses the transfer."
+        },
+        {
+          "text": "Enable producer transactions so the consumer receives each event exactly once",
+          "correct": false,
+          "why": "Kafka transactions don't cover the Postgres write; a crash between the database commit and the offset commit still redelivers."
+        },
+        {
+          "text": "Catch every error in the handler and return normally so the partition never stalls",
+          "correct": false,
+          "why": "It keeps the partition moving by silently dropping transfers that failed for transient reasons."
+        }
+      ],
+      "explain": "At-least-once consumers need two things: idempotent effects (a dedupe key in the same transaction) and the right ordering scope (a key that matches the entity whose events must stay ordered).",
+      "refs": [
+        "https://docs.nestjs.com/microservices/kafka"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q14",
+      "domain": "operations",
+      "stem": "An HR platform's payslip worker runs BullMQ jobs that take up to 40 s, in Kubernetes with `terminationGracePeriodSeconds: 60`. `enableShutdownHooks()` is on. On every deploy, a few jobs are half-written and later retried, producing duplicate payslips. What should the shutdown path do?",
+      "options": [
+        {
+          "text": "Drain with `worker.close()` in a shutdown hook, and make jobs idempotent",
+          "correct": true,
+          "why": "Draining lets in-flight jobs finish, the grace period covers the longest job, and idempotency covers the job a hard kill still interrupts."
+        },
+        {
+          "text": "Call `process.exit(0)` in `onApplicationShutdown` to stop quickly",
+          "correct": false,
+          "why": "Exiting immediately is exactly what leaves jobs half-written."
+        },
+        {
+          "text": "Increase `terminationGracePeriodSeconds` to 10 minutes so jobs have time to finish",
+          "correct": false,
+          "why": "Longer grace doesn't help if nothing waits for the jobs; it just slows every rollout."
+        },
+        {
+          "text": "Pause the queue globally from the CI pipeline before every deploy",
+          "correct": false,
+          "why": "It works, but stops all workers, including those in other deployments, and depends on CI never failing midway."
+        }
+      ],
+      "explain": "Graceful shutdown for workers means: stop taking new work, finish or hand back current work within the grace period, and design the work to be safely repeatable for the cases that still get killed.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/lifecycle-events#application-shutdown",
+        "https://docs.nestjs.com/techniques/queues"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q15",
+      "domain": "operations",
+      "stem": "A bank's 60 services read config with `configService.get('PAYMENTS_TIMEOUT_MS')`. Last month a typo (`PAYMENT_TIMEOUT_MS`) returned `undefined`, which became an infinite timeout and caused a 40-minute incident. What config structure prevents this class of bug?",
+      "options": [
+        {
+          "text": "Pass `{ infer: true }` to every `get()` call",
+          "correct": false,
+          "why": "Type inference helps only with a typed config interface, and string keys can still be misspelled when callers repeat them."
+        },
+        {
+          "text": "Use `getOrThrow()` everywhere instead of `get()`",
+          "correct": false,
+          "why": "It turns the bug into a crash at first use, often in production traffic rather than at boot."
+        },
+        {
+          "text": "Typed namespaces via `registerAs()` and `ConfigType`, validated at boot",
+          "correct": true,
+          "why": "Callers access typed properties checked by the compiler, and validation rejects missing values before the app starts."
+        },
+        {
+          "text": "Keep a shared constants file with every key name",
+          "correct": false,
+          "why": "It reduces typos, but values are still untyped and missing ones are only noticed at runtime."
+        }
+      ],
+      "explain": "Turn configuration from string lookups into typed objects, and validate them once at boot. Then typos fail at compile time and missing values fail before the app is ready.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/configuration#configuration-namespaces"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q16",
+      "domain": "operations",
+      "stem": "A bank's Nest API reads the Postgres password from AWS Secrets Manager at boot, through a `forRootAsync` factory. Secrets Manager rotates the password every 30 days. After the last rotation, pods running for more than a day started failing whenever the pool opened a new connection, until each pod was restarted. Which design survives rotation without restarts?",
+      "options": [
+        {
+          "text": "Trigger an automatic rolling restart of every pod after each rotation",
+          "correct": false,
+          "why": "It works, but couples rotation to a fleet-wide restart, and any pod that misses the restart fails."
+        },
+        {
+          "text": "A pool password callback that returns the current, briefly cached secret",
+          "correct": true,
+          "why": "Existing connections keep working, and each new connection authenticates with the secret that is valid at that moment."
+        },
+        {
+          "text": "Disable rotation for database credentials",
+          "correct": false,
+          "why": "It avoids the incident by giving up a security control the bank requires."
+        },
+        {
+          "text": "Cache the secret in Redis and refresh it every 30 days",
+          "correct": false,
+          "why": "It moves the stale copy to a new place; the pool still keeps the password it got at boot."
+        }
+      ],
+      "explain": "Boot-time configuration is a snapshot. Values that rotate, such as credentials and tokens, must be read when they are used, through a callback or a refreshing provider, not captured once at startup.",
+      "refs": [
+        "https://docs.nestjs.com/techniques/configuration#async-configuration",
+        "https://docs.nestjs.com/techniques/database"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q17",
+      "domain": "seams",
+      "stem": "A streaming company's SMS port is bound as `{ provide: SmsGateway, useClass: TwilioAdapter }` in `NotificationsModule`. The e2e suite does `.overrideProvider(TwilioAdapter).useValue(fakeSms)`. CI has started sending real SMS to test phone numbers and costing money. What is the fix?",
+      "options": [
+        {
+          "text": "Override the port token: `.overrideProvider(SmsGateway).useValue(fakeSms)`",
+          "correct": true,
+          "why": "Consumers inject `SmsGateway`, so overriding that token is what replaces the adapter they receive."
+        },
+        {
+          "text": "Register `TwilioAdapter` as a separate provider too, so `overrideProvider(TwilioAdapter)` has something to replace",
+          "correct": false,
+          "why": "That override would replace an instance nobody injects; consumers still get the one built for `SmsGateway`."
+        },
+        {
+          "text": "Set `TWILIO_ENABLED=false` in CI and check it inside the adapter",
+          "correct": false,
+          "why": "It stops the cost, but puts test switches into production code, and the fake is never used to assert messages."
+        },
+        {
+          "text": "Use a Twilio test account in CI",
+          "correct": false,
+          "why": "It stops the cost but still makes network calls, and the tests can't inspect what was sent."
+        }
+      ],
+      "explain": "Override what consumers inject, the token, not the class behind it. With ports and adapters, that token is the port, which is exactly why ports make good test seams.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/testing#testing-utilities"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q18",
+      "domain": "seams",
+      "stem": "A gaming studio's developers switched the Nest API's dev command from `nest start --watch` to `tsx watch src/main.ts` for faster reloads. Now startup fails with \"Nest can't resolve dependencies of the MatchService (?, ?)\", while CI builds with `tsc` and works. What should they do?",
+      "options": [
+        {
+          "text": "Add `emitDecoratorMetadata: true` to `tsconfig.json`",
+          "correct": false,
+          "why": "`tsc` already honours it, which is why CI works; tsx uses esbuild, which ignores that flag."
+        },
+        {
+          "text": "Use the Nest CLI with SWC (`nest start -b swc --watch`) for fast reloads",
+          "correct": true,
+          "why": "SWC is fast and emits decorator metadata, so DI keeps working in development."
+        },
+        {
+          "text": "Wrap every constructor parameter in `@Inject()` with its class",
+          "correct": false,
+          "why": "It works for constructors, but handler parameter types used by pipes still lack metadata, so validation would silently stop."
+        },
+        {
+          "text": "Switch DI to `ModuleRef.get()` calls in `onModuleInit` for every service",
+          "correct": false,
+          "why": "It gives up constructor injection across the codebase to work around a dev tool."
+        }
+      ],
+      "explain": "Development and production builds must agree on decorator metadata. If you want speed, pick SWC, which emits it, rather than an esbuild-based runner that silently drops it.",
+      "refs": [
+        "https://docs.nestjs.com/recipes/swc"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q19",
+      "domain": "seams",
+      "stem": "A marketplace moves its API to the Fastify adapter for throughput. The e2e suite builds the app with `Test.createTestingModule`, calls `app.init()`, then uses supertest; now tests hang until the runner's timeout. Production works. What should the tests do?",
+      "options": [
+        {
+          "text": "Switch the test app back to Express, since production behaviour is the same",
+          "correct": false,
+          "why": "It hides adapter differences, such as reply APIs in filters, that the e2e suite should catch."
+        },
+        {
+          "text": "Increase the test timeout to 60 s",
+          "correct": false,
+          "why": "The requests never complete, so a longer timeout only makes the suite slower."
+        },
+        {
+          "text": "Replace supertest with real HTTP calls against `app.listen(0)`",
+          "correct": false,
+          "why": "It works, but brings port management and slower tests, while Fastify offers a simpler path."
+        },
+        {
+          "text": "Await `app.getHttpAdapter().getInstance().ready()` after `init()`, or use `app.inject()`",
+          "correct": true,
+          "why": "Fastify needs its plugins to be ready before handling requests; `inject()` sends requests without a socket."
+        }
+      ],
+      "explain": "The HTTP adapter is part of the system under test. When changing adapters, run e2e tests on the same adapter as production, and follow its bootstrap rules.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/testing#end-to-end-testing",
+        "https://docs.nestjs.com/techniques/performance"
+      ]
+    },
+    {
+      "id": "nestjs-v4-q20",
+      "domain": "seams",
+      "stem": "An HR platform's `RunPayroll` use case has 14 injected ports. Each unit test lists 14 `{ provide, useValue }` mocks, and adding a 15th dependency broke 63 test files last sprint. Most tests care about only two or three ports. What should the tests do?",
+      "options": [
+        {
+          "text": "Import the real `PayrollModule` in unit tests so all dependencies resolve",
+          "correct": false,
+          "why": "It removes the mock lists by pulling in real adapters, which makes unit tests slow and dependent on infrastructure."
+        },
+        {
+          "text": "Split `RunPayroll` into 14 tiny use cases, one per port",
+          "correct": false,
+          "why": "It shrinks the lists but fragments a cohesive business operation just to suit the tests."
+        },
+        {
+          "text": "Auto-mock the rest with `useMocker()` and set up only the ports each test uses",
+          "correct": true,
+          "why": "Unknown tokens get mocks automatically, so adding a dependency doesn't break unrelated tests."
+        },
+        {
+          "text": "Make all ports `@Optional()` so tests can leave them out",
+          "correct": false,
+          "why": "It makes missing dependencies silently `undefined` in production too."
+        }
+      ],
+      "explain": "Tests should state only what they care about. Nest's `useMocker` fills in the rest of a provider's dependencies, so a new dependency only touches the tests that use it. A long dependency list is still a design signal worth reviewing.",
+      "refs": [
+        "https://docs.nestjs.com/fundamentals/testing#auto-mocking"
+      ]
+    }
+  ]
+}

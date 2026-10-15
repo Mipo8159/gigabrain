@@ -1,0 +1,132 @@
+/* teach kit v2: styles for the interactive layer. Uses the visual-explainer tokens the page defines
+   (--bg --surface --border --border-bright --text --text-dim --accent --accent-dim --ok --warn --risk --info,
+   --s-*, --r-*, --t-*, --ease, --fast, --med, --slow, --font-mono). Inlined by `bin/learn assemble`. */
+
+/* the kit hides with the hidden attribute; page rules like figure{display:grid} must not undo that */
+[hidden] { display: none !important; }
+/* a wide <pre> or table must scroll inside its block, not stretch the section.
+   Card grids in pages should use minmax(min(14.5rem, 100%), 1fr) so one card fits a phone. */
+main > section > * { min-width: 0; }
+[data-quiz], [data-fill], [data-order], figure { grid-template-columns: minmax(0, 1fr); }
+:not(pre) > code { overflow-wrap: anywhere; }
+
+/* an edge is a line: page rules like `svg .hot { fill }` must not fill a bent edge into a blob */
+svg path.edge { fill: none; }
+
+/* reading progress + section map */
+[data-progress] { position: fixed; inset: 0 0 auto 0; height: 3px; background: var(--accent); transform-origin: left; transform: scaleX(0); z-index: 50; }
+nav[data-toc] { font: 500 var(--t-small) var(--font-mono); }
+nav[data-toc] ol { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s-2); counter-reset: toc; }
+nav[data-toc] li { counter-increment: toc; display: flex; gap: var(--s-2); min-width: 0; }
+nav[data-toc] li::before { content: counter(toc); color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 1.5em; }
+nav[data-toc] a { color: var(--text-dim); text-decoration: none; overflow-wrap: anywhere; }
+nav[data-toc] a:hover, nav[data-toc] a:focus-visible, nav[data-toc] a.is-here { color: var(--text); }
+nav[data-toc] a.is-here { box-shadow: inset 0 -2px var(--accent); }
+/* below 1000px the map is one sticky row that scrolls sideways, not a block above the title */
+@media (max-width: 999px) {
+  nav[data-toc] { position: sticky; top: 0; z-index: 40; background: var(--bg); margin-inline: calc(-1 * var(--s-4)); padding: var(--s-3) var(--s-4); border-bottom: 1px solid var(--border); }
+  nav[data-toc] ol { display: flex; gap: var(--s-4); overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 85%, transparent); }
+  nav[data-toc] ol::-webkit-scrollbar { display: none; }
+  nav[data-toc] li { flex: none; }
+  nav[data-toc] a { white-space: nowrap; }
+}
+
+/* hook and "before you start" */
+[data-hook] .hook-q { font-size: var(--t-lead); color: var(--text); text-wrap: balance; }
+[data-prereq] { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-5); display: grid; gap: var(--s-3); }
+[data-prereq] ul { margin: 0; padding-left: 1.2em; display: grid; gap: var(--s-2); }
+
+/* glossary terms */
+[data-tip] { font-style: normal; text-decoration: underline dashed var(--text-dim); text-underline-offset: .2em; cursor: pointer; }
+[data-tip]:hover, [data-tip]:focus-visible { text-decoration-color: var(--accent); outline: none; }
+.kit-tip { position: fixed; z-index: 60; background: var(--text); color: var(--bg); font: 400 var(--t-small)/1.45 var(--font-body, sans-serif); padding: var(--s-2) var(--s-3); border-radius: var(--r-1); box-shadow: 0 6px 24px var(--lift, rgb(0 0 0 / .2)); pointer-events: none; }
+[data-glossary] dl { display: grid; grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr); gap: var(--s-2) var(--s-5); margin: 0; }
+[data-glossary] dt { font: 600 var(--t-small) var(--font-mono); }
+[data-glossary] dd { margin: 0; color: var(--text-dim); }
+@media (max-width: 560px) { [data-glossary] dl { grid-template-columns: minmax(0, 1fr); } [data-glossary] dd { margin-bottom: var(--s-3); } }
+
+/* stepper (also works with the visual-explainer .ve-steps parts) */
+.ve-steps [data-s] { transition: opacity var(--slow) var(--ease), stroke-dashoffset var(--slow) var(--ease); }
+.js-stepper [data-s]:not(.on) { opacity: .15; }
+.js-stepper [data-only]:not(.on) { opacity: 0; }
+.js-stepper g[data-s]:not(.on) text, .js-stepper text[data-s]:not(.on) { opacity: 0; }
+.js-stepper path[pathLength][data-s] { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.js-stepper path[pathLength][data-s].on { stroke-dashoffset: 0; }
+.js-stepper .now .sh { stroke: var(--accent); }
+.js-stepper:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: var(--r-2); }
+.kit-player, .ve-player { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2) var(--s-3); margin-top: var(--s-4); }
+.kit-player input[type=range], .ve-player input[type=range] { accent-color: var(--accent); min-width: 6rem; flex: 1 1 8rem; }
+[data-step-count] { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ve-cap { flex: 1 0 100%; order: -1; list-style: none; padding: 0; margin: 0; min-height: 3.2em; }
+.ve-cap li::before { content: attr(data-n); font: 600 var(--t-label) var(--font-mono); color: var(--accent); margin-right: var(--s-3); font-variant-numeric: tabular-nums; }
+button:disabled { opacity: .45; cursor: default; }
+/* code lit in sync with the stepper */
+pre .line { display: block; padding-inline: var(--s-2); margin-inline: calc(-1 * var(--s-2)); border-radius: var(--r-1); transition: background var(--fast) var(--ease), opacity var(--fast) var(--ease); }
+pre:has(.line.is-lit) .line:not(.is-lit) { opacity: .45; }
+pre .line.is-lit { background: var(--accent-dim); opacity: 1; }
+
+/* quizzes and predictions */
+[data-quiz] { border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-5); display: grid; gap: var(--s-3); background: var(--surface); scroll-margin-top: var(--s-8); }
+[data-quiz] .kicker, [data-predict] > .kicker { font: 600 var(--t-label) var(--font-mono); color: var(--accent); text-transform: uppercase; letter-spacing: .08em; }
+[data-quiz] [data-ask] { font-weight: 600; margin: 0; text-wrap: pretty; }
+[data-quiz] .options { display: grid; gap: var(--s-2); }
+/* block, not flex: inline code inside an option must wrap with the text */
+[data-option] { text-align: left; font: 400 var(--t-body)/1.45 var(--font-body, inherit); padding: var(--s-3) var(--s-4) var(--s-3) 2.6em; display: block; position: relative; overflow-wrap: anywhere; }
+[data-option]::before { content: '○'; font-family: var(--font-mono); color: var(--text-dim); position: absolute; left: var(--s-4); }
+.is-answered [data-option].is-right { border-color: var(--ok); }
+.is-answered [data-option].is-right::before { content: '●'; color: var(--ok); }
+.is-answered [data-option].is-picked:not(.is-right) { border-color: var(--risk); }
+.is-answered [data-option].is-picked:not(.is-right)::before { content: '■'; color: var(--risk); }
+[data-feedback] { border-top: 1px solid var(--border); padding-top: var(--s-3); display: grid; gap: var(--s-2); }
+[data-feedback] .verdict { font: 600 var(--t-small) var(--font-mono); margin: 0; }
+.is-answered:not(.is-wrong) [data-feedback] .verdict { color: var(--ok); }
+.is-wrong [data-feedback] .verdict { color: var(--risk); }
+[data-feedback] .why { margin: 0; }
+[data-reveal] { animation: kit-in var(--slow) var(--ease); }
+@keyframes kit-in { from { opacity: 0; transform: translateY(.5rem); } }
+
+/* put in order / fill the gap */
+[data-order], [data-fill] { border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-5); display: grid; gap: var(--s-3); background: var(--surface); }
+[data-order] ol { margin: 0; padding-left: 1.6em; display: grid; gap: var(--s-2); }
+[data-order] li { padding: var(--s-2) var(--s-3); border: 1px solid var(--border-bright); border-radius: var(--r-1); background: var(--bg); display: flex; justify-content: space-between; gap: var(--s-3); align-items: center; }
+[data-order] li.is-off, [data-fill] select.is-off { border-color: var(--risk); }
+.order-text { min-width: 0; overflow-wrap: anywhere; }
+.order-btns { display: inline-flex; gap: var(--s-1); flex: none; }
+.order-btns button { padding: var(--s-1) var(--s-2); }
+[data-fill] select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border-bright); border-radius: var(--r-1); padding: 0 var(--s-1); max-width: 100%; }
+[data-check] { justify-self: start; }
+
+/* spaced review */
+[data-review] { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4) var(--s-5); display: grid; gap: var(--s-3); }
+[data-review] p { margin: 0; }
+.review-links { display: grid; gap: var(--s-1); }
+[data-review-reset] { justify-self: start; }
+
+/* worked example → faded → own turn */
+.fade-ladder { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: var(--s-4); }
+.fade-ladder > * { min-width: 0; }
+
+/* entrance */
+.js-motion main > * { transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease); }
+.js-motion main > :not(.in) { opacity: 0; transform: translateY(1rem); }
+@media (prefers-reduced-motion: reduce) {
+  .js-motion main > * { opacity: 1 !important; transform: none !important; }
+  [data-reveal] { animation: none; }
+  .js-stepper [data-s] { transition: none; }
+}
+@media print {
+  .js-motion main > * { opacity: 1 !important; transform: none !important; }
+  [data-progress], .kit-player, .ve-player, .order-btns, [data-check], [data-review-reset], .kit-tip { display: none !important; }
+  .js-stepper [data-s] { opacity: 1 !important; }
+  .js-stepper [data-only]:not(.on) { display: none; }
+  .js-stepper text[data-s], .js-stepper g[data-s] text { opacity: 1 !important; }
+  [data-reveal] { display: grid !important; }
+  [data-quiz], [data-order], [data-fill], figure { break-inside: avoid; }
+}
+
+/* phones: a wide figure keeps a readable size and scrolls sideways inside its frame, never the page.
+   svg.fit opts out (for figures drawn narrow enough to scale down). */
+@media (max-width: 640px) {
+  .frame:has(> svg:not(.fit)) { overflow-x: auto; overscroll-behavior-x: contain; }
+  .frame > svg:not(.fit) { min-width: 40rem; }
+}

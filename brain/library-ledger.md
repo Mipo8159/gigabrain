@@ -14,9 +14,9 @@ Evidence is one dated, general line: no client names, URLs or schemas.
 
 | Entry | Source | Added | Confidence | Evidence (date · project kind · what happened) |
 |---|---|---|---|---|
-| skill `nestjs-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift (retirement proposal in inbox) |
-| skill `backend-patterns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `api-design` | ecc | 2026-10-03 | 0.4 | — |
+| skill `nestjs-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift; 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
+| skill `backend-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
+| skill `api-design` | ecc | 2026-10-03 | 0.4 | 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
 | skill `hexagonal-architecture` | ecc | 2026-10-03 | 0.4 | — |
 | skill `react-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `react-performance` | ecc | 2026-10-03 | 0.4 | — |
@@ -26,9 +26,9 @@ Evidence is one dated, general line: no client names, URLs or schemas.
 | skill `fastapi-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `golang-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `golang-testing` | ecc | 2026-10-03 | 0.4 | — |
-| skill `postgres-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift (retirement proposal in inbox) |
-| skill `redis-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift (retirement proposal in inbox) |
-| skill `database-migrations` | ecc | 2026-10-03 | 0.4 | — |
+| skill `postgres-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift; 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
+| skill `redis-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift; 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
+| skill `database-migrations` | ecc | 2026-10-03 | 0.4 | 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
 | skill `docker-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `kubernetes-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `deployment-patterns` | ecc | 2026-10-03 | 0.4 | — |
@@ -49,7 +49,7 @@ Evidence is one dated, general line: no client names, URLs or schemas.
 | skill `loop-design-check` | ecc | 2026-10-03 | 0.4 | — |
 | checklist `types` | ecc | 2026-10-03 | 0.4 | — |
 | checklist `tests` | ecc | 2026-10-03 | 0.6 | 2026-10-06 · Nest lab · missing IDOR, viewer-write, forged-token and failed-write atomicity cases were real gaps; all added; 2026-10-12 · own python checker · new failure paths had no tests; real gap, closed with mutation runs |
-| skill `error-handling` | ecc | 2026-10-03 | 0.4 | — |
+| skill `error-handling` | ecc | 2026-10-03 | 0.4 | 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
 | skill `mcp-server-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `e2e-testing` | ecc | 2026-10-03 | 0.4 | — |
 | skill `inherit-legacy-style` | ecc | 2026-10-03 | 0.4 | — |

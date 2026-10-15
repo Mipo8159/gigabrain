@@ -1,0 +1,682 @@
+{
+  "topic": "aws",
+  "variant": 5,
+  "of": 5,
+  "title": "AWS for Node backends — variant 5",
+  "description": "Leans on healthcare and marketplace flows: claim checks, redrive windows, event loops, Express semantics, single-table reads, S3 conditional writes and failover evidence.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "delivery",
+      "name": "Delivery, retries and failure routing (SQS, Lambda, EventBridge, Step Functions)",
+      "weight": 0.3
+    },
+    {
+      "id": "dynamo",
+      "name": "DynamoDB keys, hot partitions and conditional writes",
+      "weight": 0.25
+    },
+    {
+      "id": "sdk",
+      "name": "SDK clients, timeouts, throttling and partial failures",
+      "weight": 0.2
+    },
+    {
+      "id": "storage",
+      "name": "S3 uploads and object integrity",
+      "weight": 0.1
+    },
+    {
+      "id": "region",
+      "name": "Multi-region and failover",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "aws-v5-q01",
+      "domain": "delivery",
+      "stem": "A radiology platform queues 'study ready' jobs on SQS. Each job carries the DICOM metadata as JSON, which is usually 200 KB but reaches 3 MB for large studies; those sends fail with a size error. Which design handles every study?",
+      "options": [
+        {
+          "text": "Split large payloads across several messages and reassemble them in the consumer.",
+          "correct": false,
+          "why": "Parts can arrive out of order, on different consumers, or not at all; reassembly needs state and creates partial-failure bugs."
+        },
+        {
+          "text": "Store the payload in S3 and send a message with the object key (claim check).",
+          "correct": true,
+          "why": "SQS messages are capped at 1 MiB; a pointer to S3 keeps messages small and the payload durable."
+        },
+        {
+          "text": "Gzip and base64-encode the JSON to fit under the limit.",
+          "correct": false,
+          "why": "It may fit today, but base64 adds a third and studies keep growing, so the failure comes back."
+        },
+        {
+          "text": "Move to an SNS FIFO topic, which accepts larger messages.",
+          "correct": false,
+          "why": "SNS has a smaller payload limit than SQS's 1 MiB, not a larger one, and ordering isn't the problem."
+        }
+      ],
+      "explain": "Queues carry references, not blobs. When payloads can exceed the message limit (1 MiB for SQS since 2025), store the body in S3 and send the key (the claim-check pattern), with a lifecycle rule to clean up.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/quotas-messages.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q02",
+      "domain": "delivery",
+      "stem": "An appointment-reminder consumer dedupes with an idempotency record per reminder id that expires after 1 hour. A bug in its batch response reported some messages as failed even after their SMS was sent and recorded; after 5 receives, 30,000 messages reached the DLQ. Two days later, after the fix, they were redriven to the source queue, and about 4,000 patients got a second reminder. Why, and what is the fix?",
+      "options": [
+        {
+          "text": "Redrive changes the message; dedupe on the SQS `messageId` instead of the reminder id.",
+          "correct": false,
+          "why": "A business key like the reminder id is the right dedupe key whatever the transport does; the duplicates come from expired records, not from the key choice."
+        },
+        {
+          "text": "Redrive doesn't preserve order; use FIFO queues for reminders.",
+          "correct": false,
+          "why": "Order isn't the issue; the duplicates come from idempotency records that expired before the redrive."
+        },
+        {
+          "text": "The idempotency records had expired; keep them at least as long as a message can still be redelivered, including DLQ retention and redrive.",
+          "correct": true,
+          "why": "The 4,000 had been sent and recorded, but their records had expired by the redrive, so nothing stopped a second send."
+        },
+        {
+          "text": "The DLQ's `maxReceiveCount` was too low, so successful messages were moved there as well.",
+          "correct": false,
+          "why": "The batch-response bug put them in the DLQ; with the records still present the redrive would have been harmless. The expiry is what let them through."
+        }
+      ],
+      "explain": "An idempotency window must cover the longest path a message can take back to your handler: source retention, DLQ retention and manual redrives. A short expiry silently re-enables duplicates on exactly the day you recover from an incident.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html",
+        "https://docs.powertools.aws.dev/lambda/typescript/latest/features/idempotency/"
+      ]
+    },
+    {
+      "id": "aws-v5-q03",
+      "domain": "delivery",
+      "stem": "A clinic-scheduling service has an EventBridge rule matching `{ \"source\": [\"scheduling\"] }` that triggers an enrichment Lambda. The Lambda publishes an `AppointmentEnriched` event with `source: \"scheduling\"`. After a deploy, Lambda invocations and EventBridge costs rose 400× within an hour. Which fix addresses the cause?",
+      "options": [
+        {
+          "text": "Lower the Lambda's reserved concurrency to cap the cost.",
+          "correct": false,
+          "why": "It slows the loop and causes throttles, but every event still triggers another one."
+        },
+        {
+          "text": "Add a DLQ to the rule target so excess events are parked.",
+          "correct": false,
+          "why": "The events aren't failing; they succeed and trigger themselves, so nothing reaches a DLQ."
+        },
+        {
+          "text": "Switch the target to a Step Functions Standard workflow, which runs exactly once per event and so can't loop.",
+          "correct": false,
+          "why": "A different target emitting the same event still matches the same rule."
+        },
+        {
+          "text": "Make the rule pattern specific (e.g. on `detail-type`) or give the output a distinct `source`.",
+          "correct": true,
+          "why": "The function's output matches the rule that triggers it: a recursive loop. The fix is in the event contract and pattern."
+        }
+      ],
+      "explain": "Event-driven systems can loop when a consumer emits events that match its own trigger. Give each producer a distinct `source`/`detail-type` contract and keep rule patterns specific; Lambda's recursion detection only covers some services.",
+      "refs": [
+        "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q04",
+      "domain": "delivery",
+      "stem": "An ad-impressions pipeline puts 20,000 small messages/s on an SQS standard queue, consumed by a Lambda with batch size 10. The bill is dominated by Lambda invocations, and a 10-second processing delay is acceptable. Which configuration change fits?",
+      "options": [
+        {
+          "text": "Raise the batch size to 1,000 with `MaximumBatchingWindowInSeconds: 5`, and raise the visibility timeout to cover 6 × the function timeout plus the window.",
+          "correct": true,
+          "why": "Standard queues allow batches up to 10,000 with a batching window; larger batches cut invocations sharply within the delay budget, and the visibility timeout must include the window."
+        },
+        {
+          "text": "Set `MaximumBatchingWindowInSeconds: 300` so each batch holds as many messages as possible.",
+          "correct": false,
+          "why": "The window is capped at 5 minutes and the delay budget is 10 seconds; this breaks the latency requirement."
+        },
+        {
+          "text": "Switch to a FIFO queue, which delivers larger batches.",
+          "correct": false,
+          "why": "FIFO batches are capped at 10 for Lambda, and FIFO adds ordering costs this workload doesn't need."
+        },
+        {
+          "text": "Replace the Lambda consumer with an ECS service on Fargate that long-polls the queue continuously.",
+          "correct": false,
+          "why": "It can be cheaper at steady high volume, but it's a platform change when a configuration change addresses the invocation cost."
+        }
+      ],
+      "explain": "Batch size and batching window trade latency for cost. For high-volume, latency-tolerant streams, raise both within the delay budget, and remember the visibility timeout has to include the batching window.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q05",
+      "domain": "delivery",
+      "stem": "A marketplace moved its 'payout calculation' workflow from Step Functions Standard to Express (started asynchronously) to cut costs at 3,000 executions/s. Since then, a few sellers per day receive two payouts for the same period. Which explanation and fix fit?",
+      "options": [
+        {
+          "text": "Express workflows have a 5-minute limit and are being restarted; split the workflow into two.",
+          "correct": false,
+          "why": "Executions exceeding 5 minutes fail with a timeout; they aren't silently restarted into duplicates."
+        },
+        {
+          "text": "Async Express executions are at-least-once, so steps can rerun; make the payout step idempotent per seller and period.",
+          "correct": true,
+          "why": "Standard workflows run exactly once; async Express trades that for throughput and cost, so side effects must be idempotent."
+        },
+        {
+          "text": "Express workflows don't support `Retry`, so failures are retried by the caller.",
+          "correct": false,
+          "why": "Express supports `Retry` and `Catch` the same way as Standard."
+        },
+        {
+          "text": "The state machine uses `JitterStrategy: FULL`, which can run a task twice when two jittered retry attempts overlap in time.",
+          "correct": false,
+          "why": "Jitter only randomises retry delays; it doesn't run tasks concurrently."
+        }
+      ],
+      "explain": "Step Functions Standard gives exactly-once workflow execution; Express asynchronous gives at-least-once and synchronous gives at-most-once. When you switch for cost or throughput, every side-effecting step must become idempotent.",
+      "refs": [
+        "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q06",
+      "domain": "delivery",
+      "stem": "An e-prescription service forwards orders from SQS to a pharmacy partner whose API allows 100 requests/s and returns `429` above that. During a morning surge, Lambda scaled to 300 concurrent instances, the partner returned thousands of 429s, and many messages went to the DLQ. Which two changes apply backpressure correctly? (Choose two.)",
+      "options": [
+        {
+          "text": "Set the event source mapping's maximum concurrency to a level the partner's limit supports.",
+          "correct": true,
+          "why": "Capping pollers keeps the excess in the queue instead of turning it into failed calls."
+        },
+        {
+          "text": "Treat `429` as a retryable failure: report the message in `batchItemFailures` so it returns after the visibility timeout, with `maxReceiveCount` sized for surges.",
+          "correct": true,
+          "why": "Throttled messages go back to the queue and retry later, and enough receives keep surges from pushing good messages to the DLQ."
+        },
+        {
+          "text": "Retry `429`s inside the handler in a tight loop until the partner accepts them.",
+          "correct": false,
+          "why": "Tight retries add load at the partner and burn Lambda duration while holding messages."
+        },
+        {
+          "text": "Set `maxReceiveCount: 1` so throttled messages go straight to the DLQ for a later bulk replay.",
+          "correct": false,
+          "why": "It moves every throttled message to manual handling, which is the problem the team is trying to fix."
+        },
+        {
+          "text": "Raise the Lambda's memory so each call to the partner completes faster.",
+          "correct": false,
+          "why": "Faster calls increase the request rate against a fixed partner limit."
+        }
+      ],
+      "explain": "Backpressure on an SQS-fed consumer means limiting concurrency at the event source mapping and letting throttled work return to the queue with enough receive attempts. The queue is the buffer; don't turn it into retries against the bottleneck.",
+      "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-scaling.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q07",
+      "domain": "dynamo",
+      "stem": "A patient portal shows an appointment with its notes, prescriptions and attachments metadata. Today it makes four `GetItem`/`Query` calls to four tables, and p95 is 180 ms. Which DynamoDB design returns it in one request?",
+      "options": [
+        {
+          "text": "Put all four under `pk = APPT#<id>` (sort keys `META`, `NOTE#…`, `RX#…`, `FILE#…`) and run one `Query`.",
+          "correct": true,
+          "why": "Items that are read together share a partition key, so one query returns the appointment and all related items."
+        },
+        {
+          "text": "Embed notes, prescriptions and attachments as lists on the appointment item.",
+          "correct": false,
+          "why": "It's one read, but large appointments approach the 400 KB item limit and every new note rewrites the whole item."
+        },
+        {
+          "text": "Keep four tables and use `BatchGetItem` across them.",
+          "correct": false,
+          "why": "BatchGetItem only fetches by key; notes and prescriptions are lists that need queries, and you must handle `UnprocessedKeys`."
+        },
+        {
+          "text": "Add a GSI on `appointmentId` to each of the four tables so the related records can be queried together by appointment.",
+          "correct": false,
+          "why": "Indexes are per table; you still make four requests."
+        }
+      ],
+      "explain": "In DynamoDB, model for access patterns: items that are read together share a partition key, and sort-key prefixes tell entity types apart. One `Query` then returns the whole aggregate.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q08",
+      "domain": "dynamo",
+      "stem": "A nightly finance report runs a parallel `Scan` of a 2 TB orders table. While it runs, customer-facing reads slow down and some get throttled. Analysts also want to run ad-hoc SQL on the data. Which approach fits?",
+      "options": [
+        {
+          "text": "Throttle the scan with a small page `Limit` and sleeps.",
+          "correct": false,
+          "why": "It reduces the impact but stretches the job over many hours and still reads the whole table through the live capacity."
+        },
+        {
+          "text": "Use DynamoDB export to S3 (with point-in-time recovery enabled) and query the export with Athena.",
+          "correct": true,
+          "why": "Exports read from PITR backups without using table read capacity, and S3 plus Athena serves ad-hoc SQL."
+        },
+        {
+          "text": "Add a GSI that projects all attributes and scan the GSI instead.",
+          "correct": false,
+          "why": "A GSI duplicates storage and write cost, and scanning it still consumes read capacity on the same account and partitions."
+        },
+        {
+          "text": "Switch the table to on-demand during the report window.",
+          "correct": false,
+          "why": "On-demand can absorb more reads, but you pay for 2 TB of reads every night and partitions can still throttle."
+        }
+      ],
+      "explain": "Keep analytics off the operational read path. DynamoDB exports to S3 run from PITR without consuming table capacity, and S3 + Athena is the place for scans and ad-hoc SQL.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/S3DataExport.HowItWorks.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q09",
+      "domain": "dynamo",
+      "stem": "A ticket-marketplace API returns 20 'available' listings per page. The code below loops until it has 20 matches and returns DynamoDB's `LastEvaluatedKey` as the next-page cursor. Users report listings that never appear on any page. Why?",
+      "code": "const items: Listing[] = [];\nlet key = cursor;\ndo {\n  const page = await ddb.send(new QueryCommand({\n    TableName: \"listings\",\n    KeyConditionExpression: \"pk = :e\",\n    FilterExpression: \"#s = :avail\",\n    ExpressionAttributeNames: { \"#s\": \"state\" },\n    ExpressionAttributeValues: { \":e\": `EVENT#${eventId}`, \":avail\": \"AVAILABLE\" },\n    Limit: 50,\n    ExclusiveStartKey: key,\n  }));\n  items.push(...(page.Items as Listing[]));\n  key = page.LastEvaluatedKey;\n} while (items.length < 20 && key);\nreturn { items: items.slice(0, 20), next: key };",
+      "options": [
+        {
+          "text": "The loop should stop when a page has fewer items than `Limit`.",
+          "correct": false,
+          "why": "Short pages are normal with filters; stopping early would lose even more results."
+        },
+        {
+          "text": "`LastEvaluatedKey` should be passed as `StartKey`, not `ExclusiveStartKey`.",
+          "correct": false,
+          "why": "`ExclusiveStartKey` is the correct parameter; the issue is which key is used."
+        },
+        {
+          "text": "Matches past the 20th in the last page are dropped, but `LastEvaluatedKey` points after them; build the cursor from the last returned item's key.",
+          "correct": true,
+          "why": "The final page can hold more matches than needed; resuming from `LastEvaluatedKey` skips those extras."
+        },
+        {
+          "text": "`FilterExpression` is applied before `Limit`, so pages are already filtered and `slice` is redundant.",
+          "correct": false,
+          "why": "It's the other way round: `Limit` applies before the filter."
+        }
+      ],
+      "explain": "When you collect N matches across filtered pages, the cursor must be the key of the last item you returned, not DynamoDB's `LastEvaluatedKey` from a page you only partly used. Otherwise items between them are silently skipped.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.Pagination.html",
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.FilterExpression.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q10",
+      "domain": "dynamo",
+      "stem": "A telehealth intake API saves the patient form with the code below. Forms where the optional `referralCode` is missing fail with a 500, and support says 'some patients can't submit'. Which fix keeps the code simple?",
+      "code": "const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}));\n\nexport async function saveIntake(form: IntakeForm) {\n  await ddb.send(new PutCommand({\n    TableName: \"intake\",\n    Item: {\n      pk: `PATIENT#${form.patientId}`,\n      sk: `INTAKE#${form.submittedAt}`,\n      reason: form.reason,\n      referralCode: form.referralCode, // optional\n    },\n  }));\n}",
+      "options": [
+        {
+          "text": "Configure the DocumentClient with `marshallOptions: { removeUndefinedValues: true }`.",
+          "correct": true,
+          "why": "The DocumentClient throws on `undefined` attribute values by default; this option drops them when marshalling."
+        },
+        {
+          "text": "Wrap `send` in a retry, since the failure is transient.",
+          "correct": false,
+          "why": "The error is deterministic for those forms; retries fail every time."
+        },
+        {
+          "text": "Use `convertClassInstanceToMap: true` because the form is parsed into an object, so the marshaller can turn it into a map.",
+          "correct": false,
+          "why": "That option is for class instances; a plain object with an `undefined` field still throws."
+        },
+        {
+          "text": "Switch the attribute to a `Set` so empty values are allowed.",
+          "correct": false,
+          "why": "Empty sets also throw, and the field is a string, not a set."
+        }
+      ],
+      "explain": "lib-dynamodb's marshaller throws on `undefined` values (and empty sets) unless told otherwise. Set `removeUndefinedValues: true` once on the shared DocumentClient instead of cleaning objects at every call site.",
+      "refs": [
+        "https://github.com/aws/aws-sdk-js-v3/tree/main/lib/lib-dynamodb#configuration---marshall-and-unmarshall-options"
+      ]
+    },
+    {
+      "id": "aws-v5-q11",
+      "domain": "dynamo",
+      "stem": "A clinic booking system must enforce two rules: a slot can be booked once, and a doctor takes at most 20 appointments per day. Bookings arrive concurrently from web, phone and partner channels. Which single write enforces both?",
+      "options": [
+        {
+          "text": "A `PutItem` for the slot with `attribute_not_exists`, then an `UpdateItem` incrementing the day counter with `booked < :max`.",
+          "correct": false,
+          "why": "Each write is safe alone, but a crash or a failed counter update after the put leaves a booked slot over the daily limit."
+        },
+        {
+          "text": "A `Query` of today's bookings to count them, followed by a conditional slot `PutItem`.",
+          "correct": false,
+          "why": "The count is a read before the write; concurrent bookings both see 19 and both succeed."
+        },
+        {
+          "text": "One `TransactWriteItems`: slot Put with `attribute_not_exists`, plus counter Update `ADD booked :1` if `booked < :max`.",
+          "correct": true,
+          "why": "Both conditions are checked and both writes commit atomically, or neither does."
+        },
+        {
+          "text": "A `BatchWriteItem` with the slot item and the counter item, written together in one request.",
+          "correct": false,
+          "why": "Batch writes aren't atomic and don't allow conditions."
+        }
+      ],
+      "explain": "When an invariant spans items (a slot and a daily counter), put each item's condition in one `TransactWriteItems`. Sequential conditional writes are each atomic, but not together.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q12",
+      "domain": "sdk",
+      "stem": "A document service reads files with `GetObjectCommand` and maps `NoSuchKey` to HTTP 404. In production, missing files return 500 with `AccessDenied`. The role has `s3:GetObject` on `arn:aws:s3:::docs-prod/*`. Which two policy facts explain it and fix it? (Choose two.)",
+      "options": [
+        {
+          "text": "Without `s3:ListBucket`, S3 returns 403 instead of 404 for a missing key, to avoid revealing which keys exist.",
+          "correct": true,
+          "why": "S3 hides existence from callers who can't list the bucket, so 'not found' looks like 'denied'."
+        },
+        {
+          "text": "Grant `s3:ListBucket` on the bucket ARN `arn:aws:s3:::docs-prod` (optionally limited by an `s3:prefix` condition).",
+          "correct": true,
+          "why": "`ListBucket` is a bucket-level action, so it needs the bucket ARN, not the `/*` object ARN."
+        },
+        {
+          "text": "Grant `s3:ListBucket` on `arn:aws:s3:::docs-prod/*`.",
+          "correct": false,
+          "why": "Bucket-level actions don't match object ARNs; the grant has no effect."
+        },
+        {
+          "text": "Grant `s3:*` on both ARNs to cover every case.",
+          "correct": false,
+          "why": "It works, but gives the service delete and policy rights it doesn't need."
+        },
+        {
+          "text": "Change the object ARN to `arn:aws:s3:::docs-prod` without `/*`.",
+          "correct": false,
+          "why": "That's the bucket ARN; `GetObject` would then match no objects at all."
+        }
+      ],
+      "explain": "S3 actions are scoped to bucket ARNs or object ARNs, never both. And `ListBucket` changes error semantics: without it, a missing key is a 403. Grant the right action on the right ARN, and test the 'not found' path.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/API/API_GetObject.html",
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-with-s3-policy-actions.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q13",
+      "domain": "sdk",
+      "stem": "A Lambda was moved into private subnets to reach an RDS database. Since then, every DynamoDB call hangs until the 30 s function timeout. The VPC has no NAT gateway, by design. Which change fits?",
+      "options": [
+        {
+          "text": "Add a NAT gateway to the private subnets so the function regains outbound internet access for DynamoDB.",
+          "correct": false,
+          "why": "It works, but adds hourly and per-GB costs for traffic that never needs the internet."
+        },
+        {
+          "text": "Raise the Lambda timeout so calls have time to complete.",
+          "correct": false,
+          "why": "The calls can't reach DynamoDB at all; they'll hang for longer."
+        },
+        {
+          "text": "Set `maxAttempts: 10` so the SDK keeps trying until a route appears.",
+          "correct": false,
+          "why": "Retries can't create a network path; they multiply the hang."
+        },
+        {
+          "text": "Add a DynamoDB gateway VPC endpoint to the subnets' route tables.",
+          "correct": true,
+          "why": "A gateway endpoint gives private subnets a route to DynamoDB with no NAT and no data processing charge."
+        }
+      ],
+      "explain": "A Lambda in a VPC has only the network paths the VPC provides. For DynamoDB and S3 use gateway endpoints; for other AWS APIs use interface endpoints or NAT. Also set SDK connection timeouts so a missing route fails fast instead of hanging.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/vpc-endpoints-dynamodb.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q14",
+      "domain": "sdk",
+      "stem": "A pharmacy-alerts service publishes with SNS `PublishBatch` and retries every entry in `Failed[]` up to 10 times. During an incident, logs showed the same entries retried 10 times with the same error, while others succeeded on the second try. Which retry rule fits?",
+      "options": [
+        {
+          "text": "Retry every failed entry indefinitely with backoff until it succeeds.",
+          "correct": false,
+          "why": "Entries rejected for client errors never succeed; infinite retries just hide them."
+        },
+        {
+          "text": "Retry entries with `SenderFault: false` with backoff; park `SenderFault: true` entries for a fix.",
+          "correct": true,
+          "why": "`SenderFault` says whether the request itself was wrong (don't retry) or the service failed (retry)."
+        },
+        {
+          "text": "Retry only the whole batch, never individual entries.",
+          "correct": false,
+          "why": "Resending the batch republishes the entries that already succeeded, creating duplicates."
+        },
+        {
+          "text": "Never retry failed entries, since SNS has already retried them internally before it reports them in the `Failed` list.",
+          "correct": false,
+          "why": "SNS reports failed entries back for the caller to handle; dropping them loses alerts."
+        }
+      ],
+      "explain": "In partial-failure responses, separate retryable from non-retryable entries. SQS and SNS batch results carry `SenderFault`: retry the service-side failures with backoff, park the client-side ones for a code or data fix.",
+      "refs": [
+        "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/APIReference/API_SendMessageBatch.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q15",
+      "domain": "sdk",
+      "stem": "A booking service calls `TransactWriteItems` without setting `ClientRequestToken`. An engineer argues retries are already safe because the SDK fills the token automatically. The service wraps the call in its own retry on timeouts. What is right?",
+      "options": [
+        {
+          "text": "The engineer is right; the SDK reuses the same token for every call made with the same input.",
+          "correct": false,
+          "why": "The SDK can't know two separate `send()` calls are the same business operation; each gets its own token."
+        },
+        {
+          "text": "Tokens only matter for `TransactGetItems`.",
+          "correct": false,
+          "why": "`ClientRequestToken` is a `TransactWriteItems` parameter; it's what makes repeated writes idempotent."
+        },
+        {
+          "text": "Retries are unsafe either way because transactions are never idempotent.",
+          "correct": false,
+          "why": "With the same token within 10 minutes, a repeated transaction returns success without applying twice."
+        },
+        {
+          "text": "The auto-filled token is reused only by the SDK's own retries; the service's retry is a new call with a new token, so pass a token derived from the booking id.",
+          "correct": true,
+          "why": "SDK-internal retries reuse the token from the original request, but an application retry builds a new request; only a business-derived token links them."
+        }
+      ],
+      "explain": "Idempotency tokens only work if every retry of the same operation carries the same token. SDK-generated tokens cover SDK retries; any retry you write yourself needs a token derived from the business key.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q16",
+      "domain": "storage",
+      "stem": "Two hospital systems upload the same discharge summary to `s3://records/<patientId>/<encounterId>.pdf` within milliseconds of each other; the second silently overwrites the first, which had a signature page. The rule is 'first write wins, later writes are rejected'. Which change enforces it?",
+      "options": [
+        {
+          "text": "Enable versioning and treat the oldest version as authoritative.",
+          "correct": false,
+          "why": "Versioning keeps both objects, but readers get the latest by default, so the overwrite still wins unless every reader changes."
+        },
+        {
+          "text": "`HeadObject` before uploading and skip if the key exists.",
+          "correct": false,
+          "why": "Check-then-write races: both systems see 'missing' and both upload."
+        },
+        {
+          "text": "Upload with `IfNoneMatch: \"*\"` so S3 rejects the write with 412 if the key exists.",
+          "correct": true,
+          "why": "S3 conditional writes make the existence check and the write atomic; the second writer gets `412 Precondition Failed`."
+        },
+        {
+          "text": "Enable S3 Object Lock in compliance mode on the bucket so that objects can't be overwritten once they are written.",
+          "correct": false,
+          "why": "Object Lock protects object versions from deletion; with versioning a new PUT still becomes the current version."
+        }
+      ],
+      "explain": "S3 supports conditional writes: `If-None-Match: *` for create-only and `If-Match: <etag>` for compare-and-swap. Use them instead of check-then-write whenever concurrent writers share keys.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q17",
+      "domain": "storage",
+      "stem": "A lab-results ingester writes a result to S3, then immediately lists the prefix to rebuild an index. Years ago someone added `await sleep(5000)` between the two 'because S3 is eventually consistent'. The sleep now dominates throughput. Which statement is correct?",
+      "options": [
+        {
+          "text": "Keep the sleep; LIST is still eventually consistent after PUT.",
+          "correct": false,
+          "why": "Since December 2020, S3 provides strong read-after-write consistency for PUTs and DELETEs, including LIST."
+        },
+        {
+          "text": "Remove the sleep; S3 provides strong read-after-write consistency for PUT, GET and LIST.",
+          "correct": true,
+          "why": "A LIST after a successful PUT returns the new object, so the sleep only adds latency."
+        },
+        {
+          "text": "Replace the sleep with a retry loop on LIST until the key appears, because new prefixes still take a few seconds to show up.",
+          "correct": false,
+          "why": "It's cheaper than sleeping always, but the loop never has to wait; consistency applies to new prefixes too."
+        },
+        {
+          "text": "Remove the sleep only in us-east-1, where strong consistency first launched.",
+          "correct": false,
+          "why": "Strong consistency applies in all Regions."
+        }
+      ],
+      "explain": "S3 is strongly consistent for reads and lists after writes. Remove workarounds written for the old model, but remember concurrent writers to one key still need conditional writes or another coordination mechanism.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonS3/latest/userguide/Welcome.html#ConsistencyModel"
+      ]
+    },
+    {
+      "id": "aws-v5-q18",
+      "domain": "region",
+      "stem": "A clinic network uses a DynamoDB global table in `us-east-1` and `us-west-2`. Each Region runs a Lambda on its local DynamoDB stream that emails 'appointment confirmed' when the status changes to `CONFIRMED`. Patients receive two emails per confirmation. Which fix is correct?",
+      "options": [
+        {
+          "text": "Run the email Lambda on `us-east-1`'s stream only, since it sees replicated writes too.",
+          "correct": false,
+          "why": "It removes the duplicates, but while `us-east-1` is down no confirmations go out at all, even for bookings taken in `us-west-2`."
+        },
+        {
+          "text": "Add a conditional write `attribute_not_exists(emailedAt)` before sending in each Region.",
+          "correct": false,
+          "why": "Each Region checks its local replica; both can pass before replication brings over the other's flag."
+        },
+        {
+          "text": "Raise the Lambda's batching window in both Regions so the original record and its replicated copy arrive in the same batch and can be deduped.",
+          "correct": false,
+          "why": "Each Region's stream still carries the change; batching doesn't dedupe across Regions."
+        },
+        {
+          "text": "Send only where the write originated: the writer stamps `writtenIn`, and each consumer acts only when it equals the local Region.",
+          "correct": true,
+          "why": "Each replica's stream includes replicated writes, so both Regions see every change; one owner per item removes the double side effect."
+        }
+      ],
+      "explain": "In global tables, every replica's stream shows every change, including replicated ones. Side effects driven by streams need a single owner per item (home Region) or a globally consistent idempotency store; local conditional writes aren't enough.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-errors.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q19",
+      "domain": "region",
+      "stem": "A telehealth API uses Route 53 latency-based records for `us-east-1` and `eu-west-1`, with no health checks, to keep setup simple. When `eu-west-1` had an outage, European users kept getting errors for two hours, and the team edited DNS by hand. Which change fixes it?",
+      "options": [
+        {
+          "text": "Switch to geolocation routing so Europeans are pinned to `eu-west-1` regardless of latency measurements.",
+          "correct": false,
+          "why": "Geolocation routing still sends users to an unhealthy Region if it has no health check."
+        },
+        {
+          "text": "Associate health checks with both latency records so Route 53 stops returning the unhealthy Region.",
+          "correct": true,
+          "why": "With health checks, latency routing only answers with healthy records and falls back to the next best Region automatically."
+        },
+        {
+          "text": "Lower the record TTL to 10 seconds.",
+          "correct": false,
+          "why": "A short TTL makes changes propagate quickly, but nothing changes the answer without a health check."
+        },
+        {
+          "text": "Add a third Region to the latency records.",
+          "correct": false,
+          "why": "More Regions don't help if Route 53 can't tell which ones are failing."
+        }
+      ],
+      "explain": "Route 53 routing policies only avoid failed endpoints when health checks are associated with the records. Latency or geo routing without health checks is load distribution, not failover.",
+      "refs": [
+        "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/health-checks-how-route-53-chooses-records.html"
+      ]
+    },
+    {
+      "id": "aws-v5-q20",
+      "domain": "region",
+      "stem": "A healthcare SaaS claims an RTO of 15 minutes and RPO of 1 minute across two Regions, using DynamoDB global tables and Route 53 health checks. The last real failover test was 18 months ago. Which two practices would give evidence the claim still holds? (Choose two.)",
+      "options": [
+        {
+          "text": "Regular game days that fail over real traffic (all or a share) to the secondary Region and measure the time to recover.",
+          "correct": true,
+          "why": "Only a real failover shows the runbooks, quotas, config and dependencies still work, and measures RTO directly."
+        },
+        {
+          "text": "Alarms on the global table's `ReplicationLatency` metric, with a threshold well under the RPO.",
+          "correct": true,
+          "why": "Replication lag is the live RPO; alarming on it catches drift long before an incident."
+        },
+        {
+          "text": "An annual tabletop exercise where the team walks through the runbook.",
+          "correct": false,
+          "why": "Tabletops find gaps in the plan but don't test that the system actually fails over within 15 minutes."
+        },
+        {
+          "text": "Confirming the Route 53 health checks are green every week.",
+          "correct": false,
+          "why": "Green checks show the primary is healthy, not that the secondary can take its traffic."
+        },
+        {
+          "text": "Relying on AWS's Regional SLAs, since global tables are a managed service.",
+          "correct": false,
+          "why": "SLAs cover service availability and credits, not your application's recovery time."
+        }
+      ],
+      "explain": "Recovery objectives are claims that decay. Measure RPO continuously (replication lag) and RTO by actually failing over on a schedule; anything else is a document about a system that has since changed.",
+      "refs": [
+        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html",
+        "https://docs.aws.amazon.com/r53recovery/latest/dg/what-is-route53-recovery.html"
+      ]
+    }
+  ]
+}

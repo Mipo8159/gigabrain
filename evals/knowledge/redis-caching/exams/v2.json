@@ -1,0 +1,673 @@
+{
+  "topic": "redis-caching",
+  "variant": 2,
+  "of": 5,
+  "title": "Redis and caching at scale — variant 2",
+  "description": "Fintech and media scenarios: when write-behind is fine, refresh-ahead rates, hot write keys, replica reads, partitions and Redis transactions that don't roll back.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "patterns",
+      "name": "Cache patterns, invalidation and stale reads",
+      "weight": 0.25
+    },
+    {
+      "id": "load",
+      "name": "Stampedes, hot keys and TTL design",
+      "weight": 0.2
+    },
+    {
+      "id": "memory",
+      "name": "Memory, eviction and big keys",
+      "weight": 0.15
+    },
+    {
+      "id": "topology",
+      "name": "Cluster, replication, persistence and multi-region",
+      "weight": 0.2
+    },
+    {
+      "id": "coordination",
+      "name": "Locks, rate limits and messaging",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "redis-caching-v2-q01",
+      "domain": "patterns",
+      "stem": "A video platform counts ad impressions: 250k increments per second across 40k campaigns. Writing each one to Postgres would need a far bigger database. Finance reconciles against the ad server's own logs, so losing a few seconds of counts in a rare Redis failover is acceptable. Which pattern fits?",
+      "options": [
+        {
+          "text": "Cache-aside: write each increment to Postgres, then delete the campaign's cache key",
+          "correct": false,
+          "why": "Keeps Postgres authoritative, but it still puts 250k writes per second on Postgres, which is the cost the team is trying to avoid."
+        },
+        {
+          "text": "Write-through: update Postgres and Redis together in the request path for every impression",
+          "correct": false,
+          "why": "Gives a consistent cache, but every impression still waits on a Postgres write, so it fails the write-volume constraint."
+        },
+        {
+          "text": "Write-behind: `INCRBY` in Redis, flushed to Postgres every few seconds",
+          "correct": true,
+          "why": "Batches 250k writes per second into a few thousand rows per flush; the loss window is exactly the small, accepted risk."
+        },
+        {
+          "text": "Produce every impression to Kafka and have a consumer insert each one into Postgres as it arrives",
+          "correct": false,
+          "why": "Durable, but row-by-row consumption still lands 250k writes per second on Postgres unless you add the same batching anyway."
+        }
+      ],
+      "explain": "Write-behind trades durability for write throughput: Redis absorbs the writes and a flusher batches them. It is the right call when the data is high-volume, aggregatable and a small loss window is acceptable. Write the loss window down, because it equals Redis's own failover loss plus the flush interval.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/incrby/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q02",
+      "domain": "patterns",
+      "stem": "This handler updates a user's payout IBAN. A few times a day, users see their **old** IBAN for the full 10-minute TTL after a change, at about 2k reads per second on that endpoint. Which flaw causes this?",
+      "code": "async function updateIban(userId, iban) {\n  await redis.del(`acct:${userId}`);\n  await db.query('UPDATE accounts SET iban=$1 WHERE id=$2', [iban, userId]);\n}\n\nasync function getAccount(userId) {\n  const hit = await redis.get(`acct:${userId}`);\n  if (hit !== null) return JSON.parse(hit);\n  const row = await db.one('SELECT * FROM accounts WHERE id=$1', [userId]);\n  await redis.set(`acct:${userId}`, JSON.stringify(row), { expiration: { type: 'EX', value: 600 } });\n  return row;\n}",
+      "options": [
+        {
+          "text": "The read path should use `GETEX` to refresh the TTL on every hit",
+          "correct": false,
+          "why": "Sliding the TTL keeps popular stale entries alive longer, which makes this bug worse, not better."
+        },
+        {
+          "text": "It deletes before the update, so a read in between refills the old row; delete after commit",
+          "correct": true,
+          "why": "Any read between DEL and UPDATE misses, reads the old IBAN and caches it for 10 minutes. Deleting after the commit removes that window (a lease closes the remaining one)."
+        },
+        {
+          "text": "The cache key should include the IBAN value so a new IBAN gets a new key",
+          "correct": false,
+          "why": "Readers look up by user ID, not IBAN, so they cannot know the new key; the old entry would still be found and served."
+        },
+        {
+          "text": "`JSON.stringify` on a row object loses types such as numeric precision and dates, so the cached copy differs",
+          "correct": false,
+          "why": "A real serialization concern, but it would produce wrong types on every read, not an old IBAN after an update."
+        }
+      ],
+      "explain": "Order matters in cache-aside: write the database, then invalidate. Deleting first opens a window where a concurrent reader refills the old value. Even delete-after-commit has a smaller race (a reader that read before the commit), which a lease or version check closes; the TTL bounds whatever slips through.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/patterns/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q03",
+      "domain": "patterns",
+      "stem": "A news app's article cache fills with `SET article:{id} json EX 900`. A new 'edit headline' endpoint refreshes the cached copy with the code below. A month later, memory on the `volatile-lru` instance has climbed to the limit and writes begin to fail with OOM. What links the two?",
+      "code": "async function onHeadlineEdit(id, article) {\n  await db.saveArticle(id, article);\n  await redis.set(`article:${id}`, JSON.stringify(article));\n}",
+      "options": [
+        {
+          "text": "The edit path's `SET` dropped the TTL, so `volatile-lru` can't evict those keys",
+          "correct": true,
+          "why": "SET discards any existing TTL unless KEEPTTL or an expiry is passed, so every edited article becomes permanent and unevictable."
+        },
+        {
+          "text": "The edit path should use `MULTI` so the DB save and the cache write are atomic",
+          "correct": false,
+          "why": "MULTI cannot include the database, and atomicity is not the issue; the missing expiry is."
+        },
+        {
+          "text": "`volatile-lru` is known to leak memory on JSON string values larger than a few kilobytes",
+          "correct": false,
+          "why": "No such leak exists; eviction works on any value type as long as the key has a TTL."
+        },
+        {
+          "text": "Updating instead of deleting caused concurrent writers to land out of order, duplicating keys",
+          "correct": false,
+          "why": "Out-of-order writes cause stale values, not more keys; the key count does not grow from it."
+        }
+      ],
+      "explain": "Every SET of a cache key must carry an expiry, or `KEEPTTL` when you really mean it. A plain SET silently makes the key immortal, which removes the staleness bound and, under volatile-* eviction, makes the key unevictable. Look for this on 'update' and 'touch' paths, not just the fill path.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/set/",
+        "https://redis.io/docs/latest/develop/reference/eviction/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q04",
+      "domain": "patterns",
+      "stem": "A banking web app put a CDN in front of its API to cut origin load. Hours later, a customer reports seeing **another customer's** account summary. `GET /api/account/summary` returns `Cache-Control: max-age=60`, and the user is identified by a session cookie. Which fix is right?",
+      "options": [
+        {
+          "text": "Add `Vary: Cookie` to the response so the CDN keys on the cookie",
+          "correct": false,
+          "why": "Separates entries per cookie in caches that honour it, but private data still sits in a shared cache, each session becomes its own entry, and safety depends on every cache layer handling Vary correctly."
+        },
+        {
+          "text": "Mark per-user responses `Cache-Control: private` (and `no-store` if sensitive)",
+          "correct": true,
+          "why": "`private` forbids shared caches such as CDNs from storing the response, and `no-store` keeps sensitive data off disk entirely."
+        },
+        {
+          "text": "Lower `max-age` to 5 seconds",
+          "correct": false,
+          "why": "Shrinks the window in which a wrong customer is served, but a shared cache still stores and serves personal data."
+        },
+        {
+          "text": "Switch to `Cache-Control: no-cache`, which tells every cache not to keep the response at all",
+          "correct": false,
+          "why": "`no-cache` means 'store, but revalidate before use', not 'do not store'; the data is still stored in the shared cache."
+        }
+      ],
+      "explain": "Shared caches (CDNs, proxies) store anything public-looking. Responses tied to a user must be `private` (and `no-store` when sensitive). Keep `no-cache` for 'always revalidate', and reserve edge caching for content that is the same for everyone.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc9111"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q05",
+      "domain": "patterns",
+      "stem": "In a NestJS 11 service, changing notification settings commits to Postgres and publishes an event; a separate consumer deletes the user's settings cache key. The consumer usually lags 1–3 seconds. Users who change a setting and reload immediately see the old value and file bugs. Background invalidation for other services must stay. What change fits?",
+      "options": [
+        {
+          "text": "Make the consumer faster by adding partitions and replicas",
+          "correct": false,
+          "why": "Shrinks the lag but cannot remove it; a reload 200 ms after saving still beats any asynchronous consumer."
+        },
+        {
+          "text": "Have the settings page bypass the cache and always read Postgres directly",
+          "correct": false,
+          "why": "Works, but throws away the cache for the busiest reader of this data."
+        },
+        {
+          "text": "Also delete the key in the request path after commit",
+          "correct": true,
+          "why": "The writer's own next read then misses and loads the new row; the event still invalidates other caches asynchronously."
+        },
+        {
+          "text": "Write the new settings into Redis before committing to Postgres",
+          "correct": false,
+          "why": "If the commit fails or rolls back, the cache now holds settings that never existed."
+        }
+      ],
+      "explain": "Read-your-writes is a promise to one user, so meet it in that user's request path: invalidate synchronously after commit. Asynchronous invalidation remains the backstop for everyone else, with a TTL bounding anything missed.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/del/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q06",
+      "domain": "load",
+      "stem": "A leaderboard key expires every 30 seconds; rebuilding it is a 200 ms Postgres query. 60 pods each serve about 800 rps of it. At expiry the DB sees ~60 concurrent rebuilds, which it handles comfortably. An engineer proposes a Redlock-based distributed rebuild lock to get it to exactly one. What do you recommend?",
+      "options": [
+        {
+          "text": "Adopt the five-node Redlock so exactly one rebuild runs cluster-wide",
+          "correct": false,
+          "why": "Gets to one rebuild, but adds five Redis nodes and a lock round trip to a problem the DB already absorbs; the cost buys nothing measurable."
+        },
+        {
+          "text": "Keep per-pod single-flight; 60 rebuilds per 30 s is within capacity",
+          "correct": true,
+          "why": "Single-flight collapses each pod's 800 rps into one load, and the remaining 60 concurrent queries are well within capacity."
+        },
+        {
+          "text": "Remove the TTL and rebuild with a cron job instead",
+          "correct": false,
+          "why": "Refresh-ahead is reasonable, but it adds a scheduler to own and monitor and removes the staleness bound if the cron dies; there is no problem here that needs it."
+        },
+        {
+          "text": "Raise the TTL to 10 minutes",
+          "correct": false,
+          "why": "Fewer rebuilds, but the leaderboard becomes 10 minutes stale, which changes the product for no operational need."
+        }
+      ],
+      "explain": "Stampede control is sized to the backend's capacity, not to 'exactly one'. Per-process single-flight turns N requests into one load per process; a cross-process lock is only worth its extra moving parts when the per-pod count still overloads the source.",
+      "refs": [
+        "https://cseweb.ucsd.edu/~avattani/papers/cache_stampede.pdf"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q07",
+      "domain": "load",
+      "stem": "A payments service needs FX rates on every request (30k rps). The provider updates rates every 60 seconds, and a call to it takes ~400 ms and is rate-limited to 10 per minute. Today rates are cached with cache-aside and `EX 60`; every minute p99 spikes to 450 ms and the provider sometimes returns 429. Which design fits?",
+      "options": [
+        {
+          "text": "Add a 10% jitter to the 60-second TTL",
+          "correct": false,
+          "why": "Jitter spreads expiry across many keys; here a handful of rate keys expire and each miss still costs a slow provider call in the request path."
+        },
+        {
+          "text": "Probabilistic early refresh (XFetch) on each request",
+          "correct": false,
+          "why": "Moves misses before expiry but still makes the provider call from request handlers, and several pods can refresh together and trip the 10-per-minute limit."
+        },
+        {
+          "text": "One scheduled refresher writes rates every 30 s with a 3-minute TTL",
+          "correct": true,
+          "why": "Refresh-ahead takes the provider call out of the request path, makes 2 calls per minute, and the longer TTL keeps the last rates if one refresh fails."
+        },
+        {
+          "text": "Cache the rates in each pod's own memory for 60 seconds instead of in Redis",
+          "correct": false,
+          "why": "With many pods, each one calls the provider on its own miss, which multiplies calls and hits the 429 limit faster."
+        }
+      ],
+      "explain": "When every request needs the same small dataset and the source is slow or rate-limited, refresh it ahead of time from one place and let requests only read. Set the TTL to several refresh intervals so one failed refresh doesn't create a miss.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/set/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q08",
+      "domain": "load",
+      "stem": "A report cache uses a rebuild lock: the first request to miss runs `SET lock:report NX PX 5000`, rebuilds, writes the value and releases the lock. The rebuild takes 12 seconds at month-end. That day the warehouse DB showed three overlapping rebuild queries per expiry, and they kept piling up. Which explains the pile-up?",
+      "options": [
+        {
+          "text": "The lock is acquired with `NX`, which allows multiple holders when the key already exists",
+          "correct": false,
+          "why": "NX means 'only if not exists', so a second SET NX fails while the lock key is present; that part works."
+        },
+        {
+          "text": "The 5 s lock TTL lapses mid-rebuild, letting new holders start more",
+          "correct": true,
+          "why": "Each time the lock TTL lapses, the next miss acquires it and starts another rebuild; the TTL must exceed worst-case rebuild time, or be extended while working."
+        },
+        {
+          "text": "The release should use `DEL`, not a compare-and-delete, so the lock is cleared faster",
+          "correct": false,
+          "why": "Release speed is irrelevant here, and a plain DEL could remove a newer holder's lock, making overlap worse."
+        },
+        {
+          "text": "Month-end data is too large for a cache and should bypass it",
+          "correct": false,
+          "why": "Bypassing sends every request to the warehouse; the cache and lock are right, the lock TTL is mis-sized."
+        }
+      ],
+      "explain": "A lock's TTL is a promise about the work's duration. Size it above the worst-case (not average) runtime, or renew it while the work runs, and fail safe if renewal fails. A lease that is too short quietly turns 'one rebuilder' into several.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q09",
+      "domain": "load",
+      "stem": "A music app tracks a 'trending now' score with `ZINCRBY trending 1 <trackId>` on every play: 180k writes per second, all to one sorted-set key on a 10-shard Redis Cluster. That shard is saturated; the chart is read 50 times per second and may be up to 10 seconds old. Which change spreads the load?",
+      "options": [
+        {
+          "text": "Read the chart from replicas with `READONLY`",
+          "correct": false,
+          "why": "Replicas take reads off the primary, but the problem is 180k writes per second, which all still go to the one primary."
+        },
+        {
+          "text": "Split into 32 hashed sub-keys and merge them on read",
+          "correct": true,
+          "why": "Writes now land on 32 slots across shards; the rare reads pay a cheap merge (ZUNIONSTORE per shard or in the app) within the 10-second budget."
+        },
+        {
+          "text": "Put all trending keys under one hash tag so updates stay on one shard",
+          "correct": false,
+          "why": "That is the current problem: one slot, one primary, one thread."
+        },
+        {
+          "text": "Pipeline the ZINCRBY calls from each app pod",
+          "correct": false,
+          "why": "Pipelining reduces round trips and helps a little, but the shard still executes 180k ZINCRBY per second on one thread."
+        }
+      ],
+      "explain": "A hot write key cannot be fixed with replicas or bigger nodes; split it into N sub-keys spread across slots and aggregate on read or on a timer. Batching writes in the app (count locally, flush every second) is the other lever.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/zunionstore/",
+        "https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q10",
+      "domain": "memory",
+      "stem": "When an editor republishes a section, the news CMS invalidates `section:{id}:*` with `KEYS` and `DEL`. The instance holds 30 million keys. Each invalidation stalls Redis for ~4 seconds, and editors republish sections many times an hour. Which approach removes the stall at its root?",
+      "options": [
+        {
+          "text": "Replace `KEYS` with a `SCAN MATCH` loop and `UNLINK` the batches",
+          "correct": false,
+          "why": "Removes the long block, but each invalidation still walks all 30 million keys, many times an hour; it costs CPU and takes a long time to finish."
+        },
+        {
+          "text": "Run the `KEYS` call on a replica, then `DEL` on the primary",
+          "correct": false,
+          "why": "The replica stalls instead, its reads time out, and it still scans the whole keyspace each time."
+        },
+        {
+          "text": "Put a section version in keys and `INCR` it to invalidate",
+          "correct": true,
+          "why": "Invalidation becomes one O(1) INCR; old-version keys are never read again and expire through their TTL."
+        },
+        {
+          "text": "Move section keys to a separate logical database and `FLUSHDB` it",
+          "correct": false,
+          "why": "Flushes every section, not just the edited one, so each republish empties the whole section cache."
+        }
+      ],
+      "explain": "Pattern deletes scale with keyspace size. When invalidating a group is frequent, make the group's version part of the key and bump it; the old keys age out by TTL. Use SCAN plus UNLINK only for rare cleanups, and never KEYS in production.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/keys/",
+        "https://redis.io/docs/latest/commands/scan/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q11",
+      "domain": "memory",
+      "stem": "A recommendation cache runs `allkeys-lru` at full memory with a 94% hit rate. Every night a batch export reads every key once, and next morning the hit rate drops to 60% for two hours while the DB struggles. Moving the export elsewhere is a quarter away. Which setting helps most now?",
+      "options": [
+        {
+          "text": "Switch to `allkeys-lfu`",
+          "correct": true,
+          "why": "LFU ranks by access frequency, so keys touched once by the export stay cold, and the daily hot set keeps its high counts and survives."
+        },
+        {
+          "text": "Switch to `volatile-ttl`",
+          "correct": false,
+          "why": "Evicts by remaining TTL, not use, so it ignores the export pattern and may drop hot keys that happen to expire soon."
+        },
+        {
+          "text": "Switch to `noeviction` during the export window",
+          "correct": false,
+          "why": "Stops eviction, but the cache is full, so every write during the export fails with OOM."
+        },
+        {
+          "text": "Double `maxmemory-samples` so LRU picks victims more accurately",
+          "correct": false,
+          "why": "Better sampling makes LRU closer to true LRU, but true LRU still evicts the hot set after a full scan; the policy is the problem."
+        }
+      ],
+      "explain": "LRU is fooled by scans: one pass over everything makes every key 'recent'. LFU keeps a frequency counter that decays over time, so one-off reads don't displace the working set. Pick the eviction signal that matches the access pattern.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/reference/eviction/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q12",
+      "domain": "memory",
+      "stem": "A trading dashboard stores each user's full workspace as one 1.2 MB JSON string under `ws:{user}`. A popular shared workspace is read 5,000 times per second, and the shard's 10 Gbps network link saturates while its CPU is at 30%. Each page view needs only one widget's data (~4 KB). What should change?",
+      "options": [
+        {
+          "text": "Compress the JSON with gzip before storing it and decompress it in the app",
+          "correct": false,
+          "why": "Cuts bytes several-fold, which helps, but each view still pulls the whole workspace and pays decompression for 4 KB of use."
+        },
+        {
+          "text": "Move the shard to a node with a 25 Gbps link",
+          "correct": false,
+          "why": "6 GB per second of reads is about 48 Gbps, so 25 Gbps still saturates; the value is too big for how it is read."
+        },
+        {
+          "text": "Add read replicas and spread the reads across them",
+          "correct": false,
+          "why": "Spreads bandwidth across nodes, but every replica still ships 1.2 MB per view to read 4 KB."
+        },
+        {
+          "text": "Store widgets as hash fields so a view fetches only its widget",
+          "correct": true,
+          "why": "Each read moves ~4 KB instead of 1.2 MB, a 300x drop in bandwidth, and partial updates no longer rewrite the whole blob."
+        }
+      ],
+      "explain": "Big values cost network and serialization on every access, not just memory. Shape keys around how they are read: fetch the unit a request needs. Bandwidth (value size times read rate) is a capacity limit as real as CPU.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/hget/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q13",
+      "domain": "topology",
+      "stem": "To offload its primary, an auth service sends all Redis reads to replicas. After a user turns on two-factor login, the very next request sometimes reads the old flag from a replica and skips the 2FA prompt. Replica lag is usually under 50 ms. Which fix fits?",
+      "options": [
+        {
+          "text": "Use `WAIT 1 0` after every write so replicas are always up to date",
+          "correct": false,
+          "why": "Waits for one replica to acknowledge, but if several replicas serve reads, others may still lag, and it adds latency to every write."
+        },
+        {
+          "text": "Read security-critical keys from the primary",
+          "correct": true,
+          "why": "Security decisions need the latest value; routing those reads to the primary removes the lag window, while other reads stay on replicas."
+        },
+        {
+          "text": "Lower `repl-backlog-size` so replicas apply changes faster",
+          "correct": false,
+          "why": "The backlog size affects partial resync after disconnects, not the steady-state replication delay."
+        },
+        {
+          "text": "Add more replicas so the load per replica falls",
+          "correct": false,
+          "why": "Less load per replica can cut lag a little, but replication is still asynchronous and a read can always beat the update."
+        }
+      ],
+      "explain": "Replicas are asynchronous, so a read after a write can see the old value. Decide per key class: security and read-your-writes paths read the primary; everything that tolerates staleness reads replicas.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/replication/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q14",
+      "domain": "topology",
+      "stem": "A SaaS app wrapped every key in the tenant hash tag (`{tenant:acme}:…`) so multi-key Lua scripts would always work. The largest tenant now produces 40% of all traffic, and its slot's node is at 95% memory while the other eight are at 30%. Which redesign fits?",
+      "options": [
+        {
+          "text": "Reshard so the hot slot gets its own node",
+          "correct": false,
+          "why": "A slot cannot be split, so one node still carries 40% of traffic and memory, and it can only grow so far."
+        },
+        {
+          "text": "Add more primaries to the cluster so the tenant's load spreads out",
+          "correct": false,
+          "why": "New nodes take other slots; the one hot slot stays on one primary."
+        },
+        {
+          "text": "Turn the hash tags off for the largest tenant only",
+          "correct": false,
+          "why": "Spreads that tenant's keys, but every multi-key script for it then fails with CROSSSLOT until rewritten, so it breaks production the moment it ships."
+        },
+        {
+          "text": "Tag by the smallest atomic unit, such as `{acme:user:42}`",
+          "correct": true,
+          "why": "Keys spread across many slots, while each script still finds its keys together because it only needs one user's keys at a time."
+        }
+      ],
+      "explain": "A hash tag puts everything that shares it into one slot, which means one node. Tag by the smallest group that multi-key operations really need, never by a big, unbounded unit like a tenant.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/reference/cluster-spec/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q15",
+      "domain": "topology",
+      "stem": "Sessions for a media site live **only** in Redis: one node, persistence off. A planned kernel patch restarted the node and logged out 2 million users. The team wants restarts to keep sessions, can accept losing about a second of session writes on a crash, and wants fast failover too. What do you recommend?",
+      "options": [
+        {
+          "text": "AOF with `appendfsync everysec`, plus a replica with automatic failover",
+          "correct": true,
+          "why": "AOF everysec survives restarts losing at most about a second, and a replica covers host loss and patching without a restart outage."
+        },
+        {
+          "text": "RDB snapshots every 15 minutes",
+          "correct": false,
+          "why": "Survives a restart, but a crash loses up to 15 minutes of logins and session changes, far beyond the one-second budget."
+        },
+        {
+          "text": "AOF with `appendfsync always` and no replica",
+          "correct": false,
+          "why": "Durable per write, but it adds an fsync to every write and leaves a single node, so any restart or host loss is still an outage."
+        },
+        {
+          "text": "Keep persistence off and add a replica",
+          "correct": false,
+          "why": "Handles a planned failover, but if both nodes restart together, or an empty primary restarts and resyncs its replica, all sessions vanish again."
+        }
+      ],
+      "explain": "Pick persistence by the loss you can accept: AOF everysec loses about a second, RDB loses everything since the last snapshot, and AOF always pays an fsync per write. Persistence protects restarts; replication protects availability. You usually want both for data that lives only in Redis.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q16",
+      "domain": "topology",
+      "stem": "A network partition cut a Redis primary and a few app pods off from its replica and the Sentinels. Sentinel promoted the replica on the majority side. For 40 seconds the isolated primary kept accepting writes from pods on its side; when the partition healed it became a replica and those writes were discarded. Which setting limits this?",
+      "options": [
+        {
+          "text": "`appendfsync always` on the old primary",
+          "correct": false,
+          "why": "The writes were persisted on the old primary's disk, but it resyncs from the new primary when it rejoins, so they are dropped anyway."
+        },
+        {
+          "text": "Lower `down-after-milliseconds` in Sentinel so failover starts sooner",
+          "correct": false,
+          "why": "Promotes the replica sooner, which does nothing to stop the isolated primary from accepting writes."
+        },
+        {
+          "text": "`min-replicas-to-write 1`, `min-replicas-max-lag 10`",
+          "correct": true,
+          "why": "The primary refuses writes once no replica has acknowledged it for 10 seconds, so an isolated primary stops taking writes that would be lost."
+        },
+        {
+          "text": "Run three Sentinels instead of two",
+          "correct": false,
+          "why": "A sensible quorum setup, but Sentinels decide failover; they do not stop clients writing to the old primary."
+        }
+      ],
+      "explain": "In a partition, an isolated Redis primary keeps accepting writes until it notices it is alone. `min-replicas-to-write` / `min-replicas-max-lag` bound that window by making the primary reject writes when no replica is in touch. It reduces loss; it does not make replication synchronous.",
+      "refs": [
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/sentinel/",
+        "https://redis.io/docs/latest/operate/oss_and_stack/management/replication/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q17",
+      "domain": "coordination",
+      "stem": "A photo service uses a single-instance Redis lock (`SET lock:thumb:{id} token NX PX 30000`) so concurrent uploads don't generate the same thumbnail twice. Generating a duplicate wastes 2 seconds of CPU but produces an identical file. A reviewer asks for Redlock across five Redis nodes 'for safety'. What do you advise?",
+      "options": [
+        {
+          "text": "Adopt Redlock, since a single-instance lock can be lost on failover",
+          "correct": false,
+          "why": "True that it can be lost, but the only cost of losing it here is a duplicate thumbnail, which is harmless; five nodes buy nothing."
+        },
+        {
+          "text": "Keep the single-instance lock; it is an efficiency lock and an occasional duplicate is harmless",
+          "correct": true,
+          "why": "When a lost lock only wastes work, the simple lock is right; Redlock adds operational cost for a guarantee this job doesn't need."
+        },
+        {
+          "text": "Replace the lock with a Postgres advisory lock for stronger guarantees",
+          "correct": false,
+          "why": "Works, but adds load and coupling to the database for a job that tolerates duplicates."
+        },
+        {
+          "text": "Add fencing tokens to the thumbnail storage writes",
+          "correct": false,
+          "why": "Fencing matters when two writers would corrupt data; identical thumbnails cannot conflict, so it is cost without benefit."
+        }
+      ],
+      "explain": "Classify a lock first. Efficiency locks (avoid duplicate work) can be simple and occasionally wrong. Correctness locks (avoid corruption) need fencing tokens or a constraint at the resource, and Redlock does not provide that either.",
+      "refs": [
+        "https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q18",
+      "domain": "coordination",
+      "stem": "A public API allows 100 requests per 10 seconds per key using this Lua sliding-window limiter. A customer sends bursts from 50 parallel workers and gets ~180 requests through per window. Which flaw explains it?",
+      "code": "-- KEYS[1] = rl:{apiKey}, ARGV[1] = now (ms), ARGV[2] = window (ms), ARGV[3] = limit\nredis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1] - ARGV[2])\nif redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[3]) then\n  redis.call('ZADD', KEYS[1], ARGV[1], ARGV[1])\n  redis.call('PEXPIRE', KEYS[1], ARGV[2])\n  return 1\nend\nreturn 0",
+      "options": [
+        {
+          "text": "The script is not atomic, so parallel calls interleave between ZCARD and ZADD",
+          "correct": false,
+          "why": "A Lua script runs atomically in Redis; nothing interleaves inside it."
+        },
+        {
+          "text": "Same-millisecond requests share one member; make members unique",
+          "correct": true,
+          "why": "Sorted-set members are unique; `ZADD key now now` from parallel requests in one millisecond overwrites itself, so many requests count as one."
+        },
+        {
+          "text": "`PEXPIRE` resets the window on every allowed request, so it never shrinks",
+          "correct": false,
+          "why": "PEXPIRE only controls when the whole key is cleaned up; the window is enforced by ZREMRANGEBYSCORE on scores, which still works."
+        },
+        {
+          "text": "The limiter should count rejected requests too so heavy users are slowed further",
+          "correct": false,
+          "why": "Counting rejects would lock out a client that keeps retrying; it doesn't explain letting too many through."
+        }
+      ],
+      "explain": "In a ZSET log limiter, the member is the identity of each request; use a unique member (timestamp plus random suffix or sequence) and keep the timestamp as the score. Do the remove, count and add atomically, and add only when the request is allowed.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/zadd/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q19",
+      "domain": "coordination",
+      "stem": "A settlement worker reads a Redis Stream with `XREADGROUP GROUP settle worker-3 COUNT 10 STREAMS settlements >`, processes each entry and then `XACK`s it. After the pod was OOM-killed and restarted with the same consumer name, 10 settlements were never processed, though `XPENDING` lists them under `worker-3`. What should the worker do on start?",
+      "options": [
+        {
+          "text": "Read with ID `0` first to drain its own pending entries, then switch to `>`",
+          "correct": true,
+          "why": "`>` returns only never-delivered entries; ID `0` returns this consumer's pending (delivered, un-ACKed) entries, so a restart finishes what it started."
+        },
+        {
+          "text": "Recreate the consumer group with `XGROUP CREATE … $` on every start",
+          "correct": false,
+          "why": "Starting from `$` skips everything already in the stream, and recreating the group throws away pending state; it loses more messages."
+        },
+        {
+          "text": "Start with a fresh random consumer name each time so it gets new messages",
+          "correct": false,
+          "why": "A new name still reads only `>`, so the old consumer's pending entries are orphaned until something reclaims them."
+        },
+        {
+          "text": "ACK each entry right after reading it, before processing",
+          "correct": false,
+          "why": "Stops entries from getting stuck by turning at-least-once into at-most-once: a crash mid-process now silently loses the settlement."
+        }
+      ],
+      "explain": "Consumer groups track delivered-but-unacknowledged entries in a pending list. `>` means 'new to the group', so a restarted consumer must re-read its own history with ID 0 (or use XAUTOCLAIM / XREADGROUP CLAIM on 8.4+) before reading new entries. ACK only after the work is done.",
+      "refs": [
+        "https://redis.io/docs/latest/commands/xreadgroup/",
+        "https://redis.io/docs/latest/develop/data-types/streams/"
+      ]
+    },
+    {
+      "id": "redis-caching-v2-q20",
+      "domain": "coordination",
+      "stem": "A loyalty service moves points with ioredis 6: `multi().decrby('pts:a', 50).incrby('pts:b', 50).exec()` inside `try/catch`. `pts:b` had accidentally been stored as a hash. The call reported success, A lost 50 points and B gained nothing. Which two statements explain it? (Choose two.)",
+      "options": [
+        {
+          "text": "Redis does not roll back a transaction when one command fails at runtime; the DECRBY applied",
+          "correct": true,
+          "why": "EXEC runs every queued command; a WRONGTYPE error affects only that command, and the others stay applied."
+        },
+        {
+          "text": "ioredis `exec()` resolves with per-command `[err, result]` pairs instead of throwing, so the catch block never ran",
+          "correct": true,
+          "why": "The error sits inside the resolved array; code that only uses try/catch never sees it."
+        },
+        {
+          "text": "MULTI rolled back, but ioredis replayed the DECRBY after reconnecting",
+          "correct": false,
+          "why": "Nothing rolled back; Redis has no rollback, and no reconnect happened here."
+        },
+        {
+          "text": "Using `pipeline()` instead of `multi()` would have made the pair atomic",
+          "correct": false,
+          "why": "A pipeline is only batching; it is less atomic than MULTI, not more."
+        },
+        {
+          "text": "`WATCH` on both keys would have rolled back the DECRBY",
+          "correct": false,
+          "why": "WATCH aborts EXEC only if a watched key changed before EXEC; it does not undo commands that ran and failed."
+        }
+      ],
+      "explain": "MULTI/EXEC gives isolation (no other client runs in between), not rollback. Validate inputs first or use a Lua script that checks before it writes, and inspect every reply: ioredis returns error tuples, node-redis rejects with a MultiErrorReply even though some commands applied.",
+      "refs": [
+        "https://redis.io/docs/latest/develop/using-commands/transactions/",
+        "https://github.com/redis/ioredis#transaction"
+      ]
+    }
+  ]
+}

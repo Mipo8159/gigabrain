@@ -1,0 +1,616 @@
+{
+  "topic": "distributed-systems",
+  "variant": 4,
+  "of": 5,
+  "title": "Distributed systems at scale — variant 4",
+  "description": "AZ-aware quorums, causal order, ID generation, secondary indexes, fingerprints, ordered relays, fan-out limits, backpressure and thin cell routers.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "consistency",
+      "name": "Consistency, replication and quorums",
+      "weight": 0.2
+    },
+    {
+      "id": "partitioning",
+      "name": "Partitioning, consensus and clocks",
+      "weight": 0.2
+    },
+    {
+      "id": "effects",
+      "name": "Idempotency, outbox and sagas",
+      "weight": 0.2
+    },
+    {
+      "id": "overload",
+      "name": "Timeouts, retries, breakers and load shedding",
+      "weight": 0.25
+    },
+    {
+      "id": "regions",
+      "name": "Multi-region, cells and blast radius",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "distributed-systems-v4-q01",
+      "domain": "consistency",
+      "stem": "A leaderless store keeps N = 5 replicas of each key across three AZs, placed 2 + 2 + 1. The team needs every read to overlap the latest acknowledged write, **and** both reads and writes must survive the loss of any one whole AZ. Which quorum setting works?",
+      "options": [
+        {
+          "text": "W = 4, R = 2",
+          "correct": false,
+          "why": "Overlap holds (6 > 5) and reads are cheap, but losing a two-replica AZ leaves 3 replicas, so writes needing 4 fail."
+        },
+        {
+          "text": "W = 3, R = 3",
+          "correct": true,
+          "why": "Overlap holds (6 > 5), and losing any AZ leaves at least 3 replicas, enough for both reads and writes."
+        },
+        {
+          "text": "W = 3, R = 2",
+          "correct": false,
+          "why": "Both survive any AZ loss, but 3 + 2 = 5 is not greater than 5, so a read can miss the latest write."
+        },
+        {
+          "text": "W = 2, R = 4",
+          "correct": false,
+          "why": "Writes are cheap and overlap holds, but losing a two-replica AZ leaves 3, so reads needing 4 fail."
+        }
+      ],
+      "explain": "Check quorums against the failure you must survive, not just node count: subtract the largest failure domain (here an AZ holding 2 replicas) from N, and both W and R must fit in what's left, while W + R > N still holds. Replica placement across AZs is part of the quorum design."
+    },
+    {
+      "id": "distributed-systems-v4-q02",
+      "domain": "consistency",
+      "stem": "A group-chat service replicates messages asynchronously between three regions, and each region applies messages in the order they arrive. Some users see 'Yes, 7 pm works!' before the 'Dinner tomorrow?' it replies to. Users accept a second or two of delay but find replies before questions confusing. What fixes the ordering?",
+      "options": [
+        {
+          "text": "Sort each conversation by the sender device's timestamp before displaying it.",
+          "correct": false,
+          "why": "It looks natural, but device clocks are often minutes off, so a reply can still sort before the question."
+        },
+        {
+          "text": "Give each conversation one owner that assigns sequence numbers; replicas apply them in order and buffer gaps.",
+          "correct": true,
+          "why": "Every region applies a conversation's messages in the same causal order, while still replicating asynchronously."
+        },
+        {
+          "text": "Cut replication lag with faster links and larger instances in every region, so messages arrive in time order.",
+          "correct": false,
+          "why": "Less lag makes reordering rarer, but async paths can still deliver messages out of order, so the anomaly stays."
+        },
+        {
+          "text": "Serve every chat read from a single primary region.",
+          "correct": false,
+          "why": "Order is then consistent, but users far from that region pay its latency on every read, and the region becomes a single point of failure."
+        }
+      ],
+      "explain": "Causal consistency (effects never appear before their causes) is often what users actually need, and it is cheaper than global linearizability. Get it by giving each causal scope (a conversation, a document) one sequencer, and having replicas apply in sequence order, holding back anything that arrives after a gap."
+    },
+    {
+      "id": "distributed-systems-v4-q03",
+      "domain": "consistency",
+      "stem": "A consumer fintech runs in us-east and eu-west (about 80 ms round trip). Synchronous cross-region commit would add that round trip to every write it covers. The architect wants to pay it only for data where losing or duplicating a write in a regional failover is unacceptable. Which two datasets justify synchronous cross-region commits? (Choose two.)",
+      "options": [
+        {
+          "text": "Ledger debits and credits on customer accounts.",
+          "correct": true,
+          "why": "A lost or duplicated debit is a real financial error, so these writes need RPO 0 across regions."
+        },
+        {
+          "text": "Single-use gift-card redemptions.",
+          "correct": true,
+          "why": "If a redemption is lost in failover, the card can be spent twice, so this one-time state needs a cross-region commit."
+        },
+        {
+          "text": "Profile bios and avatar URLs.",
+          "correct": false,
+          "why": "Users notice edits, but losing a few seconds of profile changes in a rare failover is cheap to accept."
+        },
+        {
+          "text": "Per-video view counters.",
+          "correct": false,
+          "why": "Counters are high-volume and approximate by nature, so paying 80 ms per increment would be costly for no business gain."
+        },
+        {
+          "text": "Notification preference toggles.",
+          "correct": false,
+          "why": "A lost toggle is a minor annoyance the user can redo, which isn't worth a cross-region round trip on every change."
+        }
+      ],
+      "explain": "Consistency is a per-dataset budget decision. Classify data by what a lost or duplicated write costs: money and one-time rights justify synchronous cross-region commit, while profiles, counters and preferences can replicate asynchronously and accept a small RPO."
+    },
+    {
+      "id": "distributed-systems-v4-q04",
+      "domain": "consistency",
+      "stem": "A note-taking app reads from async Postgres replicas and pins each device's session to the primary for 5 s after it writes. Users still complain: they edit a note on their phone, open the laptop seconds later, and see the old version. Moving all reads to the primary is not an option. What fixes it?",
+      "options": [
+        {
+          "text": "Make sticky sessions longer, for example 60 s on the writing device.",
+          "correct": false,
+          "why": "Pinning is per device, so the laptop never had a pin, however long the phone's lasts."
+        },
+        {
+          "text": "Store each user's last-write LSN; read a replica only if it has replayed past it, else the primary.",
+          "correct": true,
+          "why": "The guarantee follows the user rather than the device, and most reads still go to replicas because they are usually caught up."
+        },
+        {
+          "text": "Cache each note in Redis for 10 s after every write.",
+          "correct": false,
+          "why": "It helps if every read path checks the cache first, but a cache fill from a lagging replica can still hold the old version."
+        },
+        {
+          "text": "Put the laptop and phone on the same replica by hashing the user id, instead of hashing the device id.",
+          "correct": false,
+          "why": "Both devices agree with each other, but that replica can still lag behind the primary, so the edit can still be missing."
+        }
+      ],
+      "explain": "Read-your-writes must hold for the scope the user sees: their account, across devices. Track a causality token (the LSN of the user's last write) somewhere every device's request can reach, and route each read to a replica that has caught up to it. Most reads stay on replicas."
+    },
+    {
+      "id": "distributed-systems-v4-q05",
+      "domain": "partitioning",
+      "stem": "A limited sneaker drop sends 200,000 reads/s for the key `product:9917` to a Redis Cluster. That key lives on one shard, which handles about 100,000 ops/s, and the shard's other keys are timing out too. The product data changes rarely, and 1 s of staleness is fine. What is the best fix?",
+      "options": [
+        {
+          "text": "Add more shards to the Redis Cluster so the load spreads across more nodes.",
+          "correct": false,
+          "why": "More shards spread many keys, but a single key still maps to one hash slot on one shard."
+        },
+        {
+          "text": "Raise the key's Redis TTL from 60 s to 1 hour so it is refreshed less often.",
+          "correct": false,
+          "why": "It reduces database refreshes, but every read still hits the same Redis shard, which is the bottleneck."
+        },
+        {
+          "text": "Cache the hot key inside each app instance for 1 s.",
+          "correct": true,
+          "why": "Each instance asks Redis about once a second, so the shard sees a handful of reads instead of 200,000/s, within the staleness budget."
+        },
+        {
+          "text": "Move that shard to a larger node with more memory and faster network interfaces.",
+          "correct": false,
+          "why": "It adds some headroom, but the load is 2× the shard's limit and the next drop will be bigger."
+        }
+      ],
+      "explain": "A hot read key concentrates load on one partition just as a hot write key does. For hot reads, the usual fix is a short-TTL near cache in each instance (plus request coalescing), or replicating the key under several names. Spend the staleness budget the product allows."
+    },
+    {
+      "id": "distributed-systems-v4-q06",
+      "domain": "partitioning",
+      "stem": "A Snowflake-style ID generator (41-bit millisecond timestamp, 10-bit worker id, 12-bit sequence) issues 200,000 IDs/s across regions. IDs must be unique and roughly time-sortable. After NTP stepped one host's clock back 2 s, that host issued duplicate IDs. What should the generator do?",
+      "options": [
+        {
+          "text": "Switch to random 64-bit IDs, which never depend on the clock.",
+          "correct": false,
+          "why": "Clock jumps stop mattering, but the IDs are no longer time-sortable, which the stem requires."
+        },
+        {
+          "text": "Allocate every ID from one global database sequence.",
+          "correct": false,
+          "why": "IDs stay unique and ordered, but 200,000/s across regions through one sequence adds latency and a single point of failure."
+        },
+        {
+          "text": "Pick a random worker id at every process start.",
+          "correct": false,
+          "why": "It changes nothing for the clock problem, and two hosts can draw the same worker id."
+        },
+        {
+          "text": "Track the last timestamp used; if the clock is behind it, wait (or refuse) until it passes.",
+          "correct": true,
+          "why": "A (timestamp, sequence) pair is never reused, so IDs stay unique and time-ordered even when the wall clock steps back."
+        }
+      ],
+      "explain": "Any scheme that builds IDs or order from wall time must survive the clock going backwards. Keep a high-water mark and never issue below it: wait, refuse, or borrow from the sequence space. Uniqueness then rests on the worker id plus a monotonic counter, not on the clock."
+    },
+    {
+      "id": "distributed-systems-v4-q07",
+      "domain": "partitioning",
+      "stem": "Orders are sharded by `customer_id` across 64 Postgres shards, which suits checkout and order history. A new merchant dashboard queries 'orders for merchant M this week', which fans out to all 64 shards; its p99 is 4 s, set by the slowest shard, and it adds load everywhere. The dashboard can lag a few seconds. What should the team build?",
+      "options": [
+        {
+          "text": "Re-shard all orders by `merchant_id` instead of `customer_id`.",
+          "correct": false,
+          "why": "The dashboard query becomes local, but checkout and order history, the main workloads, would then fan out to every shard."
+        },
+        {
+          "text": "A separate merchant-partitioned read model fed from the orders' outbox or CDC.",
+          "correct": true,
+          "why": "Each dashboard query hits one partition, and checkout keeps its customer sharding; the read model is a few seconds behind, which is allowed."
+        },
+        {
+          "text": "Go from 64 to 256 shards so each one holds less data and answers faster.",
+          "correct": false,
+          "why": "Each shard answers faster, but the query now fans out to 256 shards, so the slowest-shard tail gets worse."
+        },
+        {
+          "text": "Cache the dashboard response for an hour.",
+          "correct": false,
+          "why": "It cuts load, but data an hour stale breaks the few-seconds requirement, and the first view is still slow."
+        }
+      ],
+      "explain": "Partition by the dominant access pattern, and serve other patterns from secondary indexes or read models partitioned their own way, fed asynchronously by CDC or an outbox. Scatter-gather latency is set by the slowest shard, so adding shards makes it worse."
+    },
+    {
+      "id": "distributed-systems-v4-q08",
+      "domain": "partitioning",
+      "stem": "A feature-flag service stores flags in a 5-member etcd cluster. To cut latency, clients read with **serializable** consistency, served by whichever member they are connected to. During a network partition that split the members 2 | 3, clients connected to the minority side kept reading a kill switch as 'off' for 6 minutes after it was turned on. What should change?",
+      "options": [
+        {
+          "text": "Add a sixth member so the cluster can't split into a minority side.",
+          "correct": false,
+          "why": "Any partition can still leave members cut off from the majority, and 6 members tolerate no more failures than 5."
+        },
+        {
+          "text": "Shorten the election timeout so the minority side notices the partition sooner.",
+          "correct": false,
+          "why": "Elections affect who leads the majority side. Serializable reads on the minority side keep returning stale data either way."
+        },
+        {
+          "text": "Read kill switches with linearizable reads, etcd's default.",
+          "correct": true,
+          "why": "A linearizable read must be confirmed by a quorum, so a minority member fails the read instead of serving a stale value."
+        },
+        {
+          "text": "Cache flags in clients for 10 s and re-read them on every cache miss.",
+          "correct": false,
+          "why": "It adds another layer of staleness on top, and the reads behind the cache are still served from the minority."
+        }
+      ],
+      "explain": "Consensus systems give linearizable reads only if the read goes through the quorum, for example etcd's default linearizable reads. Local, serializable reads are cheaper but can be arbitrarily stale on a cut-off member. Use them only for data where staleness is harmless."
+    },
+    {
+      "id": "distributed-systems-v4-q09",
+      "domain": "effects",
+      "stem": "A payouts API supports `Idempotency-Key`. A partner's bug reused one key for two *different* payouts (€120, then €480). The server found the key, replayed the stored €120 response, and the €480 payout silently never happened. Which server behaviour is right?",
+      "options": [
+        {
+          "text": "Return 409 Conflict whenever a key is seen a second time, even for identical requests.",
+          "correct": false,
+          "why": "It flags the partner's bug, but it also breaks legitimate retries, which need the original response replayed."
+        },
+        {
+          "text": "Store a fingerprint of the request body with the key, and return 422 when a reused key's body differs.",
+          "correct": true,
+          "why": "Identical retries still get the replay, while a mismatched reuse fails loudly so the partner sees the €480 payout didn't happen."
+        },
+        {
+          "text": "When the body differs, ignore the stored record and process it as a new payout.",
+          "correct": false,
+          "why": "The €480 goes through, but a retry that differs in an incidental field would now execute twice, which defeats idempotency."
+        },
+        {
+          "text": "Expire idempotency keys after 60 s so the reuse doesn't match.",
+          "correct": false,
+          "why": "It masks this case by luck of timing, and real retries after 60 s, common after outages, would then double-pay."
+        }
+      ],
+      "explain": "An idempotency record should store the request fingerprint along with the result. Replay only when the fingerprint matches; reject a mismatched reuse with a clear error (422 in the IETF draft) and an in-progress duplicate with 409. Silent replay of a different request turns client bugs into lost money."
+    },
+    {
+      "id": "distributed-systems-v4-q10",
+      "domain": "effects",
+      "stem": "A logistics outbox handles 5,000 events/s, so four relay workers each claim batches with `FOR UPDATE SKIP LOCKED ORDER BY id`. Consumers now sometimes see `OrderShipped` before `OrderPaid` for the same order, because the two events were claimed by different workers. Throughput can't drop below 5,000/s. What fixes the ordering?",
+      "options": [
+        {
+          "text": "Run a single relay worker so events are published strictly in id order.",
+          "correct": false,
+          "why": "It restores order, but one worker can't sustain 5,000 events/s, which the stem requires."
+        },
+        {
+          "text": "Have consumers sort incoming events by `created_at` before handling them.",
+          "correct": false,
+          "why": "A consumer can't know whether an earlier event is still on its way, so sorting what has arrived doesn't fix order."
+        },
+        {
+          "text": "Have each worker claim with `ORDER BY id` and smaller batches, so the workers interleave less often.",
+          "correct": false,
+          "why": "Smaller batches shrink the window, but two workers can still publish one order's events in the wrong order."
+        },
+        {
+          "text": "Partition relays by `hash(order_id)`, each publishing its range in order, keyed by `order_id`.",
+          "correct": true,
+          "why": "All events for one order go through one worker and one Kafka partition, so their order is kept while four workers run in parallel."
+        }
+      ],
+      "explain": "Ordering is usually needed per entity, not globally. Partition the work by the entity key so each key has a single ordered path: one relay worker per key range, and one Kafka partition per key. That gives you parallelism across entities and order within each one."
+    },
+    {
+      "id": "distributed-systems-v4-q11",
+      "domain": "effects",
+      "stem": "A concert-ticketing saga marks seats `SOLD` at the reserve step, then charges the card. About 8% of payments fail, up to 60 s later, and the compensation then frees the seats. Meanwhile, finance reports count those seats as revenue and the 'sold out' banner turns real buyers away. How should the saga represent seats in flight?",
+      "options": [
+        {
+          "text": "Charge the card first and reserve the seat only after payment succeeds.",
+          "correct": false,
+          "why": "Seats are never shown as sold too early, but two buyers can pay for the last seat, which forces a refund."
+        },
+        {
+          "text": "Mark seats `HELD` with an expiry until payment succeeds, and have reports and the banner treat `HELD` as tentative.",
+          "correct": true,
+          "why": "This is a semantic lock: other readers can see the saga is in flight, and seats return on failure or expiry."
+        },
+        {
+          "text": "Use SERIALIZABLE isolation in the seats database so other transactions can't see the reservation.",
+          "correct": false,
+          "why": "SERIALIZABLE isolates transactions inside one database, but the saga spans the payment service, so the seat change is already committed when payment runs."
+        },
+        {
+          "text": "Wrap the seat reservation and the card charge in a two-phase commit, so neither becomes visible until both are done.",
+          "correct": false,
+          "why": "It would hide uncommitted state, but card processors don't take part in 2PC, and seats would stay locked while waiting on them."
+        }
+      ],
+      "explain": "Sagas lack isolation: each step commits on its own, so other readers see intermediate state. Countermeasures make that state explicit. A semantic lock (a `PENDING` or `HELD` status, with an expiry) tells readers a saga owns the record, so they treat it as tentative rather than final."
+    },
+    {
+      "id": "distributed-systems-v4-q12",
+      "domain": "effects",
+      "stem": "A payment provider sends `payment.succeeded` webhooks. It retries any non-2xx response, or no response within 10 s, for up to 3 days. The handler creates the shipment synchronously, which takes about 12 s, so the provider retries and 30% of orders ship twice. What should the handler do?",
+      "options": [
+        {
+          "text": "Speed up shipment creation to under 10 s, for example by caching carrier rates, so the provider stops timing out.",
+          "correct": false,
+          "why": "It removes this source of retries, but the provider also retries on network blips and its own failures, so duplicates still arrive."
+        },
+        {
+          "text": "Verify the webhook signature before processing.",
+          "correct": false,
+          "why": "Signatures stop forged webhooks, but genuine retries carry valid signatures, so it does nothing for duplicates."
+        },
+        {
+          "text": "Keep processed event ids in an in-memory `Set` and skip any id seen before.",
+          "correct": false,
+          "why": "It works on one pod until restart, but retries land on other pods, and a deploy clears the set."
+        },
+        {
+          "text": "Record the event id (unique) with a shipment job in one transaction, return 2xx, ship async.",
+          "correct": true,
+          "why": "Duplicates hit the unique constraint, the provider gets a fast 2xx, and slow shipping no longer causes retries."
+        }
+      ],
+      "explain": "Webhooks are at-least-once delivery from someone else's retry policy. Acknowledge fast, after durably recording the event id with a unique constraint, together with the follow-up work (an outbox or job row), and do slow work asynchronously. Never make the acknowledgement wait on slow side effects."
+    },
+    {
+      "id": "distributed-systems-v4-q13",
+      "domain": "overload",
+      "stem": "A nightly job re-prices 50,000 SKUs by calling a pricing API that allows at most 20 concurrent requests per client before it starts returning 503s. The job below gets thousands of 503s within seconds, and its memory spikes. Which change fixes it?",
+      "code": "const ids = await loadSkuIds();           // 50,000 ids\nconst results = await Promise.all(\n  ids.map((id) => repriceSku(id)),       // each does a fetch()\n);\nawait saveAll(results);",
+      "options": [
+        {
+          "text": "Split the ids into chunks of 1,000 and `Promise.all` each chunk in turn.",
+          "correct": false,
+          "why": "It is bounded, but each chunk still sends 1,000 at once (50× the limit), and each chunk waits for its slowest call."
+        },
+        {
+          "text": "Keep `Promise.all`, and limit the HTTP client's connection pool to 20 connections.",
+          "correct": false,
+          "why": "The wire sees at most 20, but all 50,000 requests are created at once and queue inside the client, holding memory while their timeouts tick."
+        },
+        {
+          "text": "Bound concurrency at 20 with `p-limit` or stream `map({ concurrency: 20 })`.",
+          "correct": true,
+          "why": "At most 20 calls exist at any time, so the API stays under its limit and memory stays flat."
+        },
+        {
+          "text": "Add retries with exponential backoff on 503s.",
+          "correct": false,
+          "why": "It recovers individual calls, but 50,000 concurrent requests plus their retries keep the API above its limit."
+        }
+      ],
+      "explain": "`Promise.all` over a large list means unbounded concurrency. Bound in-flight work at the source to what the downstream allows (a semaphore, p-limit, or stream `map` with `concurrency`), so work is created only as capacity frees up instead of being queued somewhere invisible."
+    },
+    {
+      "id": "distributed-systems-v4-q14",
+      "domain": "overload",
+      "stem": "An export service streams 20 million rows from Postgres to an S3 multipart-upload stream. Memory grows to 6 GB and the pod is OOM-killed about halfway through. The code is below. What is the right fix?",
+      "code": "const out = createS3UploadStream(bucket, key);\nfor await (const row of db.cursor(sql)) {\n  out.write(toCsvLine(row));     // return value ignored\n}\nout.end();",
+      "options": [
+        {
+          "text": "Raise `--max-old-space-size` to 12 GB.",
+          "correct": false,
+          "why": "The pod survives this export, but memory still grows with the dataset, so a larger export dies the same way."
+        },
+        {
+          "text": "Raise the upload stream's `highWaterMark` to 64 MB.",
+          "correct": false,
+          "why": "A larger buffer changes when `write()` returns false, but the loop ignores that return value, so memory still grows without limit."
+        },
+        {
+          "text": "Use `await pipeline(cursorStream, toCsv, out)` from `node:stream/promises`.",
+          "correct": true,
+          "why": "`pipeline` respects backpressure: it pauses reading from Postgres whenever the upload falls behind, so memory stays bounded."
+        },
+        {
+          "text": "`await new Promise(setImmediate)` after each write to give the upload time to catch up.",
+          "correct": false,
+          "why": "Yielding lets other events run, but it doesn't wait until the buffer drains, so a fast cursor still outruns a slow upload."
+        }
+      ],
+      "explain": "Backpressure is the slow consumer telling the fast producer to wait. In Node, `write()` returning false is that signal: await `drain`, or use `pipeline`, which does it for you. Ignoring it moves the whole dataset into memory."
+    },
+    {
+      "id": "distributed-systems-v4-q15",
+      "domain": "overload",
+      "stem": "A breaker wraps calls to a slow tax service with a 3 s timeout, and it does open correctly. But during the incident the API's open sockets climbed to 28,000 and it hit the file-descriptor limit. Traces show the tax requests kept running for minutes after the breaker had given up on them. What should change?",
+      "options": [
+        {
+          "text": "Lower the breaker timeout to 1 s.",
+          "correct": false,
+          "why": "Callers give up sooner, but the underlying requests still keep running, so sockets pile up even faster."
+        },
+        {
+          "text": "Raise the process's file-descriptor limit to 1 million.",
+          "correct": false,
+          "why": "It moves the ceiling, but abandoned requests still pile up and load the tax service, which is already struggling."
+        },
+        {
+          "text": "Lower the failure threshold so the breaker opens after fewer timeouts.",
+          "correct": false,
+          "why": "It reduces new calls once open, but each call that times out still leaves its request running."
+        },
+        {
+          "text": "Abort the underlying request on timeout (an `AbortSignal` into `fetch`; opossum's `abortController`).",
+          "correct": true,
+          "why": "A timed-out call then releases its socket and stops loading the tax service, instead of running on unseen."
+        }
+      ],
+      "explain": "A timeout that only rejects a promise is cosmetic: the work and its resources continue. Every timeout should cancel the operation it bounds, by wiring an `AbortSignal` through to the I/O, so giving up actually frees sockets and downstream capacity."
+    },
+    {
+      "id": "distributed-systems-v4-q16",
+      "domain": "overload",
+      "stem": "The gateway gives each request 3 s. Service A sometimes spends 2.5 s on its own work, then calls service B with B's usual 3 s timeout. When B's database slowed, B kept running queries for requests the gateway had already answered with 504, roughly doubling the database load. What fixes this?",
+      "options": [
+        {
+          "text": "Raise the gateway timeout to 10 s so that fewer requests are abandoned while the downstream services catch up.",
+          "correct": false,
+          "why": "Fewer 504s, but users wait longer, and B still works on requests that eventually die."
+        },
+        {
+          "text": "Pass the remaining deadline downstream; each hop uses it as its timeout and skips expired work.",
+          "correct": true,
+          "why": "B learns it has only 0.5 s and won't start work nobody will wait for, so dead requests stop adding database load."
+        },
+        {
+          "text": "Give every hop a fixed 1 s timeout.",
+          "correct": false,
+          "why": "Shorter hop timeouts help, but a fixed value can't know how much budget is left, so A can still call B at 2.9 s."
+        },
+        {
+          "text": "Turn off retries between A and B.",
+          "correct": false,
+          "why": "No retries reduces load, but the original call still runs to completion after the gateway gave up."
+        }
+      ],
+      "explain": "Deadlines must be propagated, not re-invented at each hop. Send the remaining budget (as gRPC does with `grpc-timeout`, or a deadline header), use it as the hop's timeout, and check it before starting expensive work. Otherwise downstream services spend capacity on requests that are already dead."
+    },
+    {
+      "id": "distributed-systems-v4-q17",
+      "domain": "overload",
+      "stem": "A money-transfer client calls `POST /v1/transfers` on a provider that fully supports `Idempotency-Key`, and the client reuses one key per transfer. The team is writing its `shouldRetry` filter. On which three outcomes should the client retry (with backoff, within its deadline)? (Choose three.)",
+      "options": [
+        {
+          "text": "503 Service Unavailable",
+          "correct": true,
+          "why": "A temporary server-side condition. With a reused key, a retry can't double-transfer."
+        },
+        {
+          "text": "429 Too Many Requests with `Retry-After`",
+          "correct": true,
+          "why": "The server says 'later', and `Retry-After` says how much later, so wait that long and retry."
+        },
+        {
+          "text": "A connection reset (`ECONNRESET`) before any response",
+          "correct": true,
+          "why": "The outcome is unknown, which is exactly the case the idempotency key makes safe to retry."
+        },
+        {
+          "text": "422 Unprocessable Content for an invalid IBAN",
+          "correct": false,
+          "why": "The request itself is wrong, so every retry fails the same way and only adds load."
+        },
+        {
+          "text": "403 Forbidden",
+          "correct": false,
+          "why": "Authorisation won't change between attempts, so retrying just repeats the failure."
+        },
+        {
+          "text": "400 Bad Request for a malformed body",
+          "correct": false,
+          "why": "A malformed body stays malformed, so it fails again on every attempt."
+        }
+      ],
+      "explain": "Retry transient and unknown outcomes (network errors, timeouts, 408, 429, 502, 503, 504), and only when the operation is idempotent or carries an idempotency key. Never retry 4xx errors that describe the request itself: they fail identically and waste budget."
+    },
+    {
+      "id": "distributed-systems-v4-q18",
+      "domain": "regions",
+      "stem": "A video platform runs active-active in three regions and stores like-counts as a single integer per video, replicated with last-write-wins. Popular videos lose thousands of likes a day: two regions each read 1,000, write 1,001, and one write wins. Counts may lag a few seconds but must not lose increments. What design fits?",
+      "options": [
+        {
+          "text": "Keep last-write-wins, but timestamp writes with tightly synchronised clocks.",
+          "correct": false,
+          "why": "Better clocks choose a 'fairer' winner, but two concurrent increments still collapse into one."
+        },
+        {
+          "text": "Keep a per-region count for each video, increment only your own region's count, and sum them to read.",
+          "correct": true,
+          "why": "Regions never overwrite each other's increments, and merging is a sum (a G-counter CRDT), so nothing is lost."
+        },
+        {
+          "text": "Send every increment to one global primary region.",
+          "correct": false,
+          "why": "No increments are lost, but every like pays cross-region latency, and likes stop when that region fails."
+        },
+        {
+          "text": "Take a global distributed lock around each read-modify-write of the counter.",
+          "correct": false,
+          "why": "It serialises increments, but it adds cross-region round trips to every like and fails during partitions."
+        }
+      ],
+      "explain": "For data that only accumulates (counters, sets of added items), use structures whose merge never loses updates: per-replica slots summed on read, as in G-counters and PN-counters. Each region writes only its own slot, so active-active needs no coordination."
+    },
+    {
+      "id": "distributed-systems-v4-q19",
+      "domain": "regions",
+      "stem": "A logistics company's region-failover runbook, during a real us-east event, required updating DNS records through the provider's API, scaling an Auto Scaling group from 2 to 60, and creating a new database read replica. Every step was slow or throttled, and the failover took 3 hours. How should the failover be redesigned?",
+      "options": [
+        {
+          "text": "Script the whole runbook with infrastructure as code, so the same DNS, scaling and replica steps run in minutes.",
+          "correct": false,
+          "why": "Automation removes human delay, but the steps still call the same impaired APIs, so they are still slow or throttled."
+        },
+        {
+          "text": "Raise the account's service quotas in advance so scaling isn't throttled.",
+          "correct": false,
+          "why": "Quotas help a little, but scaling still depends on APIs and capacity that are least available during a regional event."
+        },
+        {
+          "text": "Pre-provision the standby and fail over by data-plane routing, with no create or scale calls.",
+          "correct": true,
+          "why": "Everything failover needs already exists, so it doesn't depend on any control-plane API during the event."
+        },
+        {
+          "text": "Practise the runbook monthly so the team runs it faster.",
+          "correct": false,
+          "why": "Practice reduces mistakes, but the bottleneck is the APIs and capacity, not the people."
+        }
+      ],
+      "explain": "Control planes (create, update, scale) are more complex and less available than data planes (serve, route by health checks), and are most stressed during large events. Design recovery to rely only on the data plane and on resources provisioned in advance: static stability."
+    },
+    {
+      "id": "distributed-systems-v4-q20",
+      "domain": "regions",
+      "stem": "A SaaS moved to 30 cells behind a shared cell router. Over time the router gained auth, per-tenant rate limiting and request rewriting. A rate-limiting bug in the router took down all 30 cells at once. What should the team do with the router?",
+      "options": [
+        {
+          "text": "Keep it thin: only the tenant-to-cell lookup, with the mapping cached locally; move other features into the cells.",
+          "correct": true,
+          "why": "The shared layer then has little code and rarely changes, so it rarely fails, while features ship cell by cell."
+        },
+        {
+          "text": "Keep the features and add more router replicas for redundancy.",
+          "correct": false,
+          "why": "More replicas survive host failures, but they all run the same buggy code, so a logic bug still breaks them all."
+        },
+        {
+          "text": "Have the router look up each tenant's cell in a central database on every request, so the mapping is always the freshest.",
+          "correct": false,
+          "why": "The mapping is fresh, but the central database becomes another shared dependency on every request."
+        },
+        {
+          "text": "Merge the router into one of the cells so it is deployed with the cells.",
+          "correct": false,
+          "why": "It removes a separate service, but all cells now depend on one cell, which brings back a global blast radius."
+        }
+      ],
+      "explain": "In a cell architecture, the router is the one component every cell shares, so its blast radius is everything. Keep it as small, stable and dependency-free as possible: a cached mapping and forwarding. Push logic into the cells, where waves of deploys and isolation protect you."
+    }
+  ]
+}

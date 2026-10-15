@@ -1,0 +1,680 @@
+{
+  "topic": "code-practices",
+  "variant": 2,
+  "of": 5,
+  "title": "Code practices at scale — variant 2",
+  "description": "Currency exponents, DST schedules, month-end renewals, tied cursors, webhook dedupe, key reuse, leaky errors, path traversal, leaked secrets, trace propagation, reviewing AI pull requests, canaries and NOT NULL on a huge table.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "edges",
+      "name": "Edges: validation, money and time",
+      "weight": 0.2
+    },
+    {
+      "id": "api",
+      "name": "API design, idempotency and error surfacing",
+      "weight": 0.2
+    },
+    {
+      "id": "security",
+      "name": "Security defaults: authz, injection, SSRF, secrets",
+      "weight": 0.2
+    },
+    {
+      "id": "observability",
+      "name": "Observability: logs, metrics, traces, SLOs",
+      "weight": 0.15
+    },
+    {
+      "id": "testing",
+      "name": "Testing strategy and reviewing AI-written code",
+      "weight": 0.15
+    },
+    {
+      "id": "deploys",
+      "name": "Safe deploys: flags, migrations, canaries, rollbacks",
+      "weight": 0.1
+    }
+  ],
+  "questions": [
+    {
+      "id": "code-practices-v2-q01",
+      "domain": "edges",
+      "stem": "A marketplace pays sellers in USD, JPY and KWD. The payout service converts the API's decimal strings with `Math.round(parseFloat(amount) * 100)`. A Japanese seller owed ¥1000 appeared in the bank file as ¥100000, and a Kuwaiti seller's 1.005 KWD was cut to 1.00. Which design fixes the whole class of bug?",
+      "options": [
+        {
+          "text": "Call `toFixed(2)` on the parsed float before multiplying so the floating-point noise is removed first.",
+          "correct": false,
+          "why": "It still assumes two decimals for every currency, and `(1.005).toFixed(2)` is `'1.00'` because 1.005 is not exactly representable."
+        },
+        {
+          "text": "Integer minor units with each currency's ISO 4217 exponent (JPY 0, USD 2, KWD 3), parsed from the string without a float.",
+          "correct": true,
+          "why": "The exponent comes from the currency, not an assumption, and parsing digits directly avoids binary rounding, so 1000 JPY and 1.005 KWD are exact."
+        },
+        {
+          "text": "Store amounts as `float8` in major units and round to two decimals only when writing the bank file, where precision matters.",
+          "correct": false,
+          "why": "Floats accumulate representation error, and rounding to two decimals at the end is still wrong for JPY and KWD."
+        },
+        {
+          "text": "Convert everything to USD cents internally and convert back to the seller's currency when writing the payout.",
+          "correct": false,
+          "why": "Two FX conversions introduce rounding and rate drift, so sellers are not paid exactly what they are owed in their own currency."
+        }
+      ],
+      "explain": "Money is an integer count of minor units, and the number of minor units per major unit is a property of the currency (ISO 4217), not a constant 100. Parse decimal strings digit by digit and never round-trip money through a float.",
+      "refs": [
+        "https://docs.stripe.com/currencies"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q02",
+      "domain": "edges",
+      "stem": "A newsletter promises 'your digest at 09:00 your time' to 4M users across about 300 time zones. After the March DST change, New York users started getting it at 10:00. The scheduler computes the next run as shown. What is the right fix?",
+      "code": "function nextRun(lastRun: Date): Date {\n  return new Date(lastRun.getTime() + 24 * 60 * 60 * 1000);\n}",
+      "options": [
+        {
+          "text": "Save each user's UTC offset at signup and compute 09:00 as `midnightUTC + 9h - offset` every day.",
+          "correct": false,
+          "why": "An offset is not a zone: New York is UTC-5 in winter and UTC-4 in summer, so a stored offset is wrong half the year."
+        },
+        {
+          "text": "Take the next local date in the user's IANA zone, set 09:00 wall-clock time, convert to an instant, and define a rule for skipped or repeated times.",
+          "correct": true,
+          "why": "Calendar arithmetic happens in the zone that owns the meaning, so 09:00 stays 09:00 across DST, and nonexistent or doubled times have a defined answer."
+        },
+        {
+          "text": "Run a job every hour that sends to every user whose `lastSent` is more than 24 hours ago.",
+          "correct": false,
+          "why": "Each send slips by up to an hour, so delivery drifts later every day and DST changes still shift it."
+        },
+        {
+          "text": "Schedule all US-East users at a fixed 14:00 UTC because that is 09:00 in New York.",
+          "correct": false,
+          "why": "14:00 UTC is 09:00 only in winter; in summer it is 10:00, which is exactly the reported bug."
+        }
+      ],
+      "explain": "A day is not always 24 hours. Recurring local-time schedules must be computed on the local calendar date and wall-clock time in the IANA zone, then converted to an instant, with an explicit policy for times that are skipped or happen twice.",
+      "refs": [
+        "https://tc39.es/proposal-temporal/docs/zoneddatetime.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q03",
+      "domain": "edges",
+      "stem": "A subscription service bills on the same day of the month the customer signed up; the contract says so explicitly. Each renewal is computed from the previous one with `d.setUTCMonth(d.getUTCMonth() + 1)`. A customer who started on 31 January was billed on 3 March, then on 3 April. Which rule is correct?",
+      "options": [
+        {
+          "text": "Compute each date from the previous renewal and clamp to the last day of the month when it overflows.",
+          "correct": false,
+          "why": "It fixes March 3, but chaining from 28 February gives 28 March and every later month, so the customer drifts off their 31st forever."
+        },
+        {
+          "text": "Bill every 30 days from signup so every period has the same length.",
+          "correct": false,
+          "why": "It breaks the contract's same-day promise and produces about 12.2 bills a year, so dates drift through the calendar."
+        },
+        {
+          "text": "Move every subscription that starts on the 29th–31st to the 1st of the following month at signup.",
+          "correct": false,
+          "why": "Simple, but it changes the customer's contractual billing day and needs prorating for the gap."
+        },
+        {
+          "text": "Compute each date from the original anchor day and clamp to the target month's last day.",
+          "correct": true,
+          "why": "From an anchor of 31 you get 28 Feb (29 in a leap year), 31 Mar, 30 Apr, so short months clamp without permanently shifting the schedule."
+        }
+      ],
+      "explain": "Month arithmetic needs two rules: clamp overflows to the month's last day, and always compute from the anchor, not from the previous result. JS `setMonth` rolls overflow forward, which silently moves billing dates.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/setMonth"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q04",
+      "domain": "edges",
+      "stem": "An activity-feed API pages with `WHERE created_at < $cursor ORDER BY created_at DESC LIMIT 50`, where the cursor is the last row's timestamp. A bulk import inserted 5,000 events in one transaction, and customers' sync jobs now silently miss events. What is the right fix?",
+      "options": [
+        {
+          "text": "Change `<` to `<=` so rows that share the boundary timestamp are not skipped.",
+          "correct": false,
+          "why": "It repeats rows instead, and with more than 50 ties the next page is the same page forever."
+        },
+        {
+          "text": "Order by `(created_at, id)`, compare `(created_at, id) < ($1, $2)`, and encode both values in an opaque cursor.",
+          "correct": true,
+          "why": "A unique composite key gives a total order, so every row lands on exactly one page, and a matching index keeps each page a seek."
+        },
+        {
+          "text": "Switch to `LIMIT 50 OFFSET n`, which counts rows instead of comparing timestamps and so is not affected by ties.",
+          "correct": false,
+          "why": "New rows arriving between page fetches shift the window and cause duplicates or skips, and deep offsets get slower."
+        },
+        {
+          "text": "Store timestamps with microsecond precision so that no two events share a value.",
+          "correct": false,
+          "why": "Postgres `now()` is the transaction start time, so all 5,000 rows inserted in one transaction share it regardless of precision."
+        }
+      ],
+      "explain": "Pagination is only stable over a unique sort key. Add a unique tie-breaker (usually the id) to both `ORDER BY` and the keyset comparison, encode both in an opaque cursor, and fetch `n+1` to decide `hasMore`.",
+      "refs": [
+        "https://use-the-index-luke.com/no-offset"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q05",
+      "domain": "api",
+      "stem": "A payment provider delivers webhooks at least once, retries for three days on any non-2xx, and occasionally sends the same event twice within milliseconds. On `payment.succeeded` your handler marks the order paid, adds loyalty points and sends a receipt. Some customers got double points. What is the right design?",
+      "options": [
+        {
+          "text": "Look up the event id in Redis first, skip it if present, and set it after processing finishes.",
+          "correct": false,
+          "why": "Two concurrent deliveries both miss before either sets the key, and Redis is not atomic with the Postgres writes it guards."
+        },
+        {
+          "text": "Return 200 as soon as the request arrives and process the event asynchronously so the provider never retries.",
+          "correct": false,
+          "why": "Retries stop, but a crash after the 200 loses the event, and duplicate deliveries still arrive and still double-count."
+        },
+        {
+          "text": "Read the order first and skip the points if its status is already `paid`.",
+          "correct": false,
+          "why": "Two concurrent deliveries can both read 'not paid' before either commits; a read-then-write check does not serialise them."
+        },
+        {
+          "text": "Insert the event id under a unique constraint in the same transaction as the order and points updates; on conflict return 2xx; send the email via an outbox.",
+          "correct": true,
+          "why": "The unique insert makes the effect happen once, atomically with the state change, and the outbox sends the receipt only after commit."
+        }
+      ],
+      "explain": "At-least-once delivery means duplicates, sometimes concurrent. Make the handler idempotent with a unique record of processed event ids written in the same transaction as the effect, and push side effects like email through an outbox.",
+      "refs": [
+        "https://docs.stripe.com/webhooks"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q06",
+      "domain": "api",
+      "stem": "A B2B transfers API supports `Idempotency-Key`. A client bug reused one key for a $50 transfer and then a $5,000 transfer a minute later. The server replayed the $50 response, the client recorded the $5,000 as sent, and a supplier went unpaid for a week. What should the server do?",
+      "options": [
+        {
+          "text": "Scope keys per API client so that keys from different customers can never collide with each other.",
+          "correct": false,
+          "why": "Good practice, but both requests came from the same client, so per-client scoping changes nothing here."
+        },
+        {
+          "text": "Expire idempotency keys after 30 seconds so an old key cannot be matched by a later, different request.",
+          "correct": false,
+          "why": "It breaks legitimate retries that come later and still replays wrongly when the second request is quick."
+        },
+        {
+          "text": "Store a fingerprint of the request with the key and reject a reuse with a different payload (422).",
+          "correct": true,
+          "why": "A mismatched body is a client error, not a retry; failing loudly surfaces the bug instead of silently returning someone else's answer."
+        },
+        {
+          "text": "Replay the stored response but add a `Warning` header noting that the request body differed from the original.",
+          "correct": false,
+          "why": "Clients do not read advisory headers; the client still believes the $5,000 transfer happened."
+        }
+      ],
+      "explain": "An idempotency key promises 'same request, same result'. Store a fingerprint (method, path, body hash) with the key; a different payload under the same key is a 422, an in-flight duplicate is a 409, and only a true retry gets the replay.",
+      "refs": [
+        "https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q07",
+      "domain": "api",
+      "stem": "A fintech's public API returns `{ error: err.message, stack: err.stack }` on any 500. A pentest pulled the database hostname and SQL fragments from it, and the mobile app parses the `error` string to decide which screen to show. What should 5xx responses look like?",
+      "options": [
+        {
+          "text": "Drop `stack` in production but keep `err.message`, because the message is what the mobile app's error screens already rely on.",
+          "correct": false,
+          "why": "Driver messages are what leaked the hostname and SQL; keeping them keeps the leak and the fragile string parsing."
+        },
+        {
+          "text": "RFC 9457 problem details with a stable `type` and generic text, plus a request id; the full cause goes only to server logs.",
+          "correct": true,
+          "why": "Clients branch on a stable code, internals stay server-side, and support can find the full cause from the request id."
+        },
+        {
+          "text": "Return HTTP 200 with `{ success: false, code }` for every failure so clients have a single path to handle.",
+          "correct": false,
+          "why": "It breaks HTTP semantics: caches, retries, load balancers and error-rate monitoring all see success."
+        },
+        {
+          "text": "Return 400 for every server error so attackers cannot tell when the backend has failed.",
+          "correct": false,
+          "why": "Clients will not retry what they think is their own mistake, and server failures disappear from the 5xx alerts."
+        }
+      ],
+      "explain": "Error responses are part of the contract: a stable machine-readable code, a safe human message and a correlation id. Internal details (messages, stacks, SQL) go to logs, never to clients.",
+      "refs": [
+        "https://www.rfc-editor.org/rfc/rfc9457.html",
+        "https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q08",
+      "domain": "api",
+      "stem": "`POST /quotes` has always defaulted `currency` to USD when it is omitted. Product wants it required because EU customers get USD quotes by mistake. About 1,200 integrations call the endpoint, and nobody knows how many omit the field. What is the safe path?",
+      "options": [
+        {
+          "text": "Make `currency` required now and return a 400 whose message explains exactly which field is missing and how to fix the call.",
+          "correct": false,
+          "why": "A clear message does not stop it from breaking an unknown share of 1,200 integrations on deploy day."
+        },
+        {
+          "text": "When `currency` is missing, infer it from the caller's IP geolocation instead of defaulting to USD.",
+          "correct": false,
+          "why": "It silently changes behaviour for existing callers, and server-to-server traffic from cloud regions or VPNs geolocates wrongly."
+        },
+        {
+          "text": "Mark it required in the OpenAPI document but keep accepting requests without it on the server side.",
+          "correct": false,
+          "why": "The document and the server now disagree, so generated clients and the real behaviour drift apart."
+        },
+        {
+          "text": "Keep the default for now, log which clients omit it, contact them, and require it only in the next version.",
+          "correct": true,
+          "why": "Measuring before tightening tells you who would break, and a new version gives them a migration path."
+        }
+      ],
+      "explain": "Making an optional input required is a breaking change. Measure who depends on the old behaviour, communicate, and tighten only in a new version; never change a default's meaning silently.",
+      "refs": [
+        "https://cloud.google.com/apis/design/compatibility"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q09",
+      "domain": "security",
+      "stem": "A document-sharing service serves uploads with the handler below. Next to `/srv/uploads` is `/srv/uploads-private`, which holds other tenants' contracts. A security researcher reports they could read one. Which change actually closes the hole?",
+      "code": "const ROOT = '/srv/uploads';\napp.get('/files/:name', (req, res) => {\n  const p = path.join(ROOT, req.params.name);\n  if (!p.startsWith(ROOT)) return res.sendStatus(403);\n  res.sendFile(p);\n});",
+      "options": [
+        {
+          "text": "Call `path.normalize(req.params.name)` before joining it to `ROOT`.",
+          "correct": false,
+          "why": "Normalising `../uploads-private/x` leaves it unchanged; the leading `..` is still there and the prefix check still passes."
+        },
+        {
+          "text": "Replace `path.join` with `path.resolve(ROOT, name)` and keep the same `startsWith(ROOT)` check right after it resolves.",
+          "correct": false,
+          "why": "The prefix bug remains, and `resolve` additionally lets an absolute name replace `ROOT` entirely."
+        },
+        {
+          "text": "Resolve the path and reject unless `path.relative(ROOT, full)` is non-empty, not `..`-prefixed and not absolute.",
+          "correct": true,
+          "why": "`/srv/uploads-private/x` starts with the string `/srv/uploads`, so only a separator-aware check proves the file is inside the root."
+        },
+        {
+          "text": "Run the Node process as a dedicated non-root user so it cannot read system files.",
+          "correct": false,
+          "why": "Least privilege is good, but the same user owns every tenant's uploads, so the private contracts are still readable."
+        }
+      ],
+      "explain": "Containment checks must be separator-aware: compare with `path.relative`, or `startsWith(ROOT + path.sep)`, after decoding exactly once. A plain string prefix treats sibling directories that share a name prefix as inside the root.",
+      "refs": [
+        "https://owasp.org/www-community/attacks/Path_Traversal",
+        "https://nodejs.org/api/path.html#pathrelativefrom-to"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q10",
+      "domain": "security",
+      "stem": "A startup's API runs on ECS. Its Docker image contains a `.env` with the live Stripe key and the Postgres admin password, and the task role has `AdministratorAccess`. Yesterday the image was pushed to a public registry by mistake. Which two actions come first? (Choose two.)",
+      "options": [
+        {
+          "text": "Rotate the Stripe key and the database password now and check provider and database logs for use since the push.",
+          "correct": true,
+          "why": "Anything published must be treated as compromised; only rotation makes the leaked values useless."
+        },
+        {
+          "text": "Load secrets at runtime from a secrets manager and cut the task role down to the actions the service needs.",
+          "correct": true,
+          "why": "Secrets leave the image so the next leak exposes nothing, and least privilege limits what any compromise of the task can do."
+        },
+        {
+          "text": "Delete the image from the public registry; once it is gone the leak is contained.",
+          "correct": false,
+          "why": "Public images are pulled and scanned by bots within minutes; deleting it does not recall copies."
+        },
+        {
+          "text": "Rewrite git history to remove `.env` from every past commit.",
+          "correct": false,
+          "why": "The leak was the image, and history rewriting never revokes credentials that are already out."
+        },
+        {
+          "text": "Encrypt the `.env` inside the image with a key that is shipped alongside it in the image.",
+          "correct": false,
+          "why": "Shipping the key next to the ciphertext protects nothing."
+        }
+      ],
+      "explain": "When a secret leaks, rotate first, then investigate, then fix the root cause. Long-term, secrets are injected at runtime from a secrets manager, never baked into artifacts, and every identity gets the least privilege it needs.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q11",
+      "domain": "security",
+      "stem": "A support tool searches a 30M-row customer table with `WHERE name LIKE '%' || $1 || '%'`. Agents searching for `50%` or `_` match nearly everything, and one query of `%_%_%_%…` pinned the database CPU. A bulk lookup next to it builds `IN (${ids.join(',')})`. What should change?",
+      "options": [
+        {
+          "text": "Nothing in the search: it is already parameterized; only the bulk lookup needs placeholders.",
+          "correct": false,
+          "why": "Parameterization stops SQL injection, but `%` and `_` are still wildcards inside the bound value, so search semantics and cost stay attacker-controlled."
+        },
+        {
+          "text": "Strip `%` and `_` from the search input, and check that each id matches `/^\\d+$/` before joining them into the list.",
+          "correct": false,
+          "why": "Stripping means nobody can search for a literal '50%', and the joined list is still built from strings instead of placeholders."
+        },
+        {
+          "text": "Escape `%`, `_` and the escape character with an `ESCAPE` clause, and bind the ids as an array (`= ANY($1)`).",
+          "correct": true,
+          "why": "Wildcards in user input become literal characters, and the id list is a single bound parameter with no string building."
+        },
+        {
+          "text": "Load the matching customers into the browser and filter there.",
+          "correct": false,
+          "why": "30M rows cannot go to a browser, and it would expose every customer's data to every agent."
+        }
+      ],
+      "explain": "Binding parameters is necessary but not sufficient: LIKE patterns have their own metacharacters, and lists need generated placeholders or array binding. Treat every user string that enters a query language as data to escape or bind, never text to concatenate.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q12",
+      "domain": "security",
+      "stem": "Internet scanners hit your webhook endpoint with short or missing `X-Signature` headers. Each such request returns 500, the error-rate SLO is burning, and on-call was paged twice overnight. The verification code is below. What is the fix?",
+      "code": "const sig = Buffer.from(req.header('x-signature') ?? '', 'hex');\nconst expected = createHmac('sha256', secret).update(rawBody).digest();\nif (!timingSafeEqual(sig, expected)) return res.sendStatus(401);",
+      "options": [
+        {
+          "text": "Use `sig.equals(expected)`, which never throws on mismatched lengths and is just as easy to read.",
+          "correct": false,
+          "why": "`Buffer.equals` returns early on the first differing byte, which reintroduces a timing side channel on the signature."
+        },
+        {
+          "text": "Exclude the webhook route from the error-rate SLO, since the failing requests come from scanners rather than real providers.",
+          "correct": false,
+          "why": "It hides the symptom; the endpoint still answers garbage with a server error, and real 500s there go unseen."
+        },
+        {
+          "text": "Compare hex strings with `===` instead of buffers, so length differences never matter.",
+          "correct": false,
+          "why": "String comparison stops at the first mismatch and leaks timing, which is why a constant-time compare exists."
+        },
+        {
+          "text": "Return 401 when the decoded length differs from the digest length, before calling `timingSafeEqual`.",
+          "correct": true,
+          "why": "`timingSafeEqual` throws on unequal lengths; checking length first turns bad input into the 401 it should be while keeping the compare constant-time."
+        }
+      ],
+      "explain": "Bad client input must become a 4xx, never a 5xx. `crypto.timingSafeEqual` throws when lengths differ, so check length (or compare fixed-length digests) before calling it, and keep the compare constant-time.",
+      "refs": [
+        "https://nodejs.org/api/crypto.html#cryptotimingsafeequala-b"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q13",
+      "domain": "observability",
+      "stem": "Your edge accepts an inbound `X-Request-Id` and copies it verbatim into logfmt-style log lines that a SIEM parses. An attacker sent `abc user=admin action=refund_approved` as the ID, and fake audit fields showed up in the security dashboard. You still want upstream partners' IDs to correlate. What is the fix?",
+      "options": [
+        {
+          "text": "Always generate a fresh ID at the edge and ignore whatever the client sends.",
+          "correct": false,
+          "why": "Safe, but it breaks the correlation with upstream partners that the requirement asks to keep."
+        },
+        {
+          "text": "Strip newline characters from the inbound value before logging it.",
+          "correct": false,
+          "why": "This injection uses spaces and `key=value`, not newlines; logfmt splits on spaces, so the fake fields still appear."
+        },
+        {
+          "text": "Keep the inbound ID only if it matches a strict pattern (short, `[A-Za-z0-9-]`), else generate one, and log structured JSON.",
+          "correct": true,
+          "why": "Validation keeps legitimate partner IDs, and structured output means a value can never become a field."
+        },
+        {
+          "text": "Truncate the inbound value to 36 characters, the length of a UUID.",
+          "correct": false,
+          "why": "`abc user=admin` fits easily in 36 characters, so truncation does not stop the injection."
+        }
+      ],
+      "explain": "Anything from a client that reaches logs is untrusted input. Validate correlation IDs against a strict pattern, emit structured logs so values cannot create fields or lines, and echo the accepted ID back to the caller.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q14",
+      "domain": "observability",
+      "stem": "An order flows API → Kafka topic → fulfilment consumer → HTTP call to a warehouse system. Distributed traces stop at the Kafka producer, so incidents in fulfilment take hours to tie back to the original request. Tracing is already on at 10% sampling. What change connects the flow?",
+      "options": [
+        {
+          "text": "Raise trace sampling to 100% so that every hop of every order is recorded.",
+          "correct": false,
+          "why": "More traces of the same disconnected halves do not join them; the context is still lost at the topic."
+        },
+        {
+          "text": "Add the W3C `traceparent` to the Kafka record headers when producing and extract it in the consumer.",
+          "correct": true,
+          "why": "The consumer continues or links the same trace, so the warehouse call shows up under the original request."
+        },
+        {
+          "text": "Have the consumer start a new root trace for each message it reads, tagged with the topic, partition and offset.",
+          "correct": false,
+          "why": "You get tidy but separate traces; nothing ties a fulfilment failure back to its order request."
+        },
+        {
+          "text": "Log the order id everywhere and join the logs from all three services by grepping for it.",
+          "correct": false,
+          "why": "Useful as a fallback, but it gives no timing or causality and becomes manual work during every incident."
+        }
+      ],
+      "explain": "Trace context must cross every hop, including asynchronous ones. Propagate W3C Trace Context in message headers and extract it in consumers; instrumentation libraries do this for HTTP, but queues are where it usually breaks.",
+      "refs": [
+        "https://www.w3.org/TR/trace-context/",
+        "https://opentelemetry.io/docs/specs/semconv/messaging/messaging-spans/"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q15",
+      "domain": "observability",
+      "stem": "A checkout dashboard shows average latency flat at 80 ms, yet customers complain about 4-second checkouts. About 2% of requests hit a slow fraud-check dependency. The team wants a signal that would have caught this and can be alerted on. Which one?",
+      "options": [
+        {
+          "text": "Average latency over a longer window, split per pod.",
+          "correct": false,
+          "why": "Averages hide the slow 2% whatever the window, and per-pod averages hide it the same way."
+        },
+        {
+          "text": "Maximum latency per minute across the fleet.",
+          "correct": false,
+          "why": "The maximum is driven by single outliers, so it is noisy and pages on one bad request."
+        },
+        {
+          "text": "A latency histogram per route with p99 tracked, and an SLO on the share of requests faster than 1 s.",
+          "correct": true,
+          "why": "Percentiles and 'fraction under threshold' expose the tail that users feel, and a histogram aggregates correctly across pods."
+        },
+        {
+          "text": "CPU and memory per pod, since slow requests usually come from a resource bottleneck on the instances themselves.",
+          "correct": false,
+          "why": "These are causes, not symptoms; a slow downstream dependency leaves CPU and memory perfectly normal."
+        }
+      ],
+      "explain": "Latency SLIs should describe the tail users experience: percentiles or 'fraction under threshold' from histograms. Averages and resource metrics stay flat while a meaningful slice of users suffers.",
+      "refs": [
+        "https://sre.google/sre-book/monitoring-distributed-systems/"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q16",
+      "domain": "testing",
+      "stem": "An agent produced a 900-line PR adding refunds to a payment service. The generated tests pass and lint is clean. You have 45 minutes to review it before the release train leaves. Where is the time best spent? (Choose two.)",
+      "options": [
+        {
+          "text": "The edges: refunds that sum above the captured amount, currency exponents, concurrent refund requests and retried webhooks.",
+          "correct": true,
+          "why": "That is where money bugs live and where generated code is most often confidently wrong."
+        },
+        {
+          "text": "Whether the tests exercise failure paths (provider timeout, duplicate request) or just restate the implementation's happy path.",
+          "correct": true,
+          "why": "Tests written alongside the code tend to mirror it; checking what they would catch is how you judge whether green means anything."
+        },
+        {
+          "text": "Naming, file layout and formatting consistency with the rest of the repository.",
+          "correct": false,
+          "why": "Easy to comment on and quickly visible, but lint already covers most of it and it carries little risk."
+        },
+        {
+          "text": "The line-coverage percentage reported for the new module.",
+          "correct": false,
+          "why": "High coverage from happy-path tests says nothing about whether over-refunds or races are caught."
+        },
+        {
+          "text": "Re-running the generated tests locally to confirm they really pass.",
+          "correct": false,
+          "why": "CI already ran them; reproducing a green run adds no information about correctness."
+        }
+      ],
+      "explain": "Review AI-written code where bugs live: boundaries, concurrency, money and failure paths, and check that the tests would actually fail on a wrong implementation. Style and coverage numbers are cheap to verify and rarely where the risk sits.",
+      "refs": [
+        "https://google.github.io/eng-practices/review/reviewer/looking-for.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q17",
+      "domain": "testing",
+      "stem": "An allocation function that splits amounts into shares is used by four services. Its bugs are always the same kind: the parts are off by a cent on odd inputs. The team currently adds a UI end-to-end test for each reported case, about 8 minutes per test. What testing approach fits?",
+      "options": [
+        {
+          "text": "Snapshot the function's current output for a few hundred inputs and fail on any change.",
+          "correct": false,
+          "why": "Snapshots pin whatever it does today, including the existing off-by-a-cent bugs, and fail on correct fixes."
+        },
+        {
+          "text": "Keep adding end-to-end tests, but run them in parallel on more CI runners to cut wall time.",
+          "correct": false,
+          "why": "Each case still costs a browser session and only checks inputs someone already reported."
+        },
+        {
+          "text": "Unit-test the pure function, with property tests that assert `sum(parts) === total` and shares differ by at most one unit.",
+          "correct": true,
+          "why": "The bug class is an invariant over inputs, so fast generated cases explore odd totals, counts and currencies nobody thought to write."
+        },
+        {
+          "text": "Require a finance sign-off on every change to the allocation module before it can be merged.",
+          "correct": false,
+          "why": "Human review is slow and not repeatable, and finance reviewers will not spot edge-input bugs in code."
+        }
+      ],
+      "explain": "Test logic at the lowest level that can see the bug. Pure functions with a clear invariant are ideal for property-based tests, which find the odd inputs; keep end-to-end tests for a few critical paths.",
+      "refs": [
+        "https://martinfowler.com/articles/practical-test-pyramid.html"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q18",
+      "domain": "testing",
+      "stem": "An order service calls inventory with what was meant to be a 2 s timeout and two retries. During an inventory outage, orders hung for 60 s and the API ran out of sockets. Every existing test uses a happy fake inventory. What should be added first?",
+      "options": [
+        {
+          "text": "An end-to-end test against the inventory team's sandbox environment.",
+          "correct": false,
+          "why": "The sandbox is healthy, so the test passes and never exercises the timeout or retry paths."
+        },
+        {
+          "text": "Tests with a fake inventory that hangs, errors and returns 503, asserting timeout, attempt count and the caller's error under a fake clock.",
+          "correct": true,
+          "why": "Failure paths are tested deterministically, so a missing timeout or runaway retry fails in seconds in CI."
+        },
+        {
+          "text": "A weekly load test in staging to see how the service behaves under realistic traffic.",
+          "correct": false,
+          "why": "Staging inventory is up, so load alone never triggers the hang; feedback is also a week late."
+        },
+        {
+          "text": "A quarterly chaos experiment that kills inventory in production during business hours.",
+          "correct": false,
+          "why": "Valuable later, but it finds this bug in production months from now instead of in CI today."
+        }
+      ],
+      "explain": "Failure handling is code and needs tests: inject fakes that hang, fail and return errors, and assert timeouts, retry counts and surfaced errors with a fake clock. Happy-path fakes prove only that the happy path works.",
+      "refs": [
+        "https://nodejs.org/api/test.html#class-mocktimers"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q19",
+      "domain": "deploys",
+      "stem": "A service runs 400 pods at 50k rps. Deploys roll through all pods in 8 minutes. The last bad release took 25 minutes to detect, and every user saw errors in that time. What change to the deploy process limits the next one?",
+      "options": [
+        {
+          "text": "Slow the rolling deploy to two hours so problems are noticed before it reaches every pod.",
+          "correct": false,
+          "why": "Exposure grows more slowly, but nothing judges health or stops it, so a quiet failure still reaches everyone."
+        },
+        {
+          "text": "Canary to a few percent of traffic, compare error and latency SLIs to the baseline, and roll back automatically.",
+          "correct": true,
+          "why": "Only a small slice is exposed, the comparison is automatic, and rollback does not wait for a human to notice."
+        },
+        {
+          "text": "Blue/green with an instant 100% switch, so rolling back is just pointing the load balancer back at the old blue fleet of pods.",
+          "correct": false,
+          "why": "Rollback is fast, but every user hits the bad version at once and detection still takes 25 minutes."
+        },
+        {
+          "text": "Add a longer test pass in staging before each deploy.",
+          "correct": false,
+          "why": "Helps with some bugs, but problems that only appear under production traffic and data still get through."
+        }
+      ],
+      "explain": "Limit blast radius and shorten detection: canaries expose a small slice, automated analysis compares SLIs against a baseline, and automatic rollback removes the human delay. Speed of rollback matters less than how many users see the bad version.",
+      "refs": [
+        "https://sre.google/workbook/canarying-releases/"
+      ]
+    },
+    {
+      "id": "code-practices-v2-q20",
+      "domain": "deploys",
+      "stem": "`orders` has 600M rows and takes 3k writes/s on Postgres 17. The `customer_id` backfill is finished and you now need the column `NOT NULL`. In staging, `ALTER TABLE orders ALTER COLUMN customer_id SET NOT NULL` blocked writes for 9 minutes. What is the safe sequence?",
+      "options": [
+        {
+          "text": "Run the same `SET NOT NULL` at the lowest-traffic hour with a short `lock_timeout`.",
+          "correct": false,
+          "why": "`lock_timeout` only limits waiting to acquire the lock; once acquired, the full-table scan still blocks writes for minutes."
+        },
+        {
+          "text": "Add `CHECK (customer_id IS NOT NULL) NOT VALID`, run `VALIDATE CONSTRAINT`, then `SET NOT NULL`.",
+          "correct": true,
+          "why": "Validation scans without blocking writes, and `SET NOT NULL` can then use the valid check constraint and skip its own scan."
+        },
+        {
+          "text": "Create a new table with the constraint, copy the rows across with triggers keeping it in sync, and swap the names.",
+          "correct": false,
+          "why": "It works but means copying 600M rows and running dual-write triggers, far more risk and operations than needed."
+        },
+        {
+          "text": "Leave the column nullable and enforce non-null in the application layer.",
+          "correct": false,
+          "why": "Other writers, scripts and future code bypass it, so the database can no longer guarantee the invariant."
+        }
+      ],
+      "explain": "On large hot tables, split constraint changes into a cheap metadata step and a non-blocking validation step. In Postgres, `NOT VALID` plus `VALIDATE CONSTRAINT` takes only a lock that allows writes, and since Postgres 12 `SET NOT NULL` skips the scan when a valid check constraint proves it.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/sql-altertable.html"
+      ]
+    }
+  ]
+}

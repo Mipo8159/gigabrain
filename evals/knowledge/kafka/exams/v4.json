@@ -1,0 +1,665 @@
+{
+  "topic": "kafka",
+  "variant": 4,
+  "of": 5,
+  "title": "Kafka at scale — variant 4",
+  "description": "Games, healthcare and marketplaces: tenancy and partition sizing, compacted state, liveness under the new protocol, inbox races and open transactions, sagas and DLQ replays, tiered storage and replication lag.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "partitioning",
+      "name": "Partitioning, keys and ordering",
+      "weight": 0.2
+    },
+    {
+      "id": "groups",
+      "name": "Consumer groups, rebalancing and lag",
+      "weight": 0.2
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery semantics, idempotence and transactions",
+      "weight": 0.2
+    },
+    {
+      "id": "integration",
+      "name": "Outbox, retries, DLQ and schema evolution",
+      "weight": 0.2
+    },
+    {
+      "id": "scale",
+      "name": "Replication, multi-region and capacity",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "kafka-v4-q01",
+      "domain": "partitioning",
+      "stem": "A healthcare SaaS with 10,000 clinic tenants plans one topic per tenant for `appointment-events`, each with 6 partitions, so tenants are isolated. Most tenants send a few events per minute; three large hospital groups send thousands per second. What should the architect recommend?",
+      "options": [
+        {
+          "text": "Go ahead with 60,000 partitions; KRaft removed partition limits",
+          "correct": false,
+          "why": "KRaft raises metadata limits, but each partition still costs replication fetches, files and failover work, and 10,000 tiny topics batch terribly."
+        },
+        {
+          "text": "A shared topic keyed by tenant, plus own topics for the few huge tenants",
+          "correct": true,
+          "why": "Small tenants share partitions efficiently, keys keep per-tenant order, and the heavy hitters get isolation where it pays off."
+        },
+        {
+          "text": "One topic per tenant but with a single partition each, to cut the total to 10,000",
+          "correct": false,
+          "why": "Fewer partitions, but still 10,000 topics to manage and the hospital groups are capped at one partition's throughput."
+        },
+        {
+          "text": "One shared topic with a null key so load spreads perfectly across all partitions",
+          "correct": false,
+          "why": "Balanced, but a clinic's appointment events lose their order, and booking then cancellation can be applied backwards."
+        }
+      ],
+      "explain": "Topic-per-tenant scales operational cost with tenant count. Share topics and key by tenant for the long tail; carve out dedicated topics only for tenants big enough to need isolation.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_concepts_and_terms"
+      ]
+    },
+    {
+      "id": "kafka-v4-q02",
+      "domain": "partitioning",
+      "stem": "A game studio's chat service publishes messages to `chat` (32 partitions). Players report that replies sometimes appear above the message they answer. The producer code is `producer.send({ topic: 'chat', messages: [{ value }] })`, and the consumer renders in consumption order. How should the team fix it?",
+      "options": [
+        {
+          "text": "Set the conversation ID as the message key",
+          "correct": true,
+          "why": "Without a key, consecutive messages of one conversation land on different partitions and are consumed in any order; a key pins the conversation to one partition."
+        },
+        {
+          "text": "Sort by the broker timestamp in the client before rendering each conversation",
+          "correct": false,
+          "why": "Partitions are consumed independently, so a later message can arrive first and the client cannot know if an earlier one is still coming."
+        },
+        {
+          "text": "Reduce the topic to a single partition so all chat is totally ordered",
+          "correct": false,
+          "why": "Orders everything but caps all chat in the game at one partition's throughput and one consumer."
+        },
+        {
+          "text": "Turn on producer idempotence so messages keep their send order",
+          "correct": false,
+          "why": "Idempotence keeps order within a partition; it cannot order messages that went to different partitions."
+        }
+      ],
+      "explain": "No key, no ordering. Every stream where order matters per entity needs that entity's ID as the key.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_concepts_and_terms"
+      ]
+    },
+    {
+      "id": "kafka-v4-q03",
+      "domain": "partitioning",
+      "stem": "A marketplace is creating `listing-events`, keyed by listing ID, consumed by a search indexer that needs per-listing order. Year-one peak is 2,000 events/s; the indexer handles about 100 events/s per partition; growth of 5× over three years is forecast. Changing partition counts later is painful. How many partitions should the topic start with?",
+      "options": [
+        {
+          "text": "20, exactly enough for year-one peak, and add more as traffic grows",
+          "correct": false,
+          "why": "Cheapest today, but every later increase remaps keys and risks per-listing order unless done with a careful drain and cutover."
+        },
+        {
+          "text": "About 100–120, sized for the three-year peak with some headroom",
+          "correct": true,
+          "why": "Five times 2,000/s at 100/s per partition is 100 partitions; starting there avoids a painful re-partition while keeping per-partition overhead modest."
+        },
+        {
+          "text": "1,000, so the topic can never become a bottleneck",
+          "correct": false,
+          "why": "Far beyond any forecast; each partition adds overhead, batches get small and recovery slows for no benefit."
+        },
+        {
+          "text": "One per expected consumer pod, currently 8",
+          "correct": false,
+          "why": "Pod counts follow partitions, not the other way round; 8 partitions cap the indexer at about 800 events/s."
+        }
+      ],
+      "explain": "Size keyed topics for the forecast peak divided by per-partition consumer throughput, with headroom, because increasing partitions remaps keys. Over-sizing by 10× has real costs too.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#basic_ops_modify_topic"
+      ]
+    },
+    {
+      "id": "kafka-v4-q04",
+      "domain": "partitioning",
+      "stem": "An inventory service keeps its SKU table in a local on-disk store and, on restart, resumes `sku-stock` (compacted, keyed by SKU) from its committed offset. Discontinued SKUs are deleted with tombstones, and the topic uses the default `delete.retention.ms` (1 day). After a pod was down over a long weekend, discontinued SKUs it had stored earlier are still in its table. Why, and what fixes it?",
+      "options": [
+        {
+          "text": "Compaction failed on the weekend; run it manually before restarts",
+          "correct": false,
+          "why": "Compaction ran fine; it is what removed the tombstones that this consumer had not yet read."
+        },
+        {
+          "text": "The consumer read with `read_uncommitted`; switch to `read_committed`",
+          "correct": false,
+          "why": "Isolation level is about transactional records; tombstones are ordinary records and visible either way."
+        },
+        {
+          "text": "Resume from the latest offset instead of the committed one, so only fresh records are applied",
+          "correct": false,
+          "why": "Skips every change made during the outage, including updates, and still never deletes the stale rows."
+        },
+        {
+          "text": "Tombstones expire after `delete.retention.ms`; rebuild from empty after long outages and raise the setting",
+          "correct": true,
+          "why": "The tombstones were cleaned before this consumer read them, so its stored rows never got deleted; rebuilding from empty state, plus a window longer than realistic outages, removes the stale rows."
+        }
+      ],
+      "explain": "Tombstones only live for `delete.retention.ms` after compaction. Consumers must either read the compacted log into empty state, or catch up within that window, or they miss deletes.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#topicconfigs_delete.retention.ms"
+      ]
+    },
+    {
+      "id": "kafka-v4-q05",
+      "domain": "groups",
+      "stem": "A matchmaking service moved its Confluent JS consumers to `group.protocol: 'consumer'` and the broker's `group.consumer.session.timeout.ms` is 45 s. One pod's handler hung for 12 minutes on a stuck database call while its process kept running and heartbeating. The team expected the session timeout to evict it. Which setting governs this case?",
+      "options": [
+        {
+          "text": "The broker's session timeout, which should have fired after 45 seconds",
+          "correct": false,
+          "why": "Background heartbeats kept the session alive; a hung handler in a live process does not stop heartbeats."
+        },
+        {
+          "text": "The client's `max.poll.interval.ms`, still in force",
+          "correct": true,
+          "why": "When the app stops polling for longer than the poll interval (5 minutes by default), the client leaves the group and its partitions move."
+        },
+        {
+          "text": "The broker's heartbeat interval, which detects slow handlers",
+          "correct": false,
+          "why": "The heartbeat interval sets how often members check in; it measures liveness of the client, not progress of the handler."
+        },
+        {
+          "text": "None; under the new protocol a hung member keeps its partitions until it restarts",
+          "correct": false,
+          "why": "Too pessimistic: the poll-interval check still removes a member that stops polling."
+        }
+      ],
+      "explain": "Liveness (session, heartbeat) and progress (poll interval) are different checks. KIP-848 moves the first to the broker; the second stays on the client, so slow handlers are still caught by `max.poll.interval.ms`.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#consumerconfigs_max.poll.interval.ms"
+      ]
+    },
+    {
+      "id": "kafka-v4-q06",
+      "domain": "groups",
+      "stem": "A marketplace scales its `search-indexer` consumers with KEDA on consumer lag. The topic has 32 partitions. During a bulk import, KEDA scaled to 90 pods, the database connection pool limit was exhausted by the idle pods, and the indexer slowed further. How should the scaler be configured?",
+      "options": [
+        {
+          "text": "Scale on CPU instead of lag",
+          "correct": false,
+          "why": "CPU hides the real backlog for I/O-bound consumers, and the replica count can still exceed the partition count."
+        },
+        {
+          "text": "Disable autoscaling and run 32 pods permanently",
+          "correct": false,
+          "why": "Safe, but pays for peak capacity around the clock, giving up the cost benefit of scaling."
+        },
+        {
+          "text": "Keep scaling on lag, but cap replicas at the partition count (32)",
+          "correct": true,
+          "why": "Lag is the right signal, and the cap stops pods that can never get a partition from taking DB connections."
+        },
+        {
+          "text": "Raise the database connection pool so 90 pods all fit",
+          "correct": false,
+          "why": "Fixes the symptom while 58 pods still do nothing, and the database pays for their idle connections."
+        }
+      ],
+      "explain": "Lag-based autoscaling is right for consumers, but the maximum replica count must not exceed the partition count; extra members are idle and still consume shared resources.",
+      "refs": [
+        "https://keda.sh/docs/latest/scalers/apache-kafka/"
+      ]
+    },
+    {
+      "id": "kafka-v4-q07",
+      "domain": "groups",
+      "stem": "A claims-processing group (24 partitions, 24 pods) writes each event to Postgres with one INSERT and commit. After the database moved to a new storage tier, insert latency doubled and lag grows evenly on all 24 partitions. Scaling pods is not an option. Which change helps most?",
+      "options": [
+        {
+          "text": "Add 24 more partitions and pods",
+          "correct": false,
+          "why": "The team ruled out more pods, and adding partitions to a keyed topic remaps keys."
+        },
+        {
+          "text": "Turn on auto-commit to save a round trip per message",
+          "correct": false,
+          "why": "The bottleneck is the DB write, not the Kafka commit; auto-commit also risks committing unwritten events."
+        },
+        {
+          "text": "Switch to the `range` assignor to rebalance load",
+          "correct": false,
+          "why": "Every partition already has its own pod; assignment does not change per-partition speed."
+        },
+        {
+          "text": "Write each poll batch in one multi-row DB transaction, then commit offsets",
+          "correct": true,
+          "why": "Batching amortises the doubled latency over many rows, raising per-partition throughput without more pods."
+        }
+      ],
+      "explain": "Even lag across partitions means each lane is too slow. Raise per-lane throughput first, usually by batching the sink write per poll, before adding partitions or pods.",
+      "refs": [
+        "https://kafka.js.org/docs/consuming"
+      ]
+    },
+    {
+      "id": "kafka-v4-q08",
+      "domain": "groups",
+      "stem": "A pharmacy order consumer on the Confluent JS client awaits `consumer.disconnect()` on SIGTERM. Its handler can take up to 25 seconds for large prescriptions, and the pod's `terminationGracePeriodSeconds` is 10. After deploys, those partitions still sit idle for about 45 seconds. Why?",
+      "options": [
+        {
+          "text": "Kubernetes kills the pod at 10 s while `disconnect()` waits, so it never leaves",
+          "correct": true,
+          "why": "SIGKILL stops the clean leave, so the coordinator only notices the member is gone when its session times out."
+        },
+        {
+          "text": "`disconnect()` doesn't send a leave request; the group always waits for the session timeout",
+          "correct": false,
+          "why": "A clean disconnect does leave the group; partitions move immediately when it completes."
+        },
+        {
+          "text": "The new pod is slow to start; prewarm the container image on every node",
+          "correct": false,
+          "why": "Start time does not matter while the old member still owns the partitions."
+        },
+        {
+          "text": "The broker holds partitions for a cooldown after a leave so rebalances do not thrash",
+          "correct": false,
+          "why": "There is no such cooldown after a clean leave; the idle period equals the session timeout."
+        }
+      ],
+      "explain": "A graceful shutdown only works if it can finish. Set the pod's grace period above the longest in-flight handler time, or stop taking new work and bound handler time.",
+      "refs": [
+        "https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/"
+      ]
+    },
+    {
+      "id": "kafka-v4-q09",
+      "domain": "delivery",
+      "stem": "A game grants premium gems from `purchase-completed` events. The inbox check below runs in two pods after a rebalance; a player received gems twice. Gems and the inbox table live in the same Postgres database. Which change makes the grant exactly-once in effect?",
+      "code": "const seen = await db.query(\n  'SELECT 1 FROM inbox WHERE event_id = $1', [evt.id]);\nif (seen.rowCount) return;\nawait db.query('UPDATE wallets SET gems = gems + $1 WHERE player = $2',\n  [evt.gems, evt.player]);\nawait db.query('INSERT INTO inbox(event_id) VALUES ($1)', [evt.id]);",
+      "options": [
+        {
+          "text": "Wrap the three statements in a transaction at READ COMMITTED",
+          "correct": false,
+          "why": "Atomic, but both transactions can still pass the SELECT before either inserts; the race remains."
+        },
+        {
+          "text": "Add a Redis lock keyed on the event ID around the check, update and insert",
+          "correct": false,
+          "why": "Narrows the race, but a lock that expires during a slow write, or a crash after the update, still lets a duplicate through."
+        },
+        {
+          "text": "One transaction: claim the ID via `INSERT … ON CONFLICT DO NOTHING`, then grant",
+          "correct": true,
+          "why": "The unique key on event_id serialises the two pods; the loser gets no row and skips, and the grant commits atomically with the inbox row."
+        },
+        {
+          "text": "Commit the Kafka offset before the SELECT",
+          "correct": false,
+          "why": "Stops redelivery, but a crash before the grant loses the purchase."
+        }
+      ],
+      "explain": "Check-then-insert races. Let the database's unique constraint decide: claim the event ID first with an insert that reports whether it won, and apply the effect in that same transaction.",
+      "refs": [
+        "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+      ]
+    },
+    {
+      "id": "kafka-v4-q10",
+      "domain": "delivery",
+      "stem": "A patient-monitoring system has two ingestion pods that both receive vitals for the same patient from a load balancer and each publish to `vitals` keyed by patient ID, with idempotent producers. The alerting consumer sometimes sees a reading from 10:00:05 before 10:00:03. Why, and what fixes it?",
+      "options": [
+        {
+          "text": "Idempotence is off; turning it on guarantees order for the key",
+          "correct": false,
+          "why": "It is already on, and idempotence orders only one producer's writes, not two producers' writes to the same key."
+        },
+        {
+          "text": "Order holds per producer per partition; send each patient via one producer",
+          "correct": true,
+          "why": "Two producers race to the same partition, so arrival order wins; sticky routing by patient to one producer restores order."
+        },
+        {
+          "text": "The consumer uses too many threads; process each partition strictly single-threaded",
+          "correct": false,
+          "why": "The records are already stored out of order in the partition, so consumer threading cannot fix it."
+        },
+        {
+          "text": "Use transactions so the two producers commit in timestamp order",
+          "correct": false,
+          "why": "Transactions give atomicity, not a cross-producer ordering by timestamp."
+        }
+      ],
+      "explain": "Kafka keeps per-partition order in arrival order. Idempotence protects one producer's sequence; with several writers for one key, route each key through one writer or order on a domain sequence number at the consumer.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#semantics"
+      ]
+    },
+    {
+      "id": "kafka-v4-q11",
+      "domain": "delivery",
+      "stem": "A loyalty platform's batch job writes `points-adjustments` in one Kafka transaction per nightly run, which takes 40 minutes. Real-time consumers reading with `read_committed` from the same partitions stop receiving any new records, including unrelated ones from other producers, for the whole run. What explains this and what should change?",
+      "options": [
+        {
+          "text": "The broker throttles other producers while a transaction is open",
+          "correct": false,
+          "why": "Other producers keep writing; the stall is on the read side."
+        },
+        {
+          "text": "`read_committed` consumers wait until each record is replicated to every replica, not just the in-sync ones",
+          "correct": false,
+          "why": "Replication waits are the same for every isolation level; the difference is the transaction boundary."
+        },
+        {
+          "text": "Readers stop at the oldest open transaction (the LSO); commit in small chunks",
+          "correct": true,
+          "why": "Records after an open transaction's first record are held back until it completes, so a 40-minute transaction stalls the partition for readers."
+        },
+        {
+          "text": "Switch the real-time consumers to `read_uncommitted`",
+          "correct": false,
+          "why": "They would flow again but would also see records from aborted runs, which `read_committed` was there to hide."
+        }
+      ],
+      "explain": "Read-committed consumers stop at the last stable offset, so a long-open transaction blocks everything behind it in that partition. Keep transactions short and bounded by `transaction.timeout.ms`.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#consumerconfigs_isolation.level"
+      ]
+    },
+    {
+      "id": "kafka-v4-q12",
+      "domain": "delivery",
+      "stem": "A ride-share telemetry consumer processes 50,000 msg/s and calls `commitOffsets` synchronously after every message; profiling shows half its time is spent waiting on commits. Writes downstream are idempotent upserts. Which commit strategy keeps at-least-once and recovers throughput?",
+      "options": [
+        {
+          "text": "Commit asynchronously before processing each message",
+          "correct": false,
+          "why": "Faster, but committing before processing turns a crash into lost messages."
+        },
+        {
+          "text": "Commit after processing, per batch or every few seconds, and on revoke",
+          "correct": true,
+          "why": "Commits after processing keep at-least-once; the replay after a crash is bounded and harmless because upserts are idempotent."
+        },
+        {
+          "text": "Stop committing and rely on `auto.offset.reset=latest` after restarts",
+          "correct": false,
+          "why": "Every restart skips whatever arrived while down, which is data loss."
+        },
+        {
+          "text": "Use a transactional producer so offset commits go through the faster transaction coordinator",
+          "correct": false,
+          "why": "There is no output topic here; transactions add coordination cost without solving per-message commit overhead."
+        }
+      ],
+      "explain": "Commit frequency trades replay size for throughput. With idempotent effects, commit after processing in batches, plus on revoke and shutdown, rather than per message.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#design_consumerposition"
+      ]
+    },
+    {
+      "id": "kafka-v4-q13",
+      "domain": "integration",
+      "stem": "A marketplace checkout spans three services: order, payment and inventory, each with its own database, communicating through Kafka. When payment succeeds but inventory then fails to reserve stock, the order must end up cancelled and the payment refunded. A developer suggests a two-phase commit across all three databases. Which design should they choose instead?",
+      "options": [
+        {
+          "text": "Two-phase commit coordinated by the order service",
+          "correct": false,
+          "why": "It couples three services' availability, holds locks across network calls, and Kafka is not a participant anyway."
+        },
+        {
+          "text": "A saga: outbox-published events per step, with compensating refund and cancel events",
+          "correct": true,
+          "why": "Each service commits locally and reliably publishes; compensations undo earlier steps, giving eventual consistency without distributed locks."
+        },
+        {
+          "text": "One Kafka transaction spanning the three services' produces",
+          "correct": false,
+          "why": "A Kafka transaction belongs to one producer and covers Kafka writes only, not three services' databases."
+        },
+        {
+          "text": "Have inventory call the payment service's refund API synchronously whenever a reservation fails",
+          "correct": false,
+          "why": "Works when both are up, but a refund lost to a timeout leaves money taken for a cancelled order with no retry trail."
+        }
+      ],
+      "explain": "Across services and databases, prefer sagas: local transactions, reliable event publication (outbox) and explicit compensations. Consistency is eventual, and every step must be idempotent.",
+      "refs": [
+        "https://microservices.io/patterns/data/saga.html"
+      ]
+    },
+    {
+      "id": "kafka-v4-q14",
+      "domain": "integration",
+      "stem": "The `invoice-issued` Avro schema has a field `amount` that must become `amountMinor` (integer cents). Twelve consumers read it; the subject uses BACKWARD compatibility and teams deploy independently. Which steps form a safe migration? (Choose two.)",
+      "options": [
+        {
+          "text": "Add `amountMinor` with a default while keeping `amount`, and have the producer fill both",
+          "correct": true,
+          "why": "An added field with a default is compatible, and old consumers keep reading `amount` meanwhile."
+        },
+        {
+          "text": "Remove `amount` only after every consumer has switched to `amountMinor`",
+          "correct": true,
+          "why": "Removal is the breaking step for old readers; doing it last, once nobody reads the field, makes it safe."
+        },
+        {
+          "text": "Rename the field in place and register it as the next version",
+          "correct": false,
+          "why": "To Avro a rename is removing one field and adding another without a default; the registry rejects it or old readers break."
+        },
+        {
+          "text": "Use an Avro alias and deploy the producer first",
+          "correct": false,
+          "why": "Aliases help readers that know the alias, but old consumers do not, and under BACKWARD the producer should not lead."
+        },
+        {
+          "text": "Switch the subject to NONE for the migration week",
+          "correct": false,
+          "why": "Disables the safety check exactly when the change is risky."
+        }
+      ],
+      "explain": "Breaking changes become expand-and-contract: add the new field with a default, write both, move readers, then remove the old field. Each step on its own is compatible.",
+      "refs": [
+        "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html"
+      ]
+    },
+    {
+      "id": "kafka-v4-q15",
+      "domain": "integration",
+      "stem": "A listing-price consumer sent 3,000 events to a DLQ during a two-hour outage of a pricing dependency. The dependency is fixed, and since then newer price events for many of the same listings have been applied. An engineer wants to replay the DLQ straight into the main topic. What should happen first?",
+      "options": [
+        {
+          "text": "Nothing; replaying restores exactly the state that was missed",
+          "correct": false,
+          "why": "The old events now arrive after newer ones for the same listings and would overwrite current prices with stale ones."
+        },
+        {
+          "text": "Replay at a slow rate so the consumer is not overwhelmed",
+          "correct": false,
+          "why": "Rate is not the issue; the order of old and new events for a listing is."
+        },
+        {
+          "text": "Sort the DLQ by original event timestamp, then replay it in that order",
+          "correct": false,
+          "why": "Sorting the DLQ alone does not place its events before the newer ones already applied."
+        },
+        {
+          "text": "Add a per-listing version check that skips stale events, then replay",
+          "correct": true,
+          "why": "With a version check, stale replays are ignored and still-relevant ones apply, so the replay cannot roll prices back."
+        }
+      ],
+      "explain": "A DLQ replay is an out-of-order delivery. Before replaying keyed state changes, make the consumer reject events older than what it has applied, using a version or sequence number per key.",
+      "refs": [
+        "https://www.confluent.io/blog/error-handling-patterns-in-kafka/"
+      ]
+    },
+    {
+      "id": "kafka-v4-q16",
+      "domain": "integration",
+      "stem": "A radiology platform wants to publish DICOM studies (5–50 MB each) as events so three downstream services can process them. The cluster uses default message size limits, and the platform team refuses to raise them cluster-wide. What should the event carry?",
+      "options": [
+        {
+          "text": "The full study, after raising `max.message.bytes` on the topic only",
+          "correct": false,
+          "why": "Allowed per topic, but 50 MB records strain broker memory, replication and consumer fetch sizes on every client."
+        },
+        {
+          "text": "The study split into 1 MB chunk records with sequence headers for reassembly",
+          "correct": false,
+          "why": "Works, but consumers must reassemble across rebalances and partial deliveries, which is complex and fragile."
+        },
+        {
+          "text": "A reference to the study in object storage plus metadata (claim check)",
+          "correct": true,
+          "why": "Events stay small and fast; consumers fetch the blob when they need it, and the store handles large objects well."
+        },
+        {
+          "text": "The study compressed with zstd to fit under 1 MB",
+          "correct": false,
+          "why": "Medical images rarely compress that far, so most studies would still exceed the limit."
+        }
+      ],
+      "explain": "Kafka is built for many small records (default limits around 1 MB). For large payloads use the claim-check pattern: store the blob elsewhere and send a pointer plus metadata.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#topicconfigs_max.message.bytes"
+      ]
+    },
+    {
+      "id": "kafka-v4-q17",
+      "domain": "scale",
+      "stem": "A sportsbook replicates bets from `eu-west` to `eu-north` with MirrorMaker 2 for DR. The business asks how many seconds of accepted bets they could lose if `eu-west` vanished right now, and wants an alert when that exceeds 30 seconds. What should they measure?",
+      "options": [
+        {
+          "text": "MM2's replication latency into `eu-north`, as time",
+          "correct": true,
+          "why": "MM2 is asynchronous, so the data at risk is whatever has not yet arrived in the target; its replication latency is the live RPO."
+        },
+        {
+          "text": "Consumer lag of the bet-settlement group in `eu-west`",
+          "correct": false,
+          "why": "Measures how far settlement is behind, not how far DR is behind."
+        },
+        {
+          "text": "Under-replicated partitions in `eu-west`",
+          "correct": false,
+          "why": "That is replication inside one cluster; MM2's cross-cluster copy is separate."
+        },
+        {
+          "text": "Disk usage on `eu-north` brokers compared with `eu-west`",
+          "correct": false,
+          "why": "Size differs for many reasons (retention, compaction) and does not translate into seconds behind."
+        }
+      ],
+      "explain": "With asynchronous geo-replication, RPO equals replication lag at the moment of failure. Measure it as time (MM2 heartbeats, replication latency metrics) and alert on it.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#georeplication"
+      ]
+    },
+    {
+      "id": "kafka-v4-q18",
+      "domain": "scale",
+      "stem": "A game publisher must keep player-event history for 13 months so analytics can replay it into new models. Ingest is 20 MB/s, the cluster runs Kafka 4.3, and storing 13 months on broker SSDs with RF 3 would cost several times the current budget. Recent data (7 days) is read heavily; older data rarely. What fits best?",
+      "options": [
+        {
+          "text": "Keep 13 months on broker disks and add brokers",
+          "correct": false,
+          "why": "Simple, but replicated SSD storage for rarely read data is the cost problem in the first place."
+        },
+        {
+          "text": "Tiered storage: ~7 days on local disk, the rest in object storage",
+          "correct": true,
+          "why": "Hot data stays on fast local disks while cold segments move to cheap object storage that consumers can still read through Kafka."
+        },
+        {
+          "text": "Compact the topic so only the latest event per player is kept",
+          "correct": false,
+          "why": "Compaction throws away the history the analytics replays need."
+        },
+        {
+          "text": "Keep 7 days in Kafka and tell analytics to replay only that",
+          "correct": false,
+          "why": "Cheapest, but fails the 13-month requirement."
+        }
+      ],
+      "explain": "Tiered storage splits retention from broker disk: brokers keep a short local window and offload older segments to object storage. Long replays become affordable without bigger brokers.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#tiered_storage"
+      ]
+    },
+    {
+      "id": "kafka-v4-q19",
+      "domain": "scale",
+      "stem": "A clinic-scheduling cluster has replication factor 3 and `min.insync.replicas=3` on every topic, set by someone who wanted \"maximum safety\". During routine rolling patching of one broker, producers with `acks=all` fail with `NotEnoughReplicas`. What should change?",
+      "options": [
+        {
+          "text": "Switch producers to `acks=1` during maintenance windows",
+          "correct": false,
+          "why": "Writes continue, but each ack then rests on a single copy during the riskiest time."
+        },
+        {
+          "text": "Increase replication factor to 5 and keep min ISR 3",
+          "correct": false,
+          "why": "Would allow one broker down, but adds 67% more storage and replication traffic for what a config change solves."
+        },
+        {
+          "text": "Disable patching and only replace brokers by adding new ones",
+          "correct": false,
+          "why": "Avoids the symptom by giving up routine maintenance; the next unplanned broker failure still stops writes."
+        },
+        {
+          "text": "Set `min.insync.replicas=2`",
+          "correct": true,
+          "why": "Two in-sync copies still protect every ack, and one broker can be down for patching or failure without stopping writes."
+        }
+      ],
+      "explain": "min ISR must be lower than RF, or any single broker outage blocks acks=all writes. RF 3 with min ISR 2 is the usual balance of durability and availability.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#topicconfigs_min.insync.replicas"
+      ]
+    },
+    {
+      "id": "kafka-v4-q20",
+      "domain": "scale",
+      "stem": "A marketplace's cluster is in `us-east-1`. A new fraud team in Frankfurt runs eight consumer groups that each read the full 120 MB/s `transactions` topic directly across the Atlantic. The egress bill and their p99 fetch latency are both high. They need all data, minutes of delay are fine. What should they do?",
+      "options": [
+        {
+          "text": "Raise their consumers' fetch sizes to cut round trips",
+          "correct": false,
+          "why": "Helps latency a bit, but each of the eight groups still pulls 120 MB/s across the ocean."
+        },
+        {
+          "text": "Move the eight groups into one group to share the data",
+          "correct": false,
+          "why": "One group splits partitions between members, so each team would see only part of the data."
+        },
+        {
+          "text": "Mirror once to a Frankfurt cluster with MirrorMaker 2 and consume locally",
+          "correct": true,
+          "why": "The data crosses the Atlantic once instead of eight times, and fetches become local."
+        },
+        {
+          "text": "Turn on follower fetching so Frankfurt consumers read from the closest replica",
+          "correct": false,
+          "why": "Follower fetching picks among replicas in one cluster; there is no replica in Frankfurt to pick."
+        }
+      ],
+      "explain": "Cross-region fan-out multiplies egress by the number of consuming groups. Replicate once into the remote region and fan out locally when some delay is acceptable.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#georeplication"
+      ]
+    }
+  ]
+}

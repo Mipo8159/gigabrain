@@ -1,0 +1,686 @@
+{
+  "topic": "typescript",
+  "variant": 1,
+  "of": 5,
+  "title": "TypeScript type design at scale — variant 1",
+  "description": "Webhook and queue edges, cache round trips, discriminated unions and brands, event contract evolution, strictness migration, TS 7 and Node type stripping.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "boundaries",
+      "name": "Runtime boundaries and validation",
+      "weight": 0.25
+    },
+    {
+      "id": "modelling",
+      "name": "Modelling domain states and ids",
+      "weight": 0.25
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts between services",
+      "weight": 0.15
+    },
+    {
+      "id": "strictness",
+      "name": "Strictness, any and escape hatches",
+      "weight": 0.15
+    },
+    {
+      "id": "toolchain",
+      "name": "Modules, monorepos and the toolchain",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "typescript-v1-q01",
+      "domain": "boundaries",
+      "stem": "A payments platform receives ~400 webhooks/s from a card processor. The handler does `const evt = req.body as ChargeEvent` and the ledger sums `evt.amount`. After the processor started sending `amount` as a string for one card scheme, a merchant's daily total became `\"01999250\"` instead of a number and settlement failed. `strict` is already on. What change stops this class of bug?",
+      "options": [
+        {
+          "text": "Turn on `noImplicitAny` and `strictNullChecks` explicitly so the compiler checks `req.body` more carefully.",
+          "correct": false,
+          "why": "Tempting because it sounds stricter, but both are already part of `strict`, and no compiler flag can see what bytes arrive at runtime; `as` overrides the checker anyway."
+        },
+        {
+          "text": "Parse the body with a schema at the webhook edge and pass only the parsed value inward.",
+          "correct": true,
+          "why": "Only a runtime check sees the real payload. A schema turns `unknown` into `ChargeEvent` once, at the edge, so the ledger can trust the type and bad payloads are visible instead of silently concatenated."
+        },
+        {
+          "text": "Wrap every arithmetic use in the ledger with `Number(evt.amount)` so strings are converted where they are used.",
+          "correct": false,
+          "why": "It patches this field at this call site; the next field or the next consumer has the same hole, and `Number(\"\")` or `Number(undefined)` gives 0 or NaN silently."
+        },
+        {
+          "text": "Write a guard `isChargeEvent(x): x is ChargeEvent` that returns `typeof x === \"object\" && \"amount\" in x`.",
+          "correct": false,
+          "why": "A type predicate is a promise the compiler believes; this one checks presence, not type, so the string amount still passes and is now labelled as a number."
+        }
+      ],
+      "explain": "Types vanish at runtime: `as T` on external data is a claim, not a check. Treat everything crossing a process boundary as `unknown`, convert it once with a runtime schema at the edge, and let only the parsed type flow inward. Hand-written guards are only as good as the checks inside them.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown",
+        "https://zod.dev/api",
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions"
+      ]
+    },
+    {
+      "id": "typescript-v1-q02",
+      "domain": "boundaries",
+      "stem": "An order service caches `Order` objects in Redis as JSON (20k reads/s, 92% hit rate). `Order.createdAt` is typed `Date`. After a deploy, 8% of requests throw `createdAt.getTime is not a function`, all on cache hits. Deploys are rolling, so two versions share the cache for ~15 minutes. Which fix fits?",
+      "options": [
+        {
+          "text": "Flush the Redis cache on every deploy so only fresh entries written by the current version are ever read.",
+          "correct": false,
+          "why": "It removes stale shapes but not the Date bug (fresh entries are still strings after JSON), and at 20k reads/s a cold cache sends a stampede to the database on every deploy."
+        },
+        {
+          "text": "Widen the field to `createdAt: Date | string` and let each caller handle both forms.",
+          "correct": false,
+          "why": "It makes the type honest but pushes conversion into every caller forever; the domain model should have one representation."
+        },
+        {
+          "text": "Add a `JSON.parse` reviver that turns every key ending in `At` into a `Date`.",
+          "correct": false,
+          "why": "It fixes this field by naming convention, but it validates nothing: an entry written by the other version with a different shape still passes as `Order`."
+        },
+        {
+          "text": "Parse each cache read with a schema that converts the ISO string to `Date`; treat failure as a miss.",
+          "correct": true,
+          "why": "It converts the wire form (string) into the domain form (Date) at the boundary and also rejects entries from the other version, which simply fall through to the database."
+        }
+      ],
+      "explain": "JSON has no Date, Map, BigInt or undefined, so a cache or queue round trip changes types the compiler still trusts. Keep a wire type and a domain type, convert between them at the boundary, and treat data that fails to parse as missing rather than as trusted.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify",
+        "https://zod.dev/api"
+      ]
+    },
+    {
+      "id": "typescript-v1-q03",
+      "domain": "boundaries",
+      "stem": "A lending app reads feature flags from env vars with zod v4. Ops set `FEATURE_INSTANT_PAYOUT=false` in production to disable a risky feature during an incident, but payouts kept flowing. The schema is shown. What should the schema use?",
+      "code": "const Env = z.object({\n  FEATURE_INSTANT_PAYOUT: z.coerce.boolean().default(false),\n  PAYOUT_LIMIT: z.coerce.number(),\n});\nexport const env = Env.parse(process.env);",
+      "options": [
+        {
+          "text": "`z.boolean()`, so only real booleans are accepted.",
+          "correct": false,
+          "why": "Env vars are always strings, so `z.boolean()` rejects every value and the service fails to boot."
+        },
+        {
+          "text": "`z.stringbool()`, which maps \"true\"/\"false\"/\"1\"/\"0\"/\"yes\"/\"no\" and rejects anything else.",
+          "correct": true,
+          "why": "It parses the string meaning, so \"false\" becomes `false`, and a typo such as \"flase\" fails at boot instead of silently enabling the feature."
+        },
+        {
+          "text": "Keep `z.coerce.boolean()` but move `.default(false)` before the coercion so the default wins.",
+          "correct": false,
+          "why": "The default only applies when the key is missing; `\"false\"` is present and `Boolean(\"false\")` is `true`, so the order changes nothing."
+        },
+        {
+          "text": "Drop zod for flags and compare `process.env.FEATURE_INSTANT_PAYOUT === \"true\"` at each use site.",
+          "correct": false,
+          "why": "It reads \"false\" correctly, but scattered string checks treat typos like \"True\" as off silently and lose the fail-at-boot validation of the whole config."
+        }
+      ],
+      "explain": "Coercion in zod calls the JavaScript constructor, and `Boolean(\"false\")` is `true`. For strings that carry meaning (flags, numbers from query strings), use a parser that understands the format and fails loudly, and validate all config once at startup.",
+      "refs": [
+        "https://zod.dev/api#stringbool",
+        "https://zod.dev/api#coercion"
+      ]
+    },
+    {
+      "id": "typescript-v1-q04",
+      "domain": "boundaries",
+      "stem": "A fulfilment service consumes `OrderPlaced` events from another team's Kafka topic and does `const e = JSON.parse(msg.value) as OrderPlaced`. A producer bug published one event with `items: null`; the consumer threw, did not commit, re-read the same record and blocked its partition for 40 minutes. Which consumer design should replace it?",
+      "options": [
+        {
+          "text": "Import the producer team's published `OrderPlaced` type package so both sides compile against the same definition.",
+          "correct": false,
+          "why": "Sharing types catches drift at compile time only; the bad record was produced at runtime by a bug, and no type stops `null` arriving on the wire."
+        },
+        {
+          "text": "Validate each record; send failures to a dead-letter topic, commit and move on.",
+          "correct": true,
+          "why": "The poison record is isolated and visible, the partition keeps moving, and only valid events reach business code."
+        },
+        {
+          "text": "Validate with `z.strictObject` so any unexpected or unknown field is rejected as early as possible.",
+          "correct": false,
+          "why": "It catches the null, but it also rejects every event once the producer adds a harmless new field, turning normal schema evolution into poison messages."
+        },
+        {
+          "text": "Wrap the handler in `try/catch`, log the error and commit the offset so the partition never blocks.",
+          "correct": false,
+          "why": "It unblocks the partition, but it silently drops orders with only a log line, and other malformed events still reach business code as trusted `OrderPlaced`."
+        }
+      ],
+      "explain": "A queue edge is a trust boundary just like HTTP. Parse each message at the consumer, route failures to a dead-letter destination with context, and keep consuming. Be strict about what you need and tolerant of fields you don't know, so producers can evolve.",
+      "refs": [
+        "https://zod.dev/api",
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown"
+      ]
+    },
+    {
+      "id": "typescript-v1-q05",
+      "domain": "boundaries",
+      "stem": "A social app's `/me` endpoint returned `passwordHash` and `mfaSecret` to clients for two weeks. The code compiled without errors, as shown. Which fix prevents the next leak of this kind?",
+      "code": "type PublicUser = { id: string; name: string; avatarUrl: string };\n\nasync function me(req, res) {\n  const row = await db.users.findById(req.userId); // DbUser, 14 columns\n  const body: PublicUser = row;\n  res.json(body);\n}",
+      "options": [
+        {
+          "text": "Write `const body = row satisfies PublicUser` so the compiler checks the object against the public type.",
+          "correct": false,
+          "why": "`satisfies` only does excess-property checks on fresh object literals; a variable with extra fields still satisfies the type and is serialised in full."
+        },
+        {
+          "text": "Annotate with `Omit<DbUser, \"passwordHash\" | \"mfaSecret\">` instead of `PublicUser`.",
+          "correct": false,
+          "why": "It is still structural typing on a variable, so the extra fields remain on the object at runtime, and it is a deny-list: the next secret column leaks too."
+        },
+        {
+          "text": "Build the response from an allow-list, e.g. `{ id: row.id, name: row.name, avatarUrl: row.avatarUrl }`, or parse it through a `z.object` that strips unknown keys.",
+          "correct": true,
+          "why": "Only an explicit runtime projection removes the fields; new DB columns stay private by default."
+        },
+        {
+          "text": "Add a `JSON.stringify` replacer in the response middleware that drops keys named `passwordHash` and `mfaSecret`.",
+          "correct": false,
+          "why": "It plugs these two names globally, but it is a deny-list too: a future `recoveryCodes` column leaks until someone remembers to add it."
+        }
+      ],
+      "explain": "TypeScript compares shapes, not names, and the excess-property check only applies to object literals. A type annotation never removes data from an object. Outbound DTOs need an explicit allow-list built at runtime (a mapper or a stripping schema) so new fields are private until chosen.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/objects.html#excess-property-checks",
+        "https://zod.dev/api#objects"
+      ]
+    },
+    {
+      "id": "typescript-v1-q06",
+      "domain": "modelling",
+      "stem": "An e-commerce `Order` is modelled as `{ status: string; paidAt?: Date; trackingNo?: string; refundId?: string }`. Support found 300 orders marked `shipped` with no `paidAt`, and code everywhere does `order.trackingNo!`. The team wants the compiler to stop such states from being built. Which model should they adopt?",
+      "options": [
+        {
+          "text": "Keep the shape but add runtime asserts at the start of each handler that check the fields its status needs.",
+          "correct": false,
+          "why": "Asserts catch bad orders late and only where someone remembered them; the type still allows `shipped` without `paidAt` everywhere else."
+        },
+        {
+          "text": "A union keyed on `status`, where each member lists only and exactly the fields that state has, e.g. `{ status: \"shipped\"; paidAt: Date; trackingNo: string }`.",
+          "correct": true,
+          "why": "Each state carries its own required fields, so building a shipped order without `paidAt` is a compile error and narrowing on `status` removes the `!`s."
+        },
+        {
+          "text": "Make every field required and use `null` when it doesn't apply.",
+          "correct": false,
+          "why": "It removes `?` but `paidAt: null` with `status: \"shipped\"` still type-checks, so the illegal combination is just as representable."
+        },
+        {
+          "text": "A class hierarchy (`PaidOrder extends Order`) checked with `instanceof`.",
+          "correct": false,
+          "why": "It models states, but `instanceof` breaks after any JSON round trip (cache, queue, other service), so every boundary needs rehydration, which the union does not."
+        }
+      ],
+      "explain": "When fields depend on a state, a bag of optionals lets every combination exist. A discriminated union makes each state carry exactly its data, and narrowing on the tag gives safe access. Plain-data unions also survive serialisation, unlike classes.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v1-q07",
+      "domain": "modelling",
+      "stem": "A marketplace support tool calls `refund(customerId, orderId)`, both UUID strings. A refactor swapped the arguments at one call site; 61 refunds went to the wrong records before anyone noticed. Ids flow through about 900 functions and the hot path does 15k calls/s. Which change makes the swap a compile error with the least runtime cost?",
+      "options": [
+        {
+          "text": "Declare `type CustomerId = string` and `type OrderId = string` and use them in signatures.",
+          "correct": false,
+          "why": "Aliases are just other names for `string`, so the swapped call still compiles."
+        },
+        {
+          "text": "Wrap ids in classes (`new CustomerId(raw)`) with a private field so they are nominal.",
+          "correct": false,
+          "why": "Classes with private fields are nominal, but every id becomes an object: allocation on the hot path, and JSON, DB drivers and logging now see `{}` or need custom serialisation."
+        },
+        {
+          "text": "Branded string types, created only by a parsing function at the edge.",
+          "correct": true,
+          "why": "The brand exists only in the type system, so there is no runtime cost, a raw string or an `OrderId` is rejected where a `CustomerId` is expected, and the parser is the single way in."
+        },
+        {
+          "text": "Change the signature to take one object, `refund({ customerId, orderId })`.",
+          "correct": false,
+          "why": "Named fields help readability, but `{ customerId: order.id, orderId: customer.id }` still compiles because both are `string`."
+        }
+      ],
+      "explain": "Structural typing makes all strings interchangeable. A brand adds a type-only tag that values don't carry at runtime, so it costs nothing, and pairing it with a validating constructor makes the brand mean \"checked\". Aliases add names, not safety.",
+      "refs": [
+        "https://zod.dev/api#branded-types",
+        "https://www.typescriptlang.org/play/#example/nominal-typing"
+      ]
+    },
+    {
+      "id": "typescript-v1-q08",
+      "domain": "modelling",
+      "stem": "A payments team added `\"pix\"` to the `PaymentMethod` union. The fee function, shown, compiled and for three days returned `undefined`, which the ledger stored as a fee of 0. What change makes the next new method fail at compile time and at runtime?",
+      "code": "type PaymentMethod =\n  | { kind: \"card\"; scheme: string }\n  | { kind: \"sepa\" }\n  | { kind: \"pix\"; key: string };\n\nfunction fee(m: PaymentMethod, amount: number) {\n  switch (m.kind) {\n    case \"card\": return amount * 0.029;\n    case \"sepa\": return 0.35;\n  }\n}",
+      "options": [
+        {
+          "text": "Add `default: { const _x: never = m; throw new Error(\"unhandled kind\") }`.",
+          "correct": true,
+          "why": "Assigning to `never` fails to compile once a member is unhandled, and the throw catches values that reached the function through a cast or bad input."
+        },
+        {
+          "text": "Add `default: return 0;` so the function always returns a number.",
+          "correct": false,
+          "why": "It silences the problem: a new method now explicitly charges no fee, which is the bug made permanent and invisible."
+        },
+        {
+          "text": "Replace the union with an `enum PaymentKind` and switch over the enum members instead of strings.",
+          "correct": false,
+          "why": "An enum gives no extra exhaustiveness check, and enums are not erasable syntax, so they crash under Node's type stripping."
+        },
+        {
+          "text": "Add a unit test for each payment method's fee.",
+          "correct": false,
+          "why": "Tests cover the methods that exist when they are written; nobody writes the `pix` test until after the bug, so it doesn't guard the next addition."
+        }
+      ],
+      "explain": "Exhaustiveness is something you opt into: a `never` assignment in the default branch turns \"new union member\" into a compile error at every switch that forgot it. Keep the runtime throw too, because values that skipped the type system (casts, bad payloads) still arrive.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking"
+      ]
+    },
+    {
+      "id": "typescript-v1-q09",
+      "domain": "modelling",
+      "stem": "A ride-hailing pricing API accepts a promotion with optional `percentOff` and `amountOff`. A partner sent both, and riders got both discounts (about 40k EUR lost). The promotion object is passed through 12 services' worth of shared code. Which model removes the double discount at the type level and at the API edge?",
+      "options": [
+        {
+          "text": "Make both fields required and default the unused one to 0.",
+          "correct": false,
+          "why": "It removes `?`, but `{ percentOff: 10, amountOff: 5 }` is still a valid value, and 0 now means both \"no discount\" and \"not this kind\"."
+        },
+        {
+          "text": "Keep the type and add a check in the pricing function that throws when both are set.",
+          "correct": false,
+          "why": "It stops this one path, but the type still allows the bad value in all the other shared code, and each new consumer must remember the rule."
+        },
+        {
+          "text": "Document in JSDoc that exactly one field may be set.",
+          "correct": false,
+          "why": "Documentation is not checked by the compiler or at runtime; the partner already ignored the contract once."
+        },
+        {
+          "text": "Model it as `{ kind: \"percent\"; percentOff: number } | { kind: \"amount\"; amountOff: number }` and parse it with a discriminated-union schema at the edge.",
+          "correct": true,
+          "why": "The bad combination can no longer be written in code, and the edge schema rejects it from partners, so the rule is enforced once and everywhere."
+        }
+      ],
+      "explain": "\"Exactly one of\" rules are a sign that a union is hiding in a bag of optionals. Encode the rule in the type with a discriminant and enforce the same shape with a schema at the boundary; then no downstream code has to re-check it.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions",
+        "https://zod.dev/api#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v1-q10",
+      "domain": "modelling",
+      "stem": "A brokerage introduces a branded `AccountId` so trades can't be booked against raw strings. In review, a senior engineer says the brand will only help if two conditions hold. Which two conditions matter? (Choose two.)",
+      "options": [
+        {
+          "text": "Values of the brand are produced in one place, a function or schema `.brand()` that validates the raw string first.",
+          "correct": true,
+          "why": "Then holding an `AccountId` means it was checked; if anyone may cast, the brand means nothing."
+        },
+        {
+          "text": "Each id type uses its own brand tag, so `AccountId` and `OrderId` are not structurally identical.",
+          "correct": true,
+          "why": "Two brands with the same tag are the same type to the compiler, and the swap the brand was meant to stop compiles again."
+        },
+        {
+          "text": "Call sites convert with `raw as AccountId` wherever a string needs to become an id.",
+          "correct": false,
+          "why": "This is how brands rot: every cast is an unchecked claim, so a typo or a customer-supplied string becomes a \"valid\" id."
+        },
+        {
+          "text": "The brand field is also set on the runtime value so it can be checked with `in`.",
+          "correct": false,
+          "why": "Brands are deliberately type-only; adding a real property turns a string into an object and breaks serialisation and DB drivers."
+        },
+        {
+          "text": "`AccountId` is declared as `type AccountId = string` with a JSDoc comment explaining the brand.",
+          "correct": false,
+          "why": "That is an alias, not a brand, so any string is accepted and the comment enforces nothing."
+        }
+      ],
+      "explain": "A brand is worth what its constructor checks. Give each id its own tag and allow only one way to create it (a parse or validate function, or a schema with `.brand()`), and treat `as` on a brand as a code-review red flag.",
+      "refs": [
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v1-q11",
+      "domain": "contracts",
+      "stem": "Billing and shipping live in one monorepo and share `@acme/contracts` types. Billing renamed `amountCents` to `amount` in the `InvoiceIssued` event, fixed every compile error in the repo and deployed on Tuesday. Shipping deploys weekly and broke in production; events in the topic have 7-day retention. What should the contract process be?",
+      "options": [
+        {
+          "text": "Deploy all services that import `@acme/contracts` together whenever it changes, so the code always matches.",
+          "correct": false,
+          "why": "Lock-step deploys couple teams and still fail: events already in the topic (7-day retention) have the old shape, and a rollback reintroduces the mismatch."
+        },
+        {
+          "text": "Treat the event schema as a versioned contract: only additive changes, keep `amountCents` while adding `amount`, and check compatibility in CI against the last published schema.",
+          "correct": true,
+          "why": "Producers and consumers deploy separately and old messages remain, so only backward-compatible evolution, checked against what is actually published, keeps both sides working."
+        },
+        {
+          "text": "Pin each service to the version of `@acme/contracts` it was built with, so shipping keeps compiling against the old type.",
+          "correct": false,
+          "why": "Pinning keeps shipping's compile green, but billing still emits the new shape at runtime, so shipping reads `amountCents` as undefined."
+        },
+        {
+          "text": "Turn on project references so changes in `@acme/contracts` rebuild dependent services automatically.",
+          "correct": false,
+          "why": "Project references speed up builds; they say nothing about which service version is running against which message."
+        }
+      ],
+      "explain": "Shared types prove that code compiled together, not that the deployed versions agree. Across independently deployed services (and data at rest in topics), the contract is the wire schema; evolve it additively and check compatibility against the published version, not the repo head.",
+      "refs": [
+        "https://json-schema.org/understanding-json-schema/",
+        "https://www.typescriptlang.org/docs/handbook/project-references.html"
+      ]
+    },
+    {
+      "id": "typescript-v1-q12",
+      "domain": "contracts",
+      "stem": "A travel company's web and mobile teams hand-write TypeScript types for 140 backend endpoints. Each sprint, 3–5 bugs come from type drift (a renamed field, a nullable that wasn't). The backend is NestJS 11 and already publishes an OpenAPI document. Which approach removes drift with the least ongoing effort?",
+      "options": [
+        {
+          "text": "Publish the backend's NestJS DTO classes as an npm package that the web and mobile clients import.",
+          "correct": false,
+          "why": "It shares one source, but it couples clients to backend internals and drags decorators and server dependencies into the client bundle; DTOs also drift from what interceptors actually send."
+        },
+        {
+          "text": "Generate client types from the OpenAPI document in CI and fail the build on drift.",
+          "correct": true,
+          "why": "One machine-checked source drives both sides; drift becomes a red build instead of a bug report."
+        },
+        {
+          "text": "Hand-write zod schemas on the clients and validate every response at runtime.",
+          "correct": false,
+          "why": "It catches drift in production, at runtime, after users hit it, and the hand-written schemas drift exactly like the hand-written types did."
+        },
+        {
+          "text": "Add a PR checklist item asking backend authors to notify client teams about changes.",
+          "correct": false,
+          "why": "Relies on memory across 140 endpoints; the drift bugs were already slipping past reviews."
+        }
+      ],
+      "explain": "Pick one machine-readable contract (OpenAPI, protobuf, JSON Schema) as the source of truth, generate types from it, and verify the provider against it. Generated types turn drift into a CI failure instead of a production bug.",
+      "refs": [
+        "https://spec.openapis.org/oas/latest.html",
+        "https://www.npmjs.com/package/openapi-typescript"
+      ]
+    },
+    {
+      "id": "typescript-v1-q13",
+      "domain": "contracts",
+      "stem": "A notification service consumes order events and uses an exhaustive `switch` with a `never` check, which throws on unknown `kind`. The order team added a new event kind, `order.partially_refunded`. The notification consumer threw on every such event, crash-looped and stopped all notifications for 25 minutes. How should the consumer be structured?",
+      "options": [
+        {
+          "text": "Remove the `never` check and let unknown kinds fall through the switch.",
+          "correct": false,
+          "why": "It stops the crash, but you lose the compile-time warning that shows every handler to update when the team itself adds a kind."
+        },
+        {
+          "text": "Ask producers to never add new event kinds without first deploying every consumer.",
+          "correct": false,
+          "why": "It freezes evolution behind the slowest consumer and doesn't cover replays or new consumers; it is a process fix for a design problem."
+        },
+        {
+          "text": "Wrap the consumer loop in `try/catch` and restart it with exponential backoff after each error so the pod stops crash-looping.",
+          "correct": false,
+          "why": "Backoff turns a crash loop into a slow loop: every partially-refunded event still fails, and other notifications queue behind them."
+        },
+        {
+          "text": "At the edge, map unknown kinds to a logged, committed \"ignored\" result; keep the `never` check for the internal union.",
+          "correct": true,
+          "why": "Open-world data from outside is handled at the boundary, while the internal union stays closed and exhaustive for code the team controls."
+        }
+      ],
+      "explain": "Exhaustiveness checks are for closed sets you own; external event streams are open sets that grow. Separate the two: tolerate and observe unknown variants at the boundary, and keep internal unions exhaustive so your own additions still break the compile.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking",
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v1-q14",
+      "domain": "strictness",
+      "stem": "A logistics company has a 400k-line TypeScript monorepo with `strict: false`. Turning on `strict` reports 9,000 errors. There are 6 teams, and feature work cannot stop for more than a sprint. Which plan gets the benefit without stalling delivery?",
+      "options": [
+        {
+          "text": "Enable `strict` everywhere in one PR and silence existing errors with `!` and `as any` so the build is green.",
+          "correct": false,
+          "why": "The build turns green, but thousands of new escape hatches hide the real nulls; the codebase is stricter on paper and no safer."
+        },
+        {
+          "text": "Enable strict flags package by package, starting with new and high-risk packages, and ratchet a CI count of remaining errors so it can only go down.",
+          "correct": true,
+          "why": "Each package becomes truly strict when it is done, new code starts strict, and the ratchet stops backsliding without a big-bang freeze."
+        },
+        {
+          "text": "Wait for the planned rewrite to TS 7, since its stricter defaults will force the change anyway.",
+          "correct": false,
+          "why": "TS 7 checks types the same as 6.0; its new defaults would surface the same 9,000 errors later, with no plan to fix them."
+        },
+        {
+          "text": "Turn on `skipLibCheck` to cut the error count, then enable `strict`.",
+          "correct": false,
+          "why": "`skipLibCheck` skips `.d.ts` files only; the 9,000 errors are in the team's own code, so the count barely moves."
+        }
+      ],
+      "explain": "Strictness pays off only when it isn't faked with `!` and `as any`. Migrate incrementally, per package or per flag, start new code strict, and use a ratchet so the number of known errors only goes down.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#strict",
+        "https://www.typescriptlang.org/docs/handbook/project-references.html"
+      ]
+    },
+    {
+      "id": "typescript-v1-q15",
+      "domain": "strictness",
+      "stem": "An invoicing service has `strict: true`. It converts amounts with `const rate = fxRates[invoice.currency]` where `fxRates: Record<string, number>`. When a customer was billed in a currency missing from the table, the invoice total became `NaN` and was emailed out. Which compiler option would have flagged this line?",
+      "options": [
+        {
+          "text": "`strictNullChecks`",
+          "correct": false,
+          "why": "It is already on under `strict`, and it doesn't change index reads: `Record<string, number>` still says every key yields a `number`."
+        },
+        {
+          "text": "`exactOptionalPropertyTypes`",
+          "correct": false,
+          "why": "It controls whether optional properties may hold `undefined`; it says nothing about reading a key that may not exist in a record."
+        },
+        {
+          "text": "`noUncheckedIndexedAccess`",
+          "correct": true,
+          "why": "With it, `fxRates[k]` is `number | undefined`, so using `rate` in arithmetic is an error until the missing case is handled."
+        },
+        {
+          "text": "`noImplicitAny`",
+          "correct": false,
+          "why": "Already on under `strict`; nothing here is implicitly `any`, the type is explicit and wrong about missing keys."
+        }
+      ],
+      "explain": "`strict` does not include `noUncheckedIndexedAccess`, so index reads on records and arrays claim the value always exists. Turn it on for lookup-heavy code, and handle the missing case with a check rather than `!`.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#noUncheckedIndexedAccess",
+        "https://www.typescriptlang.org/tsconfig/#strict"
+      ]
+    },
+    {
+      "id": "typescript-v1-q16",
+      "domain": "strictness",
+      "stem": "A CRM backend has a helper used in 60 places. A field rename in the partner API went unnoticed for weeks because every caller kept compiling. The team wants the compiler to force callers to deal with the data's real shape. What should the helper return?",
+      "code": "export function parseJson(raw: string): any {\n  return JSON.parse(raw);\n}\n\nconst contact = parseJson(body);\nsendEmail(contact.emailAddress); // field is now `email`",
+      "options": [
+        {
+          "text": "A generic, `parseJson<T>(raw: string): T`, so each caller states the type it expects at the call site.",
+          "correct": false,
+          "why": "It reads better, but `T` is an unchecked assertion with nicer syntax; the renamed field still compiles because nothing checks the data."
+        },
+        {
+          "text": "`Record<string, unknown>`, so callers can still index fields by name without casting.",
+          "correct": false,
+          "why": "It is safer than `any` for values, but callers still type the field name freely, and arrays or primitives from `JSON.parse` are mislabelled as records."
+        },
+        {
+          "text": "`unknown`, with a schema (e.g. `parseJson(raw, schema)`) producing the typed value.",
+          "correct": true,
+          "why": "`unknown` makes every use a compile error until it is validated, so the rename becomes a schema failure with a clear message instead of a silent `undefined`."
+        },
+        {
+          "text": "Keep `any` and turn on `noImplicitAny` so the untyped value is reported.",
+          "correct": false,
+          "why": "`noImplicitAny` only reports implicit `any`; an explicit `any` return type is allowed, and it spreads through every caller."
+        }
+      ],
+      "explain": "`any` turns off checking for everything it touches and spreads silently; a generic return type `T` is a disguised cast. Return `unknown` from I/O helpers so the compiler forces a runtime check, and catch leftover `any` with type-aware lint rules.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown",
+        "https://typescript-eslint.io/rules/no-unsafe-assignment/"
+      ]
+    },
+    {
+      "id": "typescript-v1-q17",
+      "domain": "toolchain",
+      "stem": "A fintech monorepo is on TypeScript 6.0 with a clean `tsc --noEmit`. The team wants TypeScript 7's native compiler for faster CI. Their tests run through ts-jest, and a codegen script imports the `typescript` package to read the AST. What should they expect from the upgrade?",
+      "options": [
+        {
+          "text": "Same type-checking results, much faster, but no programmatic API: ts-jest and the codegen script stay on `@typescript/typescript6`.",
+          "correct": true,
+          "why": "7.0 is a Go port with the same checking as 6.0, and its JS API is not available until a later release, so tools that import the compiler keep using 6.0."
+        },
+        {
+          "text": "Many new type errors, because the Go rewrite changed inference rules.",
+          "correct": false,
+          "why": "It's tempting to assume a rewrite changes behaviour, but 7.0 is a port that checks types the same way as 6.0; the new errors people see come from 5.x configs and 6.0 defaults."
+        },
+        {
+          "text": "Install `@typescript/native-preview` and call `tsgo` to use TypeScript 7.",
+          "correct": false,
+          "why": "That was the preview path; 7.0 ships as the normal `typescript` package with the `tsc` binary, and native-preview is frozen."
+        },
+        {
+          "text": "Nothing else changes: TypeScript 7 keeps the JavaScript API, so ts-jest and the codegen script keep working on the new compiler unchanged.",
+          "correct": false,
+          "why": "This is the trap: 7.0 has no JS API, so anything that imports `typescript` programmatically breaks."
+        }
+      ],
+      "explain": "TypeScript 7 changes the compiler's speed and packaging, not the type system. Before upgrading, list every tool that imports `typescript` as a library (test transformers, codegen, language tooling): those stay on the 6.0 API until the 7.x API exists.",
+      "refs": [
+        "https://devblogs.microsoft.com/typescript/?p=5246",
+        "https://devblogs.microsoft.com/typescript/announcing-typescript-6-0/"
+      ]
+    },
+    {
+      "id": "typescript-v1-q18",
+      "domain": "toolchain",
+      "stem": "A NestJS 11 service (decorators, `emitDecoratorMetadata` for DI, constructor parameter properties, a few `enum`s) builds with `tsc` and ships `dist/`. To save 40 s per deploy, someone proposes `node src/main.ts` on Node 24 and deleting the build step. What happens?",
+      "options": [
+        {
+          "text": "It works once the enums are replaced with `as const` objects, since enums are the only syntax that isn't erasable.",
+          "correct": false,
+          "why": "Enums are one of several problems; parameter properties are also rejected, and decorators plus their emitted metadata still need a compiler transform."
+        },
+        {
+          "text": "It runs, but startup is slower because Node type-checks the files first.",
+          "correct": false,
+          "why": "Node never type-checks; it only removes type syntax, which is why it is fast and why it can't do what Nest needs."
+        },
+        {
+          "text": "It works if `tsconfig.json` sets `experimentalDecorators`, which Node reads during stripping.",
+          "correct": false,
+          "why": "Node's type stripping does not read `tsconfig.json` at all, so compiler options there change nothing at runtime."
+        },
+        {
+          "text": "It fails: stripping only removes types, so enums and parameter properties throw `ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`, and decorator metadata is never emitted; keep a compile step for this service.",
+          "correct": true,
+          "why": "Nest depends on transforms (decorators, metadata, parameter properties) that type stripping deliberately doesn't do."
+        }
+      ],
+      "explain": "Node's type stripping replaces types with whitespace and nothing more: no type checking, no tsconfig, no transforms. It fits code written with `erasableSyntaxOnly`; frameworks that depend on emitted code (decorator metadata, enums, parameter properties) still need a compiler.",
+      "refs": [
+        "https://nodejs.org/api/typescript.html#type-stripping",
+        "https://www.typescriptlang.org/tsconfig/#erasableSyntaxOnly"
+      ]
+    },
+    {
+      "id": "typescript-v1-q19",
+      "domain": "toolchain",
+      "stem": "A shared `@acme/metrics` library ships both ESM and CJS builds via `exports` conditions. In one service, some modules `require()` it and others `import` it. Dashboards show half the counters missing, and an `instanceof MetricsError` check fails for errors thrown by the library. What is going on, and what is the fix?",
+      "options": [
+        {
+          "text": "Missing `\"type\": \"module\"` in the service's `package.json`; add it so everything loads as ESM.",
+          "correct": false,
+          "why": "It changes how the service's own `.js` files are read, and existing `require` calls in `.js` files break; the library is still loaded through both conditions."
+        },
+        {
+          "text": "Two copies of the library load (dual-package hazard); publish a single implementation, e.g. ESM-only.",
+          "correct": true,
+          "why": "Module state and class identity are per loaded copy; a single implementation means one registry and one `MetricsError`."
+        },
+        {
+          "text": "`esModuleInterop` is off; turning it on fixes default-import mismatches between the ESM and CJS builds of the library.",
+          "correct": false,
+          "why": "Interop changes how default imports compile; it doesn't stop Node loading two separate copies at runtime."
+        },
+        {
+          "text": "A TypeScript `paths` alias points to the wrong build; correct it to the ESM output.",
+          "correct": false,
+          "why": "`paths` only affects type resolution; Node ignores it, so the runtime still picks per caller from `exports` conditions."
+        }
+      ],
+      "explain": "When a package ships separate ESM and CJS builds, `import` and `require` can load two copies, each with its own state and classes. Prefer one implementation: ESM-only (current Node can `require()` synchronous ESM) or CJS with an ESM wrapper.",
+      "refs": [
+        "https://nodejs.org/api/packages.html",
+        "https://nodejs.org/api/modules.html#loading-ecmascript-modules-using-require"
+      ]
+    },
+    {
+      "id": "typescript-v1-q20",
+      "domain": "toolchain",
+      "stem": "A team moved its test suite to `node --test` running `.ts` files directly. The service now crashes at load with `SyntaxError: The requested module './models/index.ts' does not provide an export named 'Customer'`. `models/index.ts` has `export { Customer, createCustomer } from \"./customer.ts\"`, and `Customer` is an interface. What fix also stops this coming back?",
+      "options": [
+        {
+          "text": "Switch every relative import to `.js` extensions, which is what Node's ESM loader expects for TypeScript projects.",
+          "correct": false,
+          "why": "When Node runs `.ts` directly, `./x.js` points to a file that doesn't exist, so this trades one load failure for `ERR_MODULE_NOT_FOUND`."
+        },
+        {
+          "text": "Set `moduleResolution: \"bundler\"` so type-only exports are resolved leniently.",
+          "correct": false,
+          "why": "Node doesn't read tsconfig, and `bundler` resolution is for code that a bundler will process, not for Node running files directly."
+        },
+        {
+          "text": "Use `export type { Customer }` and enable `verbatimModuleSyntax` so tsc flags it.",
+          "correct": true,
+          "why": "Stripping removes only syntax marked as types; with the flag, tsc fails the build on any unmarked type import or export before Node does."
+        },
+        {
+          "text": "Convert `Customer` from an interface to a class so a runtime export exists.",
+          "correct": false,
+          "why": "It makes the error go away by adding runtime code for a type, and every other type-only export in the barrel still breaks."
+        }
+      ],
+      "explain": "Type stripping works file by file: it can't know that `Customer` is only a type unless the syntax says so. Mark type-only imports and exports with `type`, and let `verbatimModuleSyntax` enforce it at compile time so failures happen in CI, not at load.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#verbatimModuleSyntax",
+        "https://nodejs.org/api/typescript.html#importing-types-without-type-keyword"
+      ]
+    }
+  ]
+}

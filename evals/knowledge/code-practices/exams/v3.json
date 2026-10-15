@@ -1,0 +1,669 @@
+{
+  "topic": "code-practices",
+  "variant": 3,
+  "of": 5,
+  "title": "Code practices at scale — variant 3",
+  "description": "Per-line VAT, date-only values, prototype pollution, long exports, out-of-order webhooks, batch results, client retries, DNS rebinding, IDOR, leaked keys, replayed webhooks, SLI definitions, coupled tests and liveness probes.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "edges",
+      "name": "Edges: validation, money and time",
+      "weight": 0.2
+    },
+    {
+      "id": "api",
+      "name": "API design, idempotency and error surfacing",
+      "weight": 0.2
+    },
+    {
+      "id": "security",
+      "name": "Security defaults: authz, injection, SSRF, secrets",
+      "weight": 0.2
+    },
+    {
+      "id": "observability",
+      "name": "Observability: logs, metrics, traces, SLOs",
+      "weight": 0.15
+    },
+    {
+      "id": "testing",
+      "name": "Testing strategy and reviewing AI-written code",
+      "weight": 0.15
+    },
+    {
+      "id": "deploys",
+      "name": "Safe deploys: flags, migrations, canaries, rollbacks",
+      "weight": 0.1
+    }
+  ],
+  "questions": [
+    {
+      "id": "code-practices-v3-q01",
+      "domain": "edges",
+      "stem": "An invoicing service for 20k EU merchants computes VAT as `price * qty * 0.2` in JS numbers per line, sums the lines and rounds the total at the end. The tax rules your finance team follows require VAT rounded per line, and the ledger must equal the sum of the printed lines exactly. Auditors found invoices off by a cent. What is the right design?",
+      "options": [
+        {
+          "text": "Keep JS numbers but call `toFixed(2)` after every multiplication and addition so errors never accumulate between steps.",
+          "correct": false,
+          "why": "`toFixed` rounds the binary approximation (`(1.005).toFixed(2)` is `'1.00'`), so per-step rounding is still occasionally wrong."
+        },
+        {
+          "text": "Integer minor units, VAT per line with the rounding rule finance specifies, total = sum of rounded lines.",
+          "correct": true,
+          "why": "Exact integers remove float error, the explicit per-line rule matches the tax requirement, and summing rounded lines makes the ledger equal the printout."
+        },
+        {
+          "text": "Store amounts in Postgres's `money` type, which is designed for currency and rounds correctly for you.",
+          "correct": false,
+          "why": "`money` has a single, locale-dependent precision set by `lc_monetary`, carries no currency, and does not encode your per-line rounding rule."
+        },
+        {
+          "text": "Compute everything in floats and round only the invoice total, since that is the number the customer pays.",
+          "correct": false,
+          "why": "That is today's design: it violates the per-line rule and the total stops matching the sum of the printed lines."
+        }
+      ],
+      "explain": "Rounding is a business rule, not an implementation detail: decide where it happens (per line, per total) and with which mode, and do it on integer minor units. A printed total must equal the sum of what is printed.",
+      "refs": [
+        "https://www.postgresql.org/docs/current/datatype-money.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q02",
+      "domain": "edges",
+      "stem": "A hotel-booking API receives `checkIn: \"2026-03-15\"` and does `new Date(checkIn).getDate()` to look up availability. Production runs in two regions: one host image sets `TZ=America/New_York`, the other UTC. Guests booking through the New York region get the 14th. What is the right design?",
+      "options": [
+        {
+          "text": "Parse with `new Date(checkIn + 'T00:00')` and store it with `toISOString()`, so each value becomes local midnight on the intended day.",
+          "correct": false,
+          "why": "Local midnight depends on each host's zone: on any host east of UTC, `toISOString()` turns it into the previous day, so the shift just moves to other regions."
+        },
+        {
+          "text": "Treat check-in as a calendar date (a `YYYY-MM-DD` string or Postgres `date`), never as an instant.",
+          "correct": true,
+          "why": "A check-in day has no time or zone; keeping it a plain date removes every conversion that can shift it."
+        },
+        {
+          "text": "Set `TZ=UTC` on every host image so that the date-only parsing and `getDate()` always agree with each other.",
+          "correct": false,
+          "why": "It makes the bug disappear by configuration; the next host, laptop or zone-aware formatting brings it back."
+        },
+        {
+          "text": "Store check-in as a `timestamptz` at midnight UTC and format it for display in the guest's zone.",
+          "correct": false,
+          "why": "Midnight UTC rendered in any zone west of UTC is the previous evening, so guests see the 14th again."
+        }
+      ],
+      "explain": "Not every time value is an instant. Calendar dates (birthdays, check-ins, due dates) should stay plain dates; only convert to instants when you need a moment, and then with an explicit zone. In JS, date-only strings parse as UTC and date-time strings as local time.",
+      "refs": [
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Date/Date"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q03",
+      "domain": "edges",
+      "stem": "A feature-settings service merges each tenant's JSON overrides into defaults with a recursive `merge(target, src)`. One tenant posted `{\"__proto__\": {\"isAdmin\": true}}`, and afterwards every object in that Node process had `isAdmin === true` until it restarted. What is the fix?",
+      "options": [
+        {
+          "text": "Clone the input with `JSON.parse(JSON.stringify(src))` before merging so that it is a plain data object with no prototype tricks.",
+          "correct": false,
+          "why": "`JSON.parse` creates `__proto__` as an ordinary own property, and stringify keeps it, so the clone carries the same payload into the merge."
+        },
+        {
+          "text": "Validate overrides against a schema of allowed keys and make the merge skip `__proto__`, `constructor` and `prototype`.",
+          "correct": true,
+          "why": "Only known settings get in, and the merge can never walk into `Object.prototype` even if validation is loosened later."
+        },
+        {
+          "text": "Check `typeof src[key] === 'object'` before each recursive call into the nested value.",
+          "correct": false,
+          "why": "The malicious value is an object, so the check passes and the merge recurses into the prototype."
+        },
+        {
+          "text": "Restart the settings service every night so any polluted prototype only lasts until the next restart.",
+          "correct": false,
+          "why": "Every request until the restart runs with `isAdmin` set everywhere; it limits duration, not damage."
+        }
+      ],
+      "explain": "Merging untrusted JSON into objects is an input boundary. Allowlist the keys you accept, and in generic merge helpers skip `__proto__`, `constructor` and `prototype` or build results on `Object.create(null)`.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Prototype_Pollution_Prevention_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q04",
+      "domain": "edges",
+      "stem": "A compliance export walks a 50M-row `transactions` table newest-first with `ORDER BY created_at DESC LIMIT 1000 OFFSET n` while about 300 new rows arrive per second. Exports take 3 hours, contain duplicates, and the late pages take 20 s each. What is the right design?",
+      "options": [
+        {
+          "text": "Keyset pages on `(created_at, id)`, bounded by `created_at <= export_started_at`.",
+          "correct": true,
+          "why": "Each page is an index seek regardless of depth, and the upper bound means rows arriving during the export cannot shift the window."
+        },
+        {
+          "text": "Run the whole export in one `REPEATABLE READ` transaction so every page reads the same consistent snapshot.",
+          "correct": false,
+          "why": "Pages stay consistent but still do deep OFFSET scans, and a 3-hour snapshot holds back vacuum on a busy table, causing bloat."
+        },
+        {
+          "text": "Raise the page size to 10,000 rows so there are ten times fewer pages and fewer chances for shifts.",
+          "correct": false,
+          "why": "Fewer pages, but every new row still shifts the offset window and the deepest pages remain slow."
+        },
+        {
+          "text": "Count the rows before each page and restart the export whenever the count has changed since the previous page.",
+          "correct": false,
+          "why": "With 300 inserts a second the count changes constantly, so the export never finishes."
+        }
+      ],
+      "explain": "OFFSET pagination is slow at depth and unstable under concurrent writes. Keyset pagination on a unique key, plus a fixed upper bound for one-off exports, gives stable pages and constant-time seeks without long-lived snapshots.",
+      "refs": [
+        "https://use-the-index-luke.com/sql/partial-results/fetch-next-page"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q05",
+      "domain": "api",
+      "stem": "A subscription-billing provider sends `subscription.updated` webhooks with the full object. Because of retries, a `status: canceled` event sometimes arrives before an older `status: active` one. Customers who canceled were silently reactivated and charged. What should the handler do?",
+      "options": [
+        {
+          "text": "Process events with a single consumer strictly in the order they arrive at your endpoint.",
+          "correct": false,
+          "why": "Arrival order is exactly what is wrong here; serialising processing preserves the provider's reordering."
+        },
+        {
+          "text": "Delay each event by 60 seconds so late events have a chance to arrive first, then apply them sorted by their creation time.",
+          "correct": false,
+          "why": "Retries can arrive minutes or hours late, so the window is never big enough, and every update is now a minute slower."
+        },
+        {
+          "text": "Reject any event older than 5 minutes, since a late delivery is likely to be stale anyway.",
+          "correct": false,
+          "why": "Legitimate retries after an outage are older than 5 minutes; dropping them loses real state changes."
+        },
+        {
+          "text": "Treat it as a hint: re-fetch the subscription's current state, or skip events older than the stored version.",
+          "correct": true,
+          "why": "The write is based on the latest truth or an ordering check, so a stale event can never overwrite newer state."
+        }
+      ],
+      "explain": "Webhooks are at-least-once and unordered. Either re-fetch current state when notified, or compare a version or timestamp and ignore stale events; never assume delivery order equals event order.",
+      "refs": [
+        "https://docs.stripe.com/webhooks"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q06",
+      "domain": "api",
+      "stem": "`POST /bulk/contacts` accepts up to 1,000 contacts per call from CRM sync partners. If any item fails validation or hits a database error, the whole call returns 500. Partners retry the full batch, creating duplicates of the 999 rows that had already been saved. What contract fixes this?",
+      "options": [
+        {
+          "text": "Wrap the whole batch in one transaction so that either every contact is saved or none are.",
+          "correct": false,
+          "why": "It stops duplicates, but one invalid contact now blocks 999 good ones on every retry, forever."
+        },
+        {
+          "text": "Process items independently, return a result per item, and make each item idempotent via the partner's external id.",
+          "correct": true,
+          "why": "Partners learn exactly which items failed and why, and resending the batch cannot create duplicates."
+        },
+        {
+          "text": "Return 200 for the batch as a whole and log each individual failure on the server so support can follow up with the partner.",
+          "correct": false,
+          "why": "Partners never learn that items failed, so data silently goes missing on their side."
+        },
+        {
+          "text": "Lower the batch limit to 1 contact per call.",
+          "correct": false,
+          "why": "It turns 1,000 calls into 1,000,000 for a large sync and hits rate limits, without making retries safe."
+        }
+      ],
+      "explain": "Batch endpoints need a per-item result model and idempotent items, so partial failure is reported precisely and retries are safe. All-or-nothing is right only when items truly must commit together.",
+      "refs": [
+        "https://cloud.google.com/apis/design/design_patterns"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q07",
+      "domain": "api",
+      "stem": "A food-delivery app on patchy mobile networks retries `POST /orders` after a 10 s timeout. At dinner peak the server sometimes takes 12 s. About 0.3% of orders are duplicated, and restaurants cook them twice. Which change removes the duplicates?",
+      "options": [
+        {
+          "text": "On the server, reject a second order from the same user with an identical cart within two minutes.",
+          "correct": false,
+          "why": "A heuristic: it blocks legitimate quick re-orders and misses duplicates whose cart changed slightly."
+        },
+        {
+          "text": "Raise the client timeout to 30 s so the server always finishes the order before the app gives up and fires an automatic retry.",
+          "correct": false,
+          "why": "It narrows the window but a dropped response still triggers a retry; the duplicate path still exists."
+        },
+        {
+          "text": "The app sends one idempotency key per checkout on every retry; the server claims it atomically and replays the result.",
+          "correct": true,
+          "why": "All retries of one checkout map to one order, no matter how slow the server is or where the response got lost."
+        },
+        {
+          "text": "Disable automatic retries for every POST request made by the mobile app.",
+          "correct": false,
+          "why": "Users then tap 'Order' again by hand, and orders whose response was lost look failed when they succeeded."
+        }
+      ],
+      "explain": "Retries are normal on mobile networks, so any POST with side effects must be safe to repeat. The client owns the key (one per logical operation, reused across retries) and the server makes it effective with an atomic claim.",
+      "refs": [
+        "https://docs.stripe.com/api/idempotent_requests"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q08",
+      "domain": "api",
+      "stem": "Your public API v1 pages with `?page=N`, which is an OFFSET under the hood. For v2 you plan to move to keyset pagination now and may change the default sort order next year. Partners write long-running sync jobs against it. What pagination contract should v2 expose?",
+      "options": [
+        {
+          "text": "Return `total_count` and page numbers so that clients can jump straight to any page they need.",
+          "correct": false,
+          "why": "Counting a large table on every request is expensive, and page numbers commit you to offsets again."
+        },
+        {
+          "text": "Let clients pass `sort` and `offset` freely so they can build any traversal they need.",
+          "correct": false,
+          "why": "Offsets are baked into the contract, so you can never switch to keyset without another breaking change."
+        },
+        {
+          "text": "Return one large gzip-compressed response that contains every result, so no pagination is needed.",
+          "correct": false,
+          "why": "Response size and memory grow with the data set and one failure restarts the whole transfer."
+        },
+        {
+          "text": "An opaque `next_cursor` string plus `has_more`; clients pass the cursor back unchanged.",
+          "correct": true,
+          "why": "The server owns what the cursor encodes, so the sort key or storage can change later without breaking clients."
+        }
+      ],
+      "explain": "Expose pagination position as an opaque token. It hides whether you use offsets, keysets or something else, so you can change the implementation and sort without a breaking API change.",
+      "refs": [
+        "https://cloud.google.com/apis/design/design_patterns#list_pagination"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q09",
+      "domain": "security",
+      "stem": "Customers register webhook callback URLs. Your code resolves the hostname, checks every resolved IP is public, then calls `fetch(url)`. A red team still reached an internal admin service: their DNS answered with a public IP for your check and a private one moments later. What closes this?",
+      "options": [
+        {
+          "text": "Run the resolve-and-check step twice, a second apart, and only fetch if both answers are public.",
+          "correct": false,
+          "why": "The attacker's DNS can alternate answers on any schedule; the fetch still does its own, third resolution."
+        },
+        {
+          "text": "Block any hostname containing 'internal', 'local' or 'corp' before resolving it.",
+          "correct": false,
+          "why": "The attacker controls the name; it does not need any of those words to resolve to a private address."
+        },
+        {
+          "text": "Connect to the IP you validated (a custom `lookup` on the agent) and re-check every redirect hop the same way.",
+          "correct": true,
+          "why": "Check and use become the same resolution, so a rebinding answer has no second lookup to exploit."
+        },
+        {
+          "text": "Add the internal admin service's hostname and its aliases to a blocklist that is checked before every outbound call.",
+          "correct": false,
+          "why": "The attack reaches it by IP through the attacker's own domain, so a name blocklist never matches."
+        }
+      ],
+      "explain": "Time-of-check versus time-of-use applies to DNS. An SSRF guard must validate the address you will actually connect to: resolve once, validate, pin the connection to that IP, and repeat on every redirect.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q10",
+      "domain": "security",
+      "stem": "An analytics SaaS lets users download finished exports at `GET /exports/:jobId/download`. The route checks that the caller is logged in. Job ids are sequential integers. A customer downloaded another tenant's export by incrementing the id. What is the fix?",
+      "options": [
+        {
+          "text": "Switch job ids to random UUIDs so other tenants' ids cannot be guessed by incrementing.",
+          "correct": false,
+          "why": "Ids leak through logs, shared links and support tickets; unguessable ids slow enumeration but authorize nothing."
+        },
+        {
+          "text": "Load the job and return 404 unless `job.tenantId` equals the caller's tenant, on every route taking a job id.",
+          "correct": true,
+          "why": "Ownership is checked against the resource itself, so knowing an id is never enough to read it."
+        },
+        {
+          "text": "Return a short-lived presigned S3 URL from this endpoint instead of streaming the export file through the API servers.",
+          "correct": false,
+          "why": "It changes how bytes are delivered but the endpoint still hands any logged-in user a link to any job."
+        },
+        {
+          "text": "Rate-limit the download endpoint to a handful of requests per minute.",
+          "correct": false,
+          "why": "It slows bulk enumeration but a single request for someone else's export still succeeds."
+        }
+      ],
+      "explain": "Authentication says who you are; authorization says whether this resource is yours. Every handler that takes an id must check ownership against the loaded object (or query scoped by tenant), and return 404 to avoid confirming existence.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Insecure_Direct_Object_Reference_Prevention_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q11",
+      "domain": "security",
+      "stem": "A coding agent committed an AWS access key with full S3 access to a public GitHub repository. Someone noticed 40 minutes later. The key belongs to a CI user that also deploys the static site. What is the right order of operations?",
+      "options": [
+        {
+          "text": "Force-push history to remove the commit first, so the key stops being publicly visible as soon as possible, then rotate it.",
+          "correct": false,
+          "why": "Bots scrape public commits within minutes, and forks or caches keep copies; the key must be assumed taken."
+        },
+        {
+          "text": "Make the repository private, then rotate the key during the next maintenance window.",
+          "correct": false,
+          "why": "It was public for 40 minutes; hiding it now does not revoke it, and waiting gives an attacker more time."
+        },
+        {
+          "text": "Add `.env` to `.gitignore` and enable a pre-commit secret scanner.",
+          "correct": false,
+          "why": "Good prevention for next time, but the leaked key is still valid right now."
+        },
+        {
+          "text": "Deactivate the key now, review CloudTrail for its use, then clean up and move CI to short-lived role credentials.",
+          "correct": true,
+          "why": "Revocation ends the exposure immediately, the audit finds any damage, and short-lived credentials remove the class of leak."
+        }
+      ],
+      "explain": "For leaked credentials the order is: revoke, investigate, remediate. Removing the evidence first protects nothing once a secret is public; long-lived keys should give way to short-lived, scoped credentials.",
+      "refs": [
+        "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q12",
+      "domain": "security",
+      "stem": "Your wallet service credits users on signed `payout.completed` webhooks, verified with an HMAC over the raw body. A misconfigured proxy logged full requests, and an attacker is replaying one valid captured request every hour; each replay passes verification. Which two changes stop it? (Choose two.)",
+      "options": [
+        {
+          "text": "Require a timestamp inside the signed payload and reject requests outside a few minutes' tolerance.",
+          "correct": true,
+          "why": "An old captured request fails the freshness check, and the attacker cannot change the timestamp without breaking the signature."
+        },
+        {
+          "text": "Record processed event ids under a unique constraint and ignore any id seen before.",
+          "correct": true,
+          "why": "Even inside the tolerance window, a replayed event id becomes a no-op instead of a second credit."
+        },
+        {
+          "text": "Rotate the webhook signing secret every month.",
+          "correct": false,
+          "why": "The captured request stays valid until the next rotation, so the attacker keeps replaying for weeks."
+        },
+        {
+          "text": "Enforce TLS 1.3 on the webhook endpoint.",
+          "correct": false,
+          "why": "The capture came from logs behind TLS; transport security does nothing against replaying a request you already have."
+        },
+        {
+          "text": "Switch the HMAC from SHA-256 to SHA-512.",
+          "correct": false,
+          "why": "The attacker is not forging signatures; a replayed request carries a valid one under any hash."
+        }
+      ],
+      "explain": "A valid signature proves origin, not freshness or uniqueness. Bind a timestamp into what is signed and enforce a tolerance, and dedupe by event id so that anything replayed inside the window is harmless.",
+      "refs": [
+        "https://docs.stripe.com/webhooks"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q13",
+      "domain": "observability",
+      "stem": "Password-reset links carry `?token=…`, and some partners still pass `?api_key=…` in URLs. Load-balancer and application access logs ship to a shared logging platform with 400 readers and one-year retention. What should be done?",
+      "options": [
+        {
+          "text": "Move credentials into headers or bodies, redact query strings and sensitive headers by default, and rotate tokens already logged.",
+          "correct": true,
+          "why": "Credentials stop entering logs, a default redaction list catches the next one, and rotation handles what has already leaked."
+        },
+        {
+          "text": "Restrict the logging platform so that only the SRE team of about 20 people can read access logs.",
+          "correct": false,
+          "why": "Fewer readers, but a year of valid tokens still sits in storage and in every backup and export."
+        },
+        {
+          "text": "Shorten retention for access logs from one year to seven days.",
+          "correct": false,
+          "why": "Tokens are still exposed for a week each, and everything already stored stays exposed until it ages out."
+        },
+        {
+          "text": "Hash the full URL before logging it so tokens are never stored in plain text.",
+          "correct": false,
+          "why": "It also destroys the paths you need for debugging, and still leaves the already-logged tokens valid."
+        }
+      ],
+      "explain": "Logs are a data store with many readers and long retention, so secrets must never enter them. Keep credentials out of URLs, redact by default, and when something has leaked, rotate it rather than only hiding the logs.",
+      "refs": [
+        "https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q14",
+      "domain": "observability",
+      "stem": "A search API has a 99.5% availability SLO over 28 days, backed by an error-budget policy that product signed last quarter. Three bad deploys used up the whole budget by day 12. Product now wants to ship two large features this week. What does the policy imply?",
+      "options": [
+        {
+          "text": "Lower the SLO to 99% for this window so the team can stay on the planned roadmap.",
+          "correct": false,
+          "why": "Changing the target to fit the outcome makes the SLO meaningless as a decision tool."
+        },
+        {
+          "text": "Ship the features as planned and add a second on-call engineer for the week to absorb the extra risk.",
+          "correct": false,
+          "why": "More responders do not make releases safer; users still absorb failures beyond what was agreed."
+        },
+        {
+          "text": "Pause risky feature releases and spend the effort on reliability until the budget recovers.",
+          "correct": true,
+          "why": "The budget is the agreed amount of unreliability; once spent, the agreed response is to reduce risk, not add more."
+        },
+        {
+          "text": "Treat the SLO as a reporting metric only and carry on with the planned schedule.",
+          "correct": false,
+          "why": "Then the policy product signed means nothing, and the next bad deploy lands on users with no budget left."
+        }
+      ],
+      "explain": "An error budget turns reliability into a shared, pre-agreed decision: while budget remains, ship; when it is spent, slow down and invest in reliability. The policy must be agreed before it is needed.",
+      "refs": [
+        "https://sre.google/workbook/error-budget-policy/"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q15",
+      "domain": "observability",
+      "stem": "A login API's availability SLI is `non-2xx / total`. A credential-stuffing botnet causes floods of 401s, so the SLO 'breaches' and pages on-call most nights while real users are fine. In the same month, a release made the iOS app send malformed bodies and get 400s for a week, and nobody noticed. How should the SLI change?",
+      "options": [
+        {
+          "text": "Exclude every 4xx from the SLI and leave it at that, since client errors are by definition never the service's own fault.",
+          "correct": false,
+          "why": "It fixes the noise but keeps the iOS outage invisible: those 400s were your own bug."
+        },
+        {
+          "text": "Keep counting 401s but loosen the SLO target until the nightly botnet floods no longer trigger it.",
+          "correct": false,
+          "why": "The target now hides real outages too, and the signal still mixes attacker behaviour with user experience."
+        },
+        {
+          "text": "Count 5xx and timeouts as bad, exclude 4xx in general, and alert separately on 4xx rates from your own clients.",
+          "correct": true,
+          "why": "Attack traffic stops polluting availability, while a spike of errors from your own app versions still pages someone."
+        },
+        {
+          "text": "Rate-limit the botnet at the edge so that the 401s stop.",
+          "correct": false,
+          "why": "Worth doing, but the SLI still counts every client error as an outage and still misses the iOS 400s."
+        }
+      ],
+      "explain": "An SLI should measure what users experience as failure. Server errors and timeouts count; client errors usually do not, except where your own clients are failing, which deserves its own signal.",
+      "refs": [
+        "https://sre.google/workbook/implementing-slos/"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q16",
+      "domain": "testing",
+      "stem": "A repository layer has 400 tests like `expect(db.query).toHaveBeenCalledWith('SELECT … FROM orders …')`. Every query tweak breaks dozens of them, and last month a wrong `JOIN` that returned other customers' rows passed all of them. The service uses Postgres-specific features (jsonb, `ON CONFLICT`). What should replace these tests?",
+      "options": [
+        {
+          "text": "Snapshot the generated SQL strings so tweaks only need a snapshot update.",
+          "correct": false,
+          "why": "Still asserts on implementation text; a wrong JOIN produces a new snapshot that someone approves."
+        },
+        {
+          "text": "Run repository tests against an in-memory SQLite database for speed.",
+          "correct": false,
+          "why": "SQLite lacks jsonb and differs on conflict handling and types, so Postgres-specific bugs pass or tests fail for the wrong reasons."
+        },
+        {
+          "text": "Delete repository tests and rely on the end-to-end suite to catch data bugs.",
+          "correct": false,
+          "why": "End-to-end tests are slow and rarely seed the cross-customer data that exposes a bad JOIN."
+        },
+        {
+          "text": "Test repositories against a real Postgres, asserting returned rows; test services with fake repositories.",
+          "correct": true,
+          "why": "Assertions are on behaviour (which rows come back), so refactors stay green and wrong joins fail."
+        }
+      ],
+      "explain": "Assert on observable behaviour, not on the calls an implementation makes. Data-access code is tested against the real database engine you run in production, and code above it uses fakes of the repository interface.",
+      "refs": [
+        "https://testing.googleblog.com/2013/08/testing-on-toilet-test-behavior-not.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q17",
+      "domain": "testing",
+      "stem": "A scheduling service's tests pass in CI (which runs in UTC) but fail on a developer laptop in Tokyo, and the nightly build fails only when it runs after 23:00 UTC. Production serves users in 40 countries. What should the team do?",
+      "options": [
+        {
+          "text": "Set `TZ=UTC` in the test script so every machine behaves like CI.",
+          "correct": false,
+          "why": "It makes tests consistent by hiding exactly the local-time bugs that production users in 40 countries will hit."
+        },
+        {
+          "text": "Inject the clock and the zone, pin both in tests, and also run the suite under a far-off `TZ` in CI.",
+          "correct": true,
+          "why": "Tests become deterministic, and running under an unusual zone exposes any code that silently uses host-local time."
+        },
+        {
+          "text": "Skip the date-related tests whenever the build happens to run between 23:00 and 01:00 UTC.",
+          "correct": false,
+          "why": "It hides a real day-boundary bug and keeps the suite nondeterministic."
+        },
+        {
+          "text": "Replace `new Date()` with `Date.now()` throughout the code.",
+          "correct": false,
+          "why": "It reads the same real clock; the dependency on wall time and the host zone is unchanged."
+        }
+      ],
+      "explain": "Tests must not depend on the host's clock or zone. Inject time, pin it in tests, and deliberately run under unusual zones to catch hidden local-time assumptions before users do.",
+      "refs": [
+        "https://martinfowler.com/articles/nonDeterminism.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q18",
+      "domain": "testing",
+      "stem": "An agent wrote a rate limiter and 30 tests with 100% branch coverage. In production a client got 101 requests through a 100-per-minute limit because the code used `<=` where it needed `<`. You want confidence in the agent's next test suites. What do you require?",
+      "options": [
+        {
+          "text": "Raise the coverage gate from branch coverage to full path coverage on the limiter module.",
+          "correct": false,
+          "why": "The off-by-one line was covered; coverage measures what ran, not whether a wrong result would fail."
+        },
+        {
+          "text": "Ask the same agent to write another 30 tests for the rate limiter.",
+          "correct": false,
+          "why": "Tests derived from the same reading of the code share its blind spot at the boundary."
+        },
+        {
+          "text": "Mutation testing (flip `<` and `<=`, drop the window) that the suite must kill, plus cases at limit-1, limit and limit+1.",
+          "correct": true,
+          "why": "Mutants check whether the tests can detect a wrong implementation, which is exactly what coverage cannot tell you."
+        },
+        {
+          "text": "Have a second agent review the tests and approve them.",
+          "correct": false,
+          "why": "Another reading may help, but it gives no mechanical evidence that a boundary bug would fail the suite."
+        }
+      ],
+      "explain": "Coverage shows what code ran; mutation testing shows whether tests notice when the code is wrong. For generated tests in particular, check them against deliberate mutants at every boundary.",
+      "refs": [
+        "https://stryker-mutator.io/docs/"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q19",
+      "domain": "deploys",
+      "stem": "Release N dropped the `legacy_status` column in the same deploy as the code that stopped reading it. Release N had an unrelated bug, and rolling back to N-1 failed because N-1 still selects `legacy_status`. The outage lasted 50 minutes. What rule prevents this?",
+      "options": [
+        {
+          "text": "Write a down-migration for every change and run it automatically whenever a rollback happens.",
+          "correct": false,
+          "why": "A down-migration can recreate the column but not the data that was dropped, and it adds a risky schema change mid-incident."
+        },
+        {
+          "text": "Take a database snapshot before each deploy and restore it on rollback.",
+          "correct": false,
+          "why": "Restoring loses every write made since the deploy, which is usually worse than the bug."
+        },
+        {
+          "text": "Every migration stays compatible with the previous release; drop columns only after no running version reads them.",
+          "correct": true,
+          "why": "Code rollback then never depends on schema rollback, so reverting is always safe."
+        },
+        {
+          "text": "Never roll back; always fix forward with a new release instead.",
+          "correct": false,
+          "why": "Sometimes right, but it turns every bad release into a race to write and ship a fix under pressure."
+        }
+      ],
+      "explain": "Decouple schema changes from code changes: each migration must work with both the current and previous release, and destructive steps happen in a later release. Then rollback is a code-only operation.",
+      "refs": [
+        "https://martinfowler.com/bliki/ParallelChange.html"
+      ]
+    },
+    {
+      "id": "code-practices-v3-q20",
+      "domain": "deploys",
+      "stem": "Sixty Kubernetes pods share a liveness probe on `/health`, which runs `SELECT 1` against RDS. During a 90-second RDS failover, Kubernetes restarted every pod repeatedly, and cold starts plus reconnect storms stretched the outage to 15 minutes. What probe design is right?",
+      "options": [
+        {
+          "text": "Raise the liveness `failureThreshold` so that a pod is only restarted after three full minutes of failed checks.",
+          "correct": false,
+          "why": "It rides out this failover but also waits three minutes to restart a truly deadlocked pod, and still restarts on longer outages."
+        },
+        {
+          "text": "Liveness checks only that the process itself responds; dependency checks belong in readiness or nowhere.",
+          "correct": true,
+          "why": "A database outage is not fixed by restarting the app, so it must never trigger liveness restarts."
+        },
+        {
+          "text": "Remove the probes entirely so that Kubernetes never restarts pods.",
+          "correct": false,
+          "why": "A hung or deadlocked process then stays in service forever."
+        },
+        {
+          "text": "Retry `SELECT 1` three times inside the health handler before failing the check.",
+          "correct": false,
+          "why": "A 90-second failover outlasts the retries, so pods are still restarted, just slightly later."
+        }
+      ],
+      "explain": "Liveness answers 'is this process broken in a way a restart fixes?' Dependency failures fail that test, and restarting on them multiplies outages. Keep liveness local, and be careful even with readiness: a shared dependency failing makes every pod unready at once.",
+      "refs": [
+        "https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/"
+      ]
+    }
+  ]
+}

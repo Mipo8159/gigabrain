@@ -24,3 +24,9 @@ that turns out impossible, or a hard outside blocker (credentials, an
 interactive login). A failing test or a small design decision is Claude's to
 handle. Never weaken a check to make it pass. See
 [[claude-permissions-are-wide-open]].
+
+**Exception: a same-day hard deadline.** Skip the question batch. Open with
+"Done when …; assumed …" and build on those stated assumptions; Giga corrects
+afterwards. 2026-10-12: with a deadline that day, Claude skipped questions and
+delivered two verified repos smoothly, while an onboarding question in the same
+window was rejected and the turn interrupted.

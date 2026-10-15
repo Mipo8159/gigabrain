@@ -1,0 +1,5 @@
+{
+  "name": "knowledge",
+  "description": "Backend stack knowledge (opt-in): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14: evals showed no lift over vanilla.",
+  "version": "1.0.0"
+}

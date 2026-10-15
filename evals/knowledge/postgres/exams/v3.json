@@ -1,0 +1,675 @@
+{
+  "topic": "postgres",
+  "variant": 3,
+  "of": 5,
+  "title": "Postgres at scale — variant 3",
+  "description": "Hotels, healthcare and tracking: uniqueness and batch upserts, consistent reports, volatile defaults and backfills, covering and BRIN indexes, HOT updates, pinning and prepared statements, LSN routing, fencing and anti-wraparound vacuum.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "concurrency",
+      "name": "MVCC, isolation, locking and upserts",
+      "weight": 0.25
+    },
+    {
+      "id": "migrations",
+      "name": "Schema changes on big tables without downtime",
+      "weight": 0.15
+    },
+    {
+      "id": "indexing",
+      "name": "Indexing and query shape at scale",
+      "weight": 0.15
+    },
+    {
+      "id": "pooling",
+      "name": "Connections and pooling",
+      "weight": 0.15
+    },
+    {
+      "id": "replication",
+      "name": "Replication, replicas and failover",
+      "weight": 0.15
+    },
+    {
+      "id": "maintenance",
+      "name": "Vacuum, bloat, wraparound and partitioning",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "postgres-v3-q01",
+      "domain": "concurrency",
+      "stem": "A fitness app's signup handler runs `SELECT 1 FROM users WHERE email = $1` and inserts the user only if nothing came back. After a TV ad, 2,300 duplicate accounts appeared, mostly from users double-tapping the signup button. There is a plain (non-unique) index on email. Which change prevents duplicates?",
+      "options": [
+        {
+          "text": "Disable the signup button in the mobile client after the first tap.",
+          "correct": false,
+          "why": "It cuts the most common trigger but not retries from flaky networks, scripts, or a second device, so the database still accepts duplicates."
+        },
+        {
+          "text": "Run the check and the insert in a `REPEATABLE READ` transaction so the check and the insert see the same snapshot of the users table.",
+          "correct": false,
+          "why": "Two transactions inserting the same email do not conflict on any existing row, so snapshot isolation lets both commit."
+        },
+        {
+          "text": "Make the email index unique and insert with `ON CONFLICT (email) DO NOTHING`, treating zero rows as 'already registered'.",
+          "correct": true,
+          "why": "The unique index is enforced inside the database for every concurrent insert, so exactly one row can win, and the conflict path is handled without an error."
+        },
+        {
+          "text": "Take `pg_advisory_xact_lock(hashtext($1))` before the check.",
+          "correct": false,
+          "why": "It works for this code path, but any other path that inserts users (admin tools, imports) bypasses it, and the invariant still lives only in app code."
+        }
+      ],
+      "explain": "Uniqueness checked in application code is a race; uniqueness declared in the schema is a guarantee. Put the rule in a unique index and design the conflict path (ON CONFLICT or catching 23505) as normal control flow.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-insert.html#SQL-ON-CONFLICT"
+      ]
+    },
+    {
+      "id": "postgres-v3-q02",
+      "domain": "concurrency",
+      "stem": "A hotel channel manager receives availability updates from 30 booking sites and upserts them into `room_availability (hotel_id, room_type, day)` with a primary key on those columns. A developer rewrote the upsert as `MERGE … WHEN MATCHED THEN UPDATE … WHEN NOT MATCHED THEN INSERT`. Since then about 1 in 2,000 updates fails with `23505 duplicate key` when two sites update the same night at once. Which change fixes it?",
+      "options": [
+        {
+          "text": "Run the MERGE at `SERIALIZABLE` so concurrent MERGEs on the same key are ordered.",
+          "correct": false,
+          "why": "The conflict then surfaces as 40001 instead of 23505, and the caller still needs a retry loop."
+        },
+        {
+          "text": "Use `INSERT … ON CONFLICT (hotel_id, room_type, day) DO UPDATE SET …` instead of MERGE.",
+          "correct": true,
+          "why": "ON CONFLICT is built to resolve a concurrent insert of the same key by updating the existing row, so it does not raise unique violations in this race."
+        },
+        {
+          "text": "Retry the MERGE on 23505.",
+          "correct": false,
+          "why": "It works as a patch, but every caller must carry retry code for a race that INSERT … ON CONFLICT handles inside the database."
+        },
+        {
+          "text": "Take a table-level `SHARE ROW EXCLUSIVE` lock on `room_availability` before each MERGE so that only one upsert at a time can run against the table.",
+          "correct": false,
+          "why": "It removes the race by serialising every update for every hotel through one lock, which cannot keep up with 30 sources."
+        }
+      ],
+      "explain": "MERGE is a general statement, not a concurrency-safe upsert: the docs say it does not try to avoid unique violations when rows are inserted concurrently. For upserts on a unique key under concurrency, INSERT … ON CONFLICT is the tool.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-merge.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q03",
+      "domain": "concurrency",
+      "stem": "A clinic-scheduling service ensures only one worker regenerates a doctor's weekly calendar at a time, using the helper below with a node-postgres pool of `max: 8`. After a few hours in production, regeneration for some doctors never runs again, and `pg_locks` shows advisory locks held by idle connections. Which change fixes it?",
+      "code": "async function withDoctorLock(id, fn) {\n  await pool.query('SELECT pg_advisory_lock($1)', [id]);\n  try {\n    return await fn();\n  } finally {\n    await pool.query('SELECT pg_advisory_unlock($1)', [id]);\n  }\n}",
+      "options": [
+        {
+          "text": "Check out one client, `BEGIN`, take `pg_advisory_xact_lock($1)`, run the work on that client, then `COMMIT`.",
+          "correct": true,
+          "why": "The lock lives in the transaction on one connection, and the database releases it automatically at commit or rollback, so it cannot be orphaned on another pooled connection."
+        },
+        {
+          "text": "Use `pg_try_advisory_lock` so workers skip doctors whose lock is already taken instead of waiting.",
+          "correct": false,
+          "why": "It avoids waiting, but the unlock still lands on a random pooled connection, so locks still leak and those doctors are skipped forever."
+        },
+        {
+          "text": "Call `pg_advisory_unlock_all()` in the finally block instead of unlocking one key.",
+          "correct": false,
+          "why": "It runs on whichever connection the pool hands out, so it may release another worker's locks and still miss the connection that holds this one."
+        },
+        {
+          "text": "Replace the advisory lock with a Redis lock that has a 30-second TTL, so that a lock left behind by a crashed worker expires on its own.",
+          "correct": false,
+          "why": "It adds a second system with its own failure modes, and a regeneration that runs longer than the TTL lets a second worker in."
+        }
+      ],
+      "explain": "Session-level state (advisory locks, SET, temp tables) belongs to one connection, and a pool hands out a different connection per call. Prefer transaction-scoped advisory locks on one checked-out client: the database releases them for you.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/explicit-locking.html#ADVISORY-LOCKS"
+      ]
+    },
+    {
+      "id": "postgres-v3-q04",
+      "domain": "concurrency",
+      "stem": "A parcel-tracking consumer reads Kafka batches of 500 scan events and upserts each parcel's latest status with one multi-row `INSERT … ON CONFLICT (parcel_id) DO UPDATE`. On busy days, batches fail with `ON CONFLICT DO UPDATE command cannot affect row a second time`, and the consumer lag grows. The last scan per parcel must win. Which change fixes it?",
+      "options": [
+        {
+          "text": "Switch to `ON CONFLICT DO NOTHING` so repeated parcels in the batch are skipped.",
+          "correct": false,
+          "why": "The batch stops failing, but the first scan in the batch wins and later scans for the same parcel are dropped, so status goes stale."
+        },
+        {
+          "text": "Split each batch into 500 single-row upserts.",
+          "correct": false,
+          "why": "Correct but slow: 500 round trips per batch at peak multiply latency and connection time, so lag still grows."
+        },
+        {
+          "text": "Raise the isolation level to `REPEATABLE READ` for the batch.",
+          "correct": false,
+          "why": "The error is a cardinality violation inside one statement, not a concurrency anomaly; isolation level does not change it."
+        },
+        {
+          "text": "Deduplicate the batch by parcel_id first, keeping the latest scan per parcel.",
+          "correct": true,
+          "why": "Each key then appears once in the statement (in code, or with `DISTINCT ON (parcel_id) … ORDER BY parcel_id, scanned_at DESC`), which removes the error and keeps the last scan."
+        }
+      ],
+      "explain": "One INSERT … ON CONFLICT DO UPDATE may touch each target row only once. With batched upserts from a stream, collapse the batch to one row per key first, choosing the winner by the business rule (here, latest scan).",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-insert.html#SQL-ON-CONFLICT"
+      ]
+    },
+    {
+      "id": "postgres-v3-q05",
+      "domain": "concurrency",
+      "stem": "A neobank's end-of-day job runs several statements: the sum of all account balances, then the sum of the ledger, then a comparison. Payments keep flowing at 2k/s, and the job reports false mismatches every night because each statement sees different data. The job must not block payments. Which two settings for the job's transaction make the numbers consistent? (Choose two.)",
+      "options": [
+        {
+          "text": "`BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY`",
+          "correct": true,
+          "why": "All statements share the snapshot taken at the first query, so both sums describe the same moment, and readers do not block writers."
+        },
+        {
+          "text": "`BEGIN ISOLATION LEVEL SERIALIZABLE READ ONLY DEFERRABLE`",
+          "correct": true,
+          "why": "It waits for a safe snapshot, then runs without any risk of serialization failure or blocking writers, which suits a long report."
+        },
+        {
+          "text": "Keep READ COMMITTED but run `LOCK TABLE accounts, ledger IN SHARE MODE` first.",
+          "correct": false,
+          "why": "Consistent, but SHARE mode blocks every insert and update on both tables for the job's duration, stopping payments."
+        },
+        {
+          "text": "Keep READ COMMITTED and add `SELECT … FOR SHARE` to both queries.",
+          "correct": false,
+          "why": "It row-locks every account and ledger row, blocking payments, and still does not stop new ledger rows appearing between statements."
+        },
+        {
+          "text": "Keep READ COMMITTED and run the job on an async read replica.",
+          "correct": false,
+          "why": "Moving it reduces load, but each statement still takes a fresh snapshot on the replica, so the mismatch remains."
+        }
+      ],
+      "explain": "READ COMMITTED gives each statement its own snapshot, so multi-statement reports see different moments. Use a REPEATABLE READ (or SERIALIZABLE READ ONLY DEFERRABLE) read-only transaction: one snapshot for the whole report, and MVCC readers never block writers.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/transaction-iso.html#XACT-REPEATABLE-READ"
+      ]
+    },
+    {
+      "id": "postgres-v3-q06",
+      "domain": "migrations",
+      "stem": "A streaming service needs a `public_id uuid` on `episodes_watched` (1.1B rows, 6k inserts/s). The migration `ALTER TABLE episodes_watched ADD COLUMN public_id uuid NOT NULL DEFAULT gen_random_uuid()` ran for 2 hours in staging while blocking all access to the table. Which plan gets the column in production without that outage?",
+      "options": [
+        {
+          "text": "Use `DEFAULT 'some-fixed-uuid'` instead, since constant defaults are metadata-only, and fix the values later.",
+          "correct": false,
+          "why": "It is fast, but every existing row gets the same value, so 1.1B rows must be updated afterwards anyway, and a NOT NULL unique key cannot be added until then."
+        },
+        {
+          "text": "Run the same statement with `lock_timeout = '2s'` and retry it until it gets its lock during a quiet moment.",
+          "correct": false,
+          "why": "lock_timeout limits the wait for the lock, not the run time; once granted, the volatile default still rewrites 1.1B rows under ACCESS EXCLUSIVE."
+        },
+        {
+          "text": "Add the column as nullable with no default, then `ALTER COLUMN public_id SET DEFAULT gen_random_uuid()` for new rows, backfill old rows in batches, and enforce NOT NULL online at the end.",
+          "correct": true,
+          "why": "Adding a nullable column and setting a default for future rows are both metadata-only, so the expensive part becomes a throttled backfill."
+        },
+        {
+          "text": "Create the column with `GENERATED ALWAYS AS (gen_random_uuid()) STORED`.",
+          "correct": false,
+          "why": "Generated columns must use immutable expressions, so a random function is rejected, and a stored generated column would rewrite the table anyway."
+        }
+      ],
+      "explain": "Since PG11, ADD COLUMN with a constant default is metadata-only, but a volatile default (gen_random_uuid(), clock_timestamp()) rewrites the whole table. Split it: add nullable, set the default for new rows, backfill in batches, then add the constraint online.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-altertable.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q07",
+      "domain": "migrations",
+      "stem": "A logistics company backfills a new column on 500M rows with one statement, `UPDATE shipments SET region = …`. After 40 minutes, the read replicas are 25 minutes behind, the primary's disk is filling with WAL, and the table is visibly bloating. The backfill must finish within a week without hurting production. Which approach should they use?",
+      "options": [
+        {
+          "text": "Update in primary-key ranges of about 10k rows, commit each batch, pause between batches, and slow down when replica lag rises.",
+          "correct": true,
+          "why": "Short transactions let vacuum reuse space between batches, spread WAL so replicas keep up, and the job can stop and resume at any batch."
+        },
+        {
+          "text": "Run the single UPDATE again, but at night with `synchronous_commit = off` to make it faster, and accept the replica lag during those quiet hours.",
+          "correct": false,
+          "why": "It speeds up commits, of which there is only one; the single 500M-row transaction still bloats the table and floods the replicas."
+        },
+        {
+          "text": "Create a new table with `CREATE TABLE … AS SELECT` including the region, then swap names.",
+          "correct": false,
+          "why": "Writes made during the copy are lost unless you also add triggers or replication, and the swap needs an exclusive lock and FK and index rebuilds."
+        },
+        {
+          "text": "Run the UPDATE in one transaction with `SET LOCAL work_mem = '2GB'`.",
+          "correct": false,
+          "why": "work_mem affects sorts and hashes, not row updates, and the single huge transaction remains."
+        }
+      ],
+      "explain": "Big backfills should be many small transactions: bounded locks, bounded WAL bursts, vacuum can keep up, and the job is resumable. Throttle on a health signal (replica lag, I/O) so production keeps its headroom.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/routine-vacuuming.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q08",
+      "domain": "migrations",
+      "stem": "A payroll platform must add a UNIQUE constraint on `payslips (employee_id, period)` (400M rows, written all day by payroll runs). `ALTER TABLE … ADD CONSTRAINT … UNIQUE` would build the index while blocking writes for about 30 minutes. Duplicates have already been cleaned up. Which approach adds the constraint online?",
+      "options": [
+        {
+          "text": "`ADD CONSTRAINT … UNIQUE … NOT VALID`, then `VALIDATE CONSTRAINT`.",
+          "correct": false,
+          "why": "NOT VALID exists for CHECK and foreign-key constraints, not for UNIQUE, so this is rejected."
+        },
+        {
+          "text": "Build the unique index `CONCURRENTLY`, then attach it with `ADD CONSTRAINT … UNIQUE USING INDEX`.",
+          "correct": true,
+          "why": "The expensive build runs without blocking writes, and attaching an existing valid index as a constraint is a quick catalog change."
+        },
+        {
+          "text": "Create the unique index concurrently and skip the constraint, because a unique index enforces exactly the same rule.",
+          "correct": false,
+          "why": "It does enforce uniqueness, but tools, ORMs and `ON CONFLICT ON CONSTRAINT` that expect a named constraint will not find one, so the team still needs the attach step."
+        },
+        {
+          "text": "Add a trigger that rejects duplicate inserts by checking the table first, which avoids building any index on 400M rows.",
+          "correct": false,
+          "why": "Under concurrency two inserts can both pass the check, so it does not guarantee uniqueness, and it scans or needs an index anyway."
+        }
+      ],
+      "explain": "Many constraints have an online path: build the index CONCURRENTLY, then attach it with ADD CONSTRAINT … USING INDEX (unique or primary key). Keep every short DDL step under lock_timeout, and check that the concurrent build ended valid.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/sql-altertable.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q09",
+      "domain": "indexing",
+      "stem": "A ride-hailing app serves `SELECT status FROM rides WHERE ride_id = $1` at 30k/s. The team built `CREATE INDEX ON rides (ride_id) INCLUDE (status)` to get index-only scans, but EXPLAIN (ANALYZE) shows `Index Only Scan` with `Heap Fetches` close to the row count. Rides are updated several times in their first hour, and autovacuum on this table is throttled. Which change makes the index-only scan effective?",
+      "options": [
+        {
+          "text": "Add `status` as a key column instead: `(ride_id, status)`.",
+          "correct": false,
+          "why": "Key versus INCLUDE column does not matter here; the heap fetches come from pages not marked all-visible, not from the index shape."
+        },
+        {
+          "text": "Tune autovacuum for `rides` so it keeps the visibility map current for recently updated pages.",
+          "correct": true,
+          "why": "Index-only scans skip the heap only for pages the visibility map marks all-visible, and only vacuum sets those bits."
+        },
+        {
+          "text": "Set `enable_seqscan = off` for the service so the planner always picks the index-only plan for this lookup.",
+          "correct": false,
+          "why": "The planner is already choosing the index-only plan; the problem is that each lookup still checks the heap."
+        },
+        {
+          "text": "Cluster the table on ride_id so that each ride's row versions sit next to each other on disk.",
+          "correct": false,
+          "why": "CLUSTER takes an exclusive lock for the whole rewrite and does not keep the visibility map current as new updates arrive."
+        }
+      ],
+      "explain": "An index-only scan is only as good as the visibility map. Hot, frequently updated tables need autovacuum tuned to keep up, or the 'index-only' plan still visits the heap for most rows. Look at Heap Fetches, not just the plan node name.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/indexes-index-only-scans.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q10",
+      "domain": "indexing",
+      "stem": "A smart-meter company appends 2 billion readings a day to a 40 TB table in arrival order and never updates them. Queries ask for all readings in a time window (hours to days) across all meters. A B-tree on `read_at` is 6 TB and growing and slows ingestion. Which index fits this workload better?",
+      "options": [
+        {
+          "text": "A BRIN index on `read_at`.",
+          "correct": true,
+          "why": "Rows arrive in time order, so each block range covers a narrow time span; BRIN stores just a min/max per range, making it tiny and cheap to maintain while still skipping most of the table."
+        },
+        {
+          "text": "A hash index on `read_at`.",
+          "correct": false,
+          "why": "Hash indexes support only equality, so time-window queries cannot use them."
+        },
+        {
+          "text": "A partial B-tree on `read_at` for only the last 7 days of readings, rebuilt by a nightly job as the window moves forward.",
+          "correct": false,
+          "why": "It shrinks the index but leaves older windows with no index, needs daily rebuilds, and a moving date in the predicate does not work in a partial index."
+        },
+        {
+          "text": "A GIN index on `read_at`, which handles very large tables better than a B-tree.",
+          "correct": false,
+          "why": "GIN is built for multi-valued data (arrays, JSONB, full text); it does not help range queries on a scalar timestamp."
+        }
+      ],
+      "explain": "BRIN fits huge, append-only tables where the indexed column follows physical order (time series, logs). It trades precision (it returns block ranges to recheck) for an index that is a tiny fraction of a B-tree's size and almost free on insert.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/brin.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q11",
+      "domain": "indexing",
+      "stem": "A chat app updates `users.last_seen_at` on every heartbeat, about 50k updates/s. The `users` table has 9 indexes, one of which is on `last_seen_at` (used by a nightly 'inactive users' job). WAL volume is huge and the table and its indexes bloat quickly. Which change cuts the write cost the most?",
+      "options": [
+        {
+          "text": "Raise `checkpoint_timeout` and `max_wal_size` so the system writes fewer full-page images.",
+          "correct": false,
+          "why": "It trims some WAL, but each update still writes new entries into all 9 indexes, which is where most of the cost comes from."
+        },
+        {
+          "text": "Move the heartbeat to Redis and flush it to Postgres in batches every minute, keeping the users table and all 9 indexes as they are.",
+          "correct": false,
+          "why": "It cuts the update rate, but each flushed update still touches all 9 indexes, and it adds a second store to keep consistent."
+        },
+        {
+          "text": "Drop the `last_seen_at` index (or move the column out) and lower fillfactor, so heartbeats become HOT updates.",
+          "correct": true,
+          "why": "A HOT update is possible when no indexed column changes and the page has room; then no index entries are written at all."
+        },
+        {
+          "text": "Partition `users` by hash of user id into 16 partitions.",
+          "correct": false,
+          "why": "It spreads the writes but does not reduce them; each update still changes an indexed column and writes 9 index entries."
+        }
+      ],
+      "explain": "When an update changes no indexed column and the new row version fits on the same page, Postgres does a HOT update and skips the indexes. Indexing a hot, frequently updated column turns every update into N index writes. Keep volatile columns out of indexes, or out of the hot table.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/storage-hot.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q12",
+      "domain": "pooling",
+      "stem": "A claims-processing service moved to PgBouncer 1.18 in transaction mode, and its ORM, which uses protocol-level named prepared statements, now fails intermittently with `prepared statement \"s12\" does not exist`. The team wants to keep prepared statements because they save about 20% CPU on its hot queries. Which change fixes it?",
+      "options": [
+        {
+          "text": "Switch the ORM to SQL-level `PREPARE`/`EXECUTE` statements.",
+          "correct": false,
+          "why": "SQL-level PREPARE lives in the server session, which transaction pooling does not keep, so it fails the same way."
+        },
+        {
+          "text": "Upgrade to PgBouncer 1.21+ and set `max_prepared_statements` above 0.",
+          "correct": true,
+          "why": "PgBouncer then re-prepares statements on whichever server connection a transaction lands on, so the ORM keeps its prepared statements."
+        },
+        {
+          "text": "Switch PgBouncer to session mode for this service.",
+          "correct": false,
+          "why": "It fixes the error by giving each client a dedicated server connection, which gives up the multiplexing PgBouncer was brought in for."
+        },
+        {
+          "text": "Disable prepared statements in the ORM and accept the CPU cost on the database for every query.",
+          "correct": false,
+          "why": "It works today but throws away the 20% CPU saving the team wants to keep, when a supported fix exists."
+        }
+      ],
+      "explain": "Transaction pooling breaks anything stored in a server session. Protocol-level prepared statements are the exception that PgBouncer 1.21+ can track for you with max_prepared_statements. Check the pooler's feature table before choosing a driver setting.",
+      "refs": [
+        "https://www.pgbouncer.org/config.html#max_prepared_statements"
+      ]
+    },
+    {
+      "id": "postgres-v3-q13",
+      "domain": "pooling",
+      "stem": "An e-commerce checkout opens a transaction, inserts the order, calls the payment provider over HTTP (normally 300 ms, 30 s when the provider degrades), then marks the order paid and commits. During a provider incident, the pool of 20 per pod was exhausted, healthy endpoints timed out, and inventory rows stayed locked. Which two changes address the root cause and contain the next incident? (Choose two.)",
+      "options": [
+        {
+          "text": "Commit the order first, call the provider outside any transaction, then record the result in a second short transaction (with idempotency on the payment).",
+          "correct": true,
+          "why": "No connection or row lock is held while waiting on the network, so a slow provider cannot drain the pool or block inventory."
+        },
+        {
+          "text": "Set `idle_in_transaction_session_timeout` (for example 10 s) for the app role.",
+          "correct": true,
+          "why": "A guard rail: any future code that waits inside a transaction gets its session ended instead of holding locks and a connection indefinitely."
+        },
+        {
+          "text": "Raise the pool to 100 per pod.",
+          "correct": false,
+          "why": "It delays exhaustion by a few seconds during a 30 s stall, and multiplies connections and lock holders on the database."
+        },
+        {
+          "text": "Raise the HTTP client timeout to 60 s so fewer payments fail.",
+          "correct": false,
+          "why": "It makes each stuck transaction hold its connection and locks for longer, which worsens the incident."
+        },
+        {
+          "text": "Switch the transaction to `SERIALIZABLE`.",
+          "correct": false,
+          "why": "It changes conflict handling, not how long connections and locks are held during the HTTP call."
+        }
+      ],
+      "explain": "Never wait on the network inside a database transaction: it pins a pooled connection and holds row locks for the duration of someone else's outage. Split the work into short transactions around the remote call, and set idle_in_transaction_session_timeout as a backstop.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/runtime-config-client.html#GUC-IDLE-IN-TRANSACTION-SESSION-TIMEOUT"
+      ]
+    },
+    {
+      "id": "postgres-v3-q14",
+      "domain": "pooling",
+      "stem": "A news site's API runs on Lambda through RDS Proxy. CloudWatch shows `DatabaseConnectionsCurrentlySessionPinned` close to the total, and the database has almost as many connections as there are concurrent Lambdas. Each new connection runs `SET TIME ZONE 'UTC'` and `SET statement_timeout = '5s'` on open. Which change restores multiplexing?",
+      "options": [
+        {
+          "text": "Raise the proxy's `MaxConnectionsPercent` to 100.",
+          "correct": false,
+          "why": "It lets the proxy open more database connections, but pinned clients still each hold one, so multiplexing stays off."
+        },
+        {
+          "text": "Replace RDS Proxy with PgBouncer in session mode on EC2.",
+          "correct": false,
+          "why": "Session mode also gives each client its own server connection, so it has the same effect as pinning, plus servers to run."
+        },
+        {
+          "text": "Run `RESET ALL` at the end of every Lambda invocation so the pinned sessions are cleaned up for the next client.",
+          "correct": false,
+          "why": "The SET statements that caused pinning already ran; resetting later does not unpin, and RESET itself changes session state."
+        },
+        {
+          "text": "Remove the session SETs and set those values on the database role with `ALTER ROLE api SET timezone = 'UTC'` and `ALTER ROLE api SET statement_timeout = '5s'`.",
+          "correct": true,
+          "why": "Every connection the proxy opens then starts with the right settings, and no client issues a session-level SET that forces pinning."
+        }
+      ],
+      "explain": "A transaction pooler or proxy can only share a server connection when clients leave no session state behind. Move per-session defaults into role or database settings, and keep per-request state transaction-local, so the proxy never has to pin. RDS Proxy's documented fix is the proxy's initialization query (`SET` statements it runs on each new database connection); `ALTER ROLE … SET` also works.",
+      "refs": [
+        "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/rds-proxy-pinning.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q15",
+      "domain": "replication",
+      "stem": "A freight-tracking platform has one primary and three async replicas in different AZs, with lag that ranges from 20 ms to several seconds during bulk imports. After a dispatcher updates a load, the next screen must show the update, but sending all of a dispatcher's reads to the primary for a fixed window overloaded it during imports. Which design gives read-your-writes while keeping most reads on replicas?",
+      "options": [
+        {
+          "text": "After each write, return the commit LSN (`pg_current_wal_lsn()`) to the client; on the next read, use a replica whose `pg_last_wal_replay_lsn()` is at least that LSN, otherwise the primary.",
+          "correct": true,
+          "why": "Reads go to the primary only when no replica has caught up, which is rare except during imports, so freshness is exact without a fixed window."
+        },
+        {
+          "text": "Make one replica synchronous with `remote_apply` and route all dispatcher reads to it.",
+          "correct": false,
+          "why": "It gives fresh reads, but all commits now wait for that one replica's replay, including the bulk imports, and it becomes a single point of failure for writes."
+        },
+        {
+          "text": "Lengthen the fixed primary window to 30 s to cover import lag.",
+          "correct": false,
+          "why": "It sends even more reads to the primary for longer, which is exactly what overloaded it."
+        },
+        {
+          "text": "Cache the dispatcher's own writes in the browser session and merge them into the replica's results on screen.",
+          "correct": false,
+          "why": "It covers the dispatcher's own edits on one screen, but other derived data (totals, lists) still comes back stale, and the merge logic is complex."
+        }
+      ],
+      "explain": "Read-your-writes can be enforced precisely with LSNs: the writer remembers its commit position and reads from any replica that has replayed past it. It beats fixed time windows when lag varies widely.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/functions-admin.html#FUNCTIONS-RECOVERY-INFO-TABLE"
+      ]
+    },
+    {
+      "id": "postgres-v3-q16",
+      "domain": "replication",
+      "stem": "A healthcare SaaS sees steady bloat on its primary's busiest tables. pg_stat_activity on the primary shows no transaction older than 2 minutes, and there are no replication slots for CDC. A data team runs 6-hour exploratory queries on a physical replica, which has `hot_standby_feedback = on`. Where should the team look, and what should it change?",
+      "options": [
+        {
+          "text": "At autovacuum settings on the primary; raise `autovacuum_max_workers` until bloat stops growing.",
+          "correct": false,
+          "why": "Vacuum can only remove rows older than the oldest xmin it must respect; extra workers cannot remove rows the replica still asks to keep."
+        },
+        {
+          "text": "At `pg_stat_replication.backend_xmin` on the primary; then move the long queries to a replica without feedback (accepting cancellations or lag there) or to a warehouse.",
+          "correct": true,
+          "why": "With hot_standby_feedback the replica reports its oldest snapshot, and the primary holds vacuum back for 6 hours at a time; backend_xmin shows it."
+        },
+        {
+          "text": "At WAL settings; raise `wal_keep_size` so the replica can keep up with the primary's write rate.",
+          "correct": false,
+          "why": "WAL retention affects whether a lagging standby can reconnect, not which dead rows vacuum may remove."
+        },
+        {
+          "text": "At `max_standby_streaming_delay` on the replica; lower it so that long-running queries there are cancelled sooner.",
+          "correct": false,
+          "why": "With feedback on, conflicts are mostly avoided rather than cancelled, so lowering the delay barely touches the bloat; the feedback is the cause."
+        }
+      ],
+      "explain": "The vacuum horizon is cluster-wide: a replica with hot_standby_feedback counts as a long-running transaction on the primary. When bloat appears with no long transactions on the primary, check slots, prepared transactions and standby feedback.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/hot-standby.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q17",
+      "domain": "replication",
+      "stem": "An insurance company's home-grown failover script promotes the standby when the primary misses three health checks. During a 90-second network partition, the standby was promoted while the old primary kept accepting writes from app servers on its side. When the partition healed, the company had two diverged databases. What should replace the script?",
+      "options": [
+        {
+          "text": "The same script with a longer threshold, such as 10 missed health checks.",
+          "correct": false,
+          "why": "It makes false failovers rarer but does not prevent two writers after a long partition; nothing stops the old primary."
+        },
+        {
+          "text": "Synchronous replication, so the old primary cannot commit without the standby.",
+          "correct": false,
+          "why": "It blocks commits on the old primary once the standby is gone, which helps, but promotion without fencing can still split, and nothing controls who is primary."
+        },
+        {
+          "text": "A consensus-based HA manager (for example Patroni with etcd) where only the leader-lock holder runs as primary and a node that loses the lock demotes itself.",
+          "correct": true,
+          "why": "Leadership comes from a quorum store, so the isolated old primary cannot renew its lock and stops accepting writes before the other side promotes."
+        },
+        {
+          "text": "Manual failover only: page the DBA and let them decide when to promote the standby after confirming the primary is really gone.",
+          "correct": false,
+          "why": "It avoids split-brain by trading it for long outages at 3 a.m., and still needs a way to fence the old primary."
+        }
+      ],
+      "explain": "Failover is safe only if the old primary is fenced: it must stop taking writes before another node is promoted. Use a consensus store for leadership (leader lease plus self-demotion), not health checks alone.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/warm-standby-failover.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q18",
+      "domain": "maintenance",
+      "stem": "A bank keeps an insert-only `audit_log` (3B rows) on Postgres 17. Years ago someone set `autovacuum_enabled = false` on it 'because nothing is ever updated'. Last Tuesday, at the morning peak, an autovacuum labelled '(to prevent wraparound)' started on it anyway and ran for 14 hours with heavy I/O. Which change prevents a repeat?",
+      "options": [
+        {
+          "text": "Also set `autovacuum_freeze_max_age` very high for the table so that the forced wraparound vacuum never starts on it again.",
+          "correct": false,
+          "why": "It delays the forced vacuum and makes the eventual one bigger; XID wraparound limits still force it before the hard stop."
+        },
+        {
+          "text": "Re-enable autovacuum on the table, so insert-triggered vacuums freeze new pages in small steps as they fill.",
+          "correct": true,
+          "why": "Since PG13, inserts also trigger autovacuum, which freezes and marks pages all-visible incrementally, so no huge anti-wraparound pass builds up."
+        },
+        {
+          "text": "Kill the wraparound autovacuum when it starts at peak and run it at night.",
+          "correct": false,
+          "why": "It restarts by itself because the table still needs freezing, and each kill loses its progress."
+        },
+        {
+          "text": "Move the table to a tablespace on faster disks so the forced vacuum finishes sooner.",
+          "correct": false,
+          "why": "It shortens the pain but keeps the pattern of one giant freeze pass at an unplanned time."
+        }
+      ],
+      "explain": "Even insert-only tables must be frozen, because their XIDs age. Anti-wraparound vacuum runs even with autovacuum disabled. Let regular (insert-triggered) autovacuum freeze in small steps instead of saving it all for a forced pass.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/routine-vacuuming.html#VACUUM-FOR-WRAPAROUND"
+      ]
+    },
+    {
+      "id": "postgres-v3-q19",
+      "domain": "maintenance",
+      "stem": "A shipping company partitioned `shipments` (1.5B rows) by month on `created_at` to speed things up, creating 36 partitions. Afterwards, the most frequent query, `WHERE shipment_id = $1` (40k/s), got slower, and its plans show 36 index scans. Retention is 3 years and is rarely touched. Which conclusion should drive the next step?",
+      "options": [
+        {
+          "text": "Add more indexes on `shipment_id` to each partition.",
+          "correct": false,
+          "why": "Each partition already has one; the problem is that every lookup must probe all 36 because the key does not include the partition column."
+        },
+        {
+          "text": "The partition key does not match the dominant access path; either include `created_at` (or a time-ordered id) in lookups, or reconsider partitioning this table.",
+          "correct": true,
+          "why": "Pruning works only when the query constrains the partition key, so a key that the hot query never filters on makes every lookup fan out to all partitions."
+        },
+        {
+          "text": "Switch to weekly partitions so that each partition, and each of its indexes, is smaller and faster to probe.",
+          "correct": false,
+          "why": "That gives about 156 partitions, so each lookup probes even more indexes."
+        },
+        {
+          "text": "Raise `max_parallel_workers_per_gather` so the 36 index probes run in parallel.",
+          "correct": false,
+          "why": "Parallelism adds worker start-up cost to a sub-millisecond lookup at 40k/s and does not remove the fan-out."
+        }
+      ],
+      "explain": "Partitioning helps queries only through pruning, which needs the partition key in the WHERE clause. Pick the key from the dominant access path and from retention together; if they conflict, it may not be worth partitioning.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/ddl-partition-pruning.html"
+      ]
+    },
+    {
+      "id": "postgres-v3-q20",
+      "domain": "maintenance",
+      "stem": "A notification service uses a `jobs` table as a queue: 4k jobs/s are inserted, claimed with SKIP LOCKED and deleted. The claim query slows from 2 ms in the morning to 300 ms by evening, and EXPLAIN shows its index scan stepping over hundreds of thousands of dead entries. A BI job on the same primary keeps one transaction open from 09:00 to 17:00. Which change fixes the slowdown?",
+      "options": [
+        {
+          "text": "Add an index on `jobs(status)` so the claim finds pending jobs faster.",
+          "correct": false,
+          "why": "The new index fills with the same dead entries, because vacuum cannot remove rows the BI snapshot still might see."
+        },
+        {
+          "text": "Rebuild the queue index with `REINDEX CONCURRENTLY` every hour during the day, while the BI job keeps running as it does today.",
+          "correct": false,
+          "why": "The fresh index is still built over dead rows that cannot be removed, so it fills up again within the hour."
+        },
+        {
+          "text": "Move the BI job off the primary and give `jobs` aggressive autovacuum settings.",
+          "correct": true,
+          "why": "Run the BI job on a replica without hot_standby_feedback or in a warehouse; with no 8-hour snapshot holding back the horizon, vacuum removes dead queue rows within minutes and the claim scan stays short."
+        },
+        {
+          "text": "Switch the queue to `UNLOGGED` to avoid WAL.",
+          "correct": false,
+          "why": "It cuts WAL but not dead tuples; the BI snapshot still blocks their removal, and the queue is wiped after a crash."
+        }
+      ],
+      "explain": "High-churn tables (queues, sessions) depend on vacuum removing dead rows quickly, and one long transaction anywhere on the primary stops that. Keep long reads off the primary and give churn tables aggressive autovacuum settings.",
+      "refs": [
+        "https://www.postgresql.org/docs/17/routine-vacuuming.html"
+      ]
+    }
+  ]
+}

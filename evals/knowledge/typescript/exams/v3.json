@@ -1,0 +1,670 @@
+{
+  "topic": "typescript",
+  "variant": 3,
+  "of": 5,
+  "title": "TypeScript type design at scale — variant 3",
+  "description": "CSV, partner and remote-config edges, parse once, seat and wallet state modelling, NoInfer, proof brands, layer types, API diffs and expand-contract events, suppressions, async gaps, require(esm) and fast builds.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "boundaries",
+      "name": "Runtime boundaries and validation",
+      "weight": 0.25
+    },
+    {
+      "id": "modelling",
+      "name": "Modelling domain states and ids",
+      "weight": 0.25
+    },
+    {
+      "id": "contracts",
+      "name": "Contracts between services",
+      "weight": 0.15
+    },
+    {
+      "id": "strictness",
+      "name": "Strictness, any and escape hatches",
+      "weight": 0.15
+    },
+    {
+      "id": "toolchain",
+      "name": "Modules, monorepos and the toolchain",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "typescript-v3-q01",
+      "domain": "boundaries",
+      "stem": "A marketplace lets sellers bulk-upload products as CSV (up to 50k rows). The importer maps each row with `row as unknown as Product` and writes to Postgres. A seller in Germany uploaded prices like `\"12,50\"`; 8,000 products went live at price `NaN` and checkout broke for them. What should the importer do?",
+      "options": [
+        {
+          "text": "Parse each row with a schema that normalises the price; import valid rows, report the rest.",
+          "correct": true,
+          "why": "The schema is the one place where CSV strings become typed values, and the report lets the seller fix the bad rows without blocking the good ones."
+        },
+        {
+          "text": "Add a Postgres `CHECK (price > 0)` constraint so bad prices are rejected by the database.",
+          "correct": false,
+          "why": "A good backstop, but `NaN` comparisons and driver conversions make it unreliable, the error surfaces as a failed insert with no row-level feedback, and other fields are still unchecked."
+        },
+        {
+          "text": "Replace the double cast with a single `row as Product`, so the compiler at least checks overlap.",
+          "correct": false,
+          "why": "A cast is still a claim; CSV cells are all strings, and no assertion turns `\"12,50\"` into a number."
+        },
+        {
+          "text": "Reject the whole file if any row fails, so partial imports never happen.",
+          "correct": false,
+          "why": "Safe, but with 50k rows one typo blocks the seller's entire catalogue, and without a schema the failures still aren't detected."
+        }
+      ],
+      "explain": "File imports are untyped input, however trusted the uploader. Convert them with a schema that normalises formats, and design the failure path (per-row errors, partial success) as deliberately as the happy path.",
+      "refs": [
+        "https://zod.dev/api",
+        "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#type-assertions"
+      ]
+    },
+    {
+      "id": "typescript-v3-q02",
+      "domain": "boundaries",
+      "stem": "A hotel channel manager receives availability events from 25 booking partners and parses them with `z.strictObject(...)`, \"to catch bad data early\". One partner added an optional `promoCode` field; every event from that partner was rejected and their rooms showed as sold out for 6 hours. Which parsing policy fits inbound partner data?",
+      "options": [
+        {
+          "text": "Keep `z.strictObject` and alert on every rejection so the team can update the partner schemas quickly.",
+          "correct": false,
+          "why": "Faster alerts still mean an outage for every additive change a partner makes, and partners don't announce them."
+        },
+        {
+          "text": "Use `z.looseObject` so unknown fields are passed through to domain code.",
+          "correct": false,
+          "why": "It accepts the event, but unvalidated extra fields flow into the domain and may be persisted or forwarded without anyone deciding to."
+        },
+        {
+          "text": "A plain `z.object`, which strips unknown keys; keep strict objects for the team's own config.",
+          "correct": true,
+          "why": "The fields you rely on are validated, new partner fields are dropped harmlessly, and strictness is kept where a typo means a team mistake."
+        },
+        {
+          "text": "Skip validation for trusted partners and validate only new integrations.",
+          "correct": false,
+          "why": "Trusted partners are the ones whose changes break you; skipping validation turns their next bug into corrupt availability."
+        }
+      ],
+      "explain": "Be strict about what you need and tolerant of what you don't. External producers add fields without warning, so inbound schemas should strip unknown keys; reserve strict objects for inputs your own team writes, where an unknown key is a typo.",
+      "refs": [
+        "https://zod.dev/api#objects"
+      ]
+    },
+    {
+      "id": "typescript-v3-q03",
+      "domain": "boundaries",
+      "stem": "A gym chain syncs memberships from a billing provider. The schema has `cancelledAt: z.coerce.date()`. For active members the provider sends `cancelledAt: null`. After a deploy, 14,000 active members were treated as cancelled on 1970-01-01 and locked out of the gyms. What should the field be?",
+      "options": [
+        {
+          "text": "`z.coerce.date().optional()`",
+          "correct": false,
+          "why": "`optional` allows the key to be missing, but `null` is present and still coerces to the 1970 epoch."
+        },
+        {
+          "text": "`z.iso.datetime({ offset: true }).transform(s => new Date(s)).nullable()`",
+          "correct": true,
+          "why": "`null` stays `null` (still active), real timestamps become Dates, and malformed values are rejected instead of becoming 1970."
+        },
+        {
+          "text": "`z.date().nullable()`",
+          "correct": false,
+          "why": "`null` is handled correctly, but the provider sends ISO strings, not Date objects, so every cancelled member now fails validation."
+        },
+        {
+          "text": "Keep `z.coerce.date()` and treat any date before 2000 as \"not cancelled\" in the access check.",
+          "correct": false,
+          "why": "It patches one symptom with a magic number, and every other reader of `cancelledAt` still sees a 1970 date."
+        }
+      ],
+      "explain": "Coercion invents values: `new Date(null)` is the epoch. Model absence explicitly (`nullable`/`optional`) and parse the wire format you actually receive, so the domain type distinguishes \"never\" from \"a date\".",
+      "refs": [
+        "https://zod.dev/api#coercion",
+        "https://zod.dev/api#iso-datetimes"
+      ]
+    },
+    {
+      "id": "typescript-v3-q04",
+      "domain": "boundaries",
+      "stem": "A mobile game's live-ops service pulls a tuning config (drop rates, prices) from a remote config store every 60 s on 300 pods. It is typed with `as LiveConfig`. An operator pushed a JSON file with `dropRates` as an object instead of an array; every pod threw on the next tick and the game was down for 12 minutes. How should the service load config?",
+      "options": [
+        {
+          "text": "Validate the JSON in the config store's UI before it can be saved.",
+          "correct": false,
+          "why": "Useful, but it is a separate implementation that drifts from the service's real type, and the service still trusts whatever it reads."
+        },
+        {
+          "text": "Wrap the config consumer in `try/catch` and fall back to hard-coded defaults on error.",
+          "correct": false,
+          "why": "The pods stay up, but they silently switch to stale built-in values mid-game, and the bad config still reaches code paths outside the `try`."
+        },
+        {
+          "text": "Parse each fetched config with a schema; on failure keep the last-known-good config and alert.",
+          "correct": true,
+          "why": "Bad pushes are rejected at the boundary, every pod keeps running on the previous valid config, and the operator learns quickly."
+        },
+        {
+          "text": "Roll out config changes to 10% of pods first.",
+          "correct": false,
+          "why": "A canary limits the blast radius, but those 30 pods still crash on the bad config; the missing piece is validation."
+        }
+      ],
+      "explain": "Runtime config is input like any other, and a hot-reload loop is a boundary you cross every minute. Parse each new version; on failure keep the last valid one and alert, so a bad push degrades to \"no change\" instead of an outage.",
+      "refs": [
+        "https://zod.dev/api",
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown"
+      ]
+    },
+    {
+      "id": "typescript-v3-q05",
+      "domain": "boundaries",
+      "stem": "An ad-tech bidder handles 200k requests/s. The same bid request is validated with a zod schema in the controller, again in the pricing service and again in the repository, \"to be safe\". Profiling shows 30% of CPU in validation. What should the design be?",
+      "options": [
+        {
+          "text": "Switch to a faster validation library and keep all three checks.",
+          "correct": false,
+          "why": "Faster checks reduce the cost, but repeated validation of data that can't have changed inside one process is still waste."
+        },
+        {
+          "text": "Validate once at the edge and pass the parsed type inward.",
+          "correct": true,
+          "why": "Parse once at the trust boundary (brand the result if needed); in-process calls can rely on the static type, which costs nothing at runtime."
+        },
+        {
+          "text": "Remove validation entirely and rely on the TypeScript types.",
+          "correct": false,
+          "why": "It removes the cost, but the types say nothing about what bidders actually send; the edge check is the one that matters."
+        },
+        {
+          "text": "Validate only a 1% sample of requests and log failures.",
+          "correct": false,
+          "why": "It cuts CPU, but 99% of malformed requests now reach pricing unchecked."
+        }
+      ],
+      "explain": "\"Parse, don't validate\": convert untrusted input once, at the boundary, into a type that records it was checked, and let the type system carry that fact inward. Re-validating inside the process buys nothing.",
+      "refs": [
+        "https://zod.dev/api",
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v3-q06",
+      "domain": "modelling",
+      "stem": "A ticketing system models a seat as `{ isReserved: boolean; isReleased: boolean; isExpired: boolean; holdUntil?: Date; orderId?: string }`. On-sale events (40k users per minute) produced seats that were both reserved and released, and seats sold twice. Which model removes the impossible combinations?",
+      "options": [
+        {
+          "text": "A union on `state`: free, held with `holdUntil`, or sold with `orderId`.",
+          "correct": true,
+          "why": "Each seat is in exactly one state, and each state carries only its data; the flag combinations simply can't be written."
+        },
+        {
+          "text": "Keep the booleans and add a database `CHECK` constraint that at most one is true.",
+          "correct": false,
+          "why": "It stops bad rows in the DB, but code still builds impossible objects in memory, and `holdUntil` without `isReserved` still type-checks."
+        },
+        {
+          "text": "Replace the booleans with one `status: string` field.",
+          "correct": false,
+          "why": "Better than three flags, but `string` accepts typos, and the optional fields are still unrelated to the status."
+        },
+        {
+          "text": "Make the three booleans `readonly` so they can't be changed after creation.",
+          "correct": false,
+          "why": "Seats legitimately change state; `readonly` blocks valid updates and still allows invalid combinations at creation."
+        }
+      ],
+      "explain": "N booleans describe 2^N states, most of them impossible. A discriminated union lists only the real states and attaches data to the state it belongs to. Pair it with a database constraint for defence in depth.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions"
+      ]
+    },
+    {
+      "id": "typescript-v3-q07",
+      "domain": "modelling",
+      "stem": "A wallet service's `transfer()` throws `Error(\"insufficient funds\")`, `Error(\"account frozen\")` or `Error(\"limit exceeded\")`, and callers parse the message. A message rewording turned frozen-account attempts into 500s for 2 hours. These outcomes are expected business results, not bugs. What should `transfer()` do?",
+      "options": [
+        {
+          "text": "Throw custom subclasses (`InsufficientFunds extends Error`) and catch them with `instanceof`.",
+          "correct": false,
+          "why": "Better than parsing strings, but the signature doesn't say which errors can occur, so callers can forget them and the compiler won't notice."
+        },
+        {
+          "text": "Return a result union with a typed `reason`; throw only for bugs and outages.",
+          "correct": true,
+          "why": "Expected failures become part of the type: callers must handle them, and an exhaustive switch on `reason` flags new reasons."
+        },
+        {
+          "text": "Keep throwing, but move the messages into shared constants.",
+          "correct": false,
+          "why": "It stops the rewording bug, but callers still find out about failure modes only by reading the implementation."
+        },
+        {
+          "text": "Return `null` for any failure and log the reason.",
+          "correct": false,
+          "why": "The caller can't tell \"frozen\" from \"limit\", which is exactly the information it needs to respond correctly."
+        }
+      ],
+      "explain": "Use the type system for outcomes callers must handle: a discriminated result union makes expected failures visible and exhaustively checkable. Keep exceptions for the unexpected (bugs, outages), where unwinding is what you want.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions",
+        "https://www.typescriptlang.org/docs/handbook/2/narrowing.html#exhaustiveness-checking"
+      ]
+    },
+    {
+      "id": "typescript-v3-q08",
+      "domain": "modelling",
+      "stem": "A platform team's helper builds typed state machines. A product team wrote the call shown; it compiled, and the job scheduler started every job in a state no transition handles, so 4,000 jobs hung overnight. How should the helper's signature change?",
+      "code": "function createFsm<S extends string>(\n  states: readonly S[],\n  initial: S,\n): Fsm<S> { /* ... */ }\n\nconst jobs = createFsm([\"queued\", \"running\", \"done\"], \"queud\");\n// S is inferred as \"queued\" | \"running\" | \"done\" | \"queud\"",
+      "options": [
+        {
+          "text": "Annotate the call site: `createFsm<\"queued\" | \"running\" | \"done\">(...)`.",
+          "correct": false,
+          "why": "It works when people remember it, but the helper should be safe by default, and the next team will skip the annotation."
+        },
+        {
+          "text": "Validate `initial` against `states` at runtime and throw.",
+          "correct": false,
+          "why": "A good extra check, but it fails at startup in production instead of at compile time, which the types can do for free."
+        },
+        {
+          "text": "Declare `initial: NoInfer<S>`, so `S` is inferred only from `states`.",
+          "correct": true,
+          "why": "`NoInfer` stops the second argument from widening `S`, so a typo in `initial` becomes a compile error."
+        },
+        {
+          "text": "Change `S extends string` to `S extends \"queued\" | \"running\" | \"done\"`.",
+          "correct": false,
+          "why": "It hard-codes one machine's states into a generic helper, so no other team can use it."
+        }
+      ],
+      "explain": "Generic inference uses every argument as a candidate, so a typo in one argument can quietly widen the type. Mark arguments that should only be checked, not used for inference, with `NoInfer<T>` (TS 5.4).",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-4.html#the-noinfer-utility-type"
+      ]
+    },
+    {
+      "id": "typescript-v3-q09",
+      "domain": "modelling",
+      "stem": "An e-commerce platform was fined after marketing emails went to addresses that had never confirmed opt-in. `sendMarketing(to: string)` is called from 30 places, and the verification check lives in some of them. Which design makes the rule impossible to skip in code?",
+      "options": [
+        {
+          "text": "Have `sendMarketing` look up the verification status in the database before each send.",
+          "correct": false,
+          "why": "It enforces the rule at runtime, but it adds a query per email (millions per campaign), and the type still invites passing any string."
+        },
+        {
+          "text": "Add a code-review checklist item for every new caller.",
+          "correct": false,
+          "why": "It relies on reviewers remembering across 30 call sites, which is how the fine happened."
+        },
+        {
+          "text": "A brand `VerifiedEmail` that only the opt-in confirmation flow can produce, and `sendMarketing(to: VerifiedEmail)`.",
+          "correct": true,
+          "why": "The only way to get a `VerifiedEmail` is through the flow that checks consent, so unverified addresses don't compile at the call site."
+        },
+        {
+          "text": "Rename the parameter to `verifiedEmail: string` to make the expectation obvious.",
+          "correct": false,
+          "why": "Parameter names are not checked; any string still compiles."
+        }
+      ],
+      "explain": "Brands can carry proofs, not just identities: \"this email has been verified\", \"this amount was checked against the limit\". Produce the brand only in the function that performs the check, and require it where the rule matters.",
+      "refs": [
+        "https://zod.dev/api#branded-types"
+      ]
+    },
+    {
+      "id": "typescript-v3-q10",
+      "domain": "modelling",
+      "stem": "A classifieds API uses one `Listing` type for the create request, the DB entity and the public response, so `id`, `createdAt` and `sellerEmail` are all optional. Code is full of `listing.id!`, and a response once included `sellerEmail`. What should the team do?",
+      "options": [
+        {
+          "text": "Keep one type but mark server-set fields `readonly`.",
+          "correct": false,
+          "why": "It stops writes, but `id` is still optional on entities and `sellerEmail` is still part of the public shape."
+        },
+        {
+          "text": "Use `Partial<Listing>` for requests and `Required<Listing>` for entities.",
+          "correct": false,
+          "why": "It fixes optionality in two places, but it is still one field list, so private fields stay in every derived type, including the response."
+        },
+        {
+          "text": "Generate all three from the database schema.",
+          "correct": false,
+          "why": "The DB schema knows the entity, not what clients may send or see; the public response would still mirror the table."
+        },
+        {
+          "text": "Separate types per layer: `CreateListingInput`, `Listing` (all server fields required) and `ListingResponse` built by an explicit mapper.",
+          "correct": true,
+          "why": "Each layer states its own truth: entities always have an `id`, inputs can't set it, and the response holds only allowed fields."
+        }
+      ],
+      "explain": "One type shared across input, storage and output must be the loosest of the three, so everything becomes optional and private fields leak. Give each layer its own type and convert explicitly at the seams.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/2/objects.html#excess-property-checks"
+      ]
+    },
+    {
+      "id": "typescript-v3-q11",
+      "domain": "contracts",
+      "stem": "A logistics API is used by about 300 external integrators. A developer made `incoterm` a required request field in the OpenAPI spec and the handler; review missed it, and 40% of integrators started getting 400s. The team wants this caught before release. What should they add?",
+      "options": [
+        {
+          "text": "A CI diff of the spec against the last release that fails on breaking changes.",
+          "correct": true,
+          "why": "The diff checks the actual contract change against what integrators use, which a code review of handler code easily misses."
+        },
+        {
+          "text": "Integration tests that call each endpoint with a full, valid payload, run on every pull request.",
+          "correct": false,
+          "why": "Tests with complete payloads keep passing; they don't show that an older client without `incoterm` now fails."
+        },
+        {
+          "text": "Generate server types from the spec so the handler and spec always match.",
+          "correct": false,
+          "why": "Good practice, but the spec and handler agreed with each other; both were changed incompatibly for clients."
+        },
+        {
+          "text": "A longer review period for any PR touching the API module.",
+          "correct": false,
+          "why": "More time doesn't reliably catch a one-line `required` change; an automated diff does."
+        }
+      ],
+      "explain": "For public APIs, compatibility is a property of the change between versions, not of the current code. Diff the published contract against the last release in CI and treat \"newly required input\" or \"removed output\" as breaking unless it ships as a new version.",
+      "refs": [
+        "https://spec.openapis.org/oas/latest.html"
+      ]
+    },
+    {
+      "id": "typescript-v3-q12",
+      "domain": "contracts",
+      "stem": "A pricing team needs to change `PriceChanged.price` from `number` (implicitly EUR) to `{ amount: number; currency: string }`. Seven services consume the event from Kafka, and two of them deploy monthly. How should the change be rolled out?",
+      "options": [
+        {
+          "text": "Change the field's type in a single release and update the shared type package so consumers see compile errors.",
+          "correct": false,
+          "why": "Consumers see errors only when they rebuild; the monthly deployers keep running old code that reads a number and gets an object."
+        },
+        {
+          "text": "Ask all seven teams to deploy on the same day as the producer.",
+          "correct": false,
+          "why": "It might work once, but it couples seven release cycles, and messages already in the topic still have the old shape."
+        },
+        {
+          "text": "Add a new field or a `v2` event alongside the old one, migrate consumers, then remove the old.",
+          "correct": true,
+          "why": "Old and new readers both work during the transition, so each consumer migrates on its own schedule."
+        },
+        {
+          "text": "Use a union type `number | Money` for `price` so either shape is valid.",
+          "correct": false,
+          "why": "The type allows both, but every consumer must handle both forever, and old consumers still crash on the object."
+        }
+      ],
+      "explain": "A type change to an existing field is a breaking change, however small. Expand then contract: add the new form beside the old, move consumers over, and remove the old form only when nobody reads it.",
+      "refs": [
+        "https://json-schema.org/understanding-json-schema/"
+      ]
+    },
+    {
+      "id": "typescript-v3-q13",
+      "domain": "contracts",
+      "stem": "A shared `@acme/events` package changes `currency: string` to `currency: \"EUR\" | \"USD\" | \"GBP\"`. Some services produce these events; others only consume them. Two producers deploy weekly and one sends `\"CHF\"` for a Swiss pilot. How should this release be treated?",
+      "options": [
+        {
+          "text": "As a patch: narrowing a type is always safe for consumers.",
+          "correct": false,
+          "why": "Narrowing is safe for readers at compile time, but producers that assign arbitrary strings break, and the runtime data can still contain `\"CHF\"`."
+        },
+        {
+          "text": "As a minor version, since no field was removed.",
+          "correct": false,
+          "why": "No field was removed, but code that writes the type stops compiling, which is breaking by any semver definition."
+        },
+        {
+          "text": "Breaking for producers; consumers must still parse `currency` at runtime.",
+          "correct": true,
+          "why": "It is a major for code that writes the type, and the narrower type doesn't change what old or non-compliant producers actually send."
+        },
+        {
+          "text": "As safe, because zod `z.infer` will regenerate the type for every consumer on its next build.",
+          "correct": false,
+          "why": "Inferred types only change what the compiler believes; they don't change messages already in the topic or sent by old producers."
+        }
+      ],
+      "explain": "Type changes have direction: narrowing breaks writers, widening breaks readers. And a shared type only describes what compliant, up-to-date code sends, so consumers still need runtime parsing for values outside the new union.",
+      "refs": [
+        "https://semver.org/",
+        "https://www.typescriptlang.org/docs/handbook/2/functions.html#unknown"
+      ]
+    },
+    {
+      "id": "typescript-v3-q14",
+      "domain": "strictness",
+      "stem": "A codebase has 230 `// @ts-ignore` comments added during a TS upgrade. A library later fixed its types, so many ignores now hide nothing, and three of them have since hidden new, real errors that shipped. What should the team change?",
+      "options": [
+        {
+          "text": "Switch to `@ts-expect-error`, which fails once the line no longer errors.",
+          "correct": true,
+          "why": "Unused `@ts-expect-error` comments fail the build (TS2578), so suppressions are removed as soon as they stop being needed and can't silently hide new errors."
+        },
+        {
+          "text": "Replace them with `as any` casts at the exact expression.",
+          "correct": false,
+          "why": "A cast is narrower than a line ignore, but it never expires either and hides every later error in that expression."
+        },
+        {
+          "text": "Leave them, but require a comment explaining each one.",
+          "correct": false,
+          "why": "Explanations help reviewers, but the ignore still hides any new error on that line."
+        },
+        {
+          "text": "Turn on `skipLibCheck` so problems in library types no longer need ignores in application code.",
+          "correct": false,
+          "why": "`skipLibCheck` skips errors inside `.d.ts` files, not errors in your code caused by a library's types."
+        }
+      ],
+      "explain": "Every suppression should expire when its reason does. `@ts-expect-error` fails when it becomes unnecessary, so suppressions shrink over time instead of collecting and hiding new bugs.",
+      "refs": [
+        "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-9.html#-ts-expect-error-comments"
+      ]
+    },
+    {
+      "id": "typescript-v3-q15",
+      "domain": "strictness",
+      "stem": "A plugin system defines `interface WebhookHandler { handle(e: WebhookEvent): Promise<void> }` where `WebhookEvent` is a union of 12 event types. A plugin implemented `handle(e: InvoicePaid)` and crashed at runtime on other events. `strict` (including `strictFunctionTypes`) is on. Why did it compile, and what fixes it?",
+      "options": [
+        {
+          "text": "`Promise<void>` return types disable parameter checks; change the return type to `void`.",
+          "correct": false,
+          "why": "Return types don't affect how parameters are compared; the method syntax does."
+        },
+        {
+          "text": "Interfaces are checked loosely; change it to a `type` alias.",
+          "correct": false,
+          "why": "Interfaces and type aliases compare parameters the same way; switching keywords alone changes nothing."
+        },
+        {
+          "text": "`strictFunctionTypes` only covers callbacks, not plugins loaded at runtime; add a runtime type guard.",
+          "correct": false,
+          "why": "A guard helps at runtime, but the compiler could reject the implementation outright with a different declaration."
+        },
+        {
+          "text": "Method shorthand is exempt from `strictFunctionTypes`; declare `handle: (e: WebhookEvent) => Promise<void>`.",
+          "correct": true,
+          "why": "Property syntax is checked contravariantly, so an implementation that accepts only `InvoicePaid` is rejected."
+        }
+      ],
+      "explain": "`strictFunctionTypes` applies to function-typed properties, not to method declarations, which stay bivariant. For ports and plugin interfaces where the implementation must accept every input, use property syntax.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#strictFunctionTypes"
+      ]
+    },
+    {
+      "id": "typescript-v3-q16",
+      "domain": "strictness",
+      "stem": "A nightly job imports 20k supplier records. Under `strict`, it compiles cleanly, but it reports \"import complete\" and the next job reads half-written data. The code is shown. What would have flagged this before production?",
+      "code": "async function importAll(rows: Row[]) {\n  rows.forEach(async (r) => {\n    await upsert(r);\n  });\n  log.info(\"import complete\");\n}",
+      "options": [
+        {
+          "text": "Enabling `noImplicitReturns` so the async callback must return a value.",
+          "correct": false,
+          "why": "The callback returns nothing on every path, which `noImplicitReturns` allows; the issue is the promise nobody awaits."
+        },
+        {
+          "text": "Typing `rows` as `readonly Row[]` so `forEach` can't change it.",
+          "correct": false,
+          "why": "Immutability doesn't change how `forEach` ignores the promises its callback returns."
+        },
+        {
+          "text": "Only type-aware lint (e.g. `no-floating-promises`); tsc has no check for it.",
+          "correct": true,
+          "why": "tsc has no floating-promise check; typescript-eslint `no-floating-promises`/`no-misused-promises` flag it, and `for...of` with `await` (or `await Promise.all`) fixes the ordering."
+        },
+        {
+          "text": "Enabling `strictFunctionTypes` so an async function can't be passed where a sync callback is expected.",
+          "correct": false,
+          "why": "A function returning `Promise<void>` is assignable to one returning `void` by design; no compiler flag changes that."
+        }
+      ],
+      "explain": "The type checker allows async functions wherever `void` callbacks are expected, so lost promises compile. Add type-aware lint for floating and misused promises, and await loops explicitly; types don't protect async control flow.",
+      "refs": [
+        "https://typescript-eslint.io/rules/no-floating-promises/",
+        "https://typescript-eslint.io/rules/no-misused-promises/"
+      ]
+    },
+    {
+      "id": "typescript-v3-q17",
+      "domain": "toolchain",
+      "stem": "A NestJS 11 service compiled to CommonJS needs a new dependency that ships ESM only. The service runs on Node 24. A teammate proposes a full migration of the service to ESM first (about 2 weeks). What is the cheaper path, and what is its catch?",
+      "options": [
+        {
+          "text": "There is none; CommonJS code can only load ESM with dynamic `import()`, which forces async initialisation everywhere.",
+          "correct": false,
+          "why": "That was true on older Node; current Node can `require()` synchronous ESM, so dynamic `import()` is no longer the only option."
+        },
+        {
+          "text": "`require()` the package directly, since Node 24 supports `require(esm)`; it fails only if the package uses top-level `await`.",
+          "correct": true,
+          "why": "Synchronous ES module graphs can be required from CJS on current Node; graphs with top-level `await` throw `ERR_REQUIRE_ASYNC_MODULE`."
+        },
+        {
+          "text": "Set `esModuleInterop: true`, which lets tsc convert the dependency to CommonJS.",
+          "correct": false,
+          "why": "Interop changes how your imports are compiled; it never rewrites a dependency in `node_modules`."
+        },
+        {
+          "text": "Bundle the dependency into the service with a bundler so the format no longer matters.",
+          "correct": false,
+          "why": "It works, but it adds a build tool and a second module graph to maintain for one dependency, when Node can load it directly."
+        }
+      ],
+      "explain": "Since Node 22.12 (and 20.19), CommonJS can `require()` ES modules that don't use top-level `await`. That changes the economics of ESM-only dependencies: check for top-level await before planning a migration.",
+      "refs": [
+        "https://nodejs.org/api/modules.html#loading-ecmascript-modules-using-require"
+      ]
+    },
+    {
+      "id": "typescript-v3-q18",
+      "domain": "toolchain",
+      "stem": "A 300k-line service takes 4 minutes to build with `tsc`. The team wants to emit JS with esbuild or swc (per-file transpilers, a few seconds) and keep type safety. Which setup is sound?",
+      "options": [
+        {
+          "text": "Emit with the transpiler and drop `tsc` entirely; editors show type errors anyway.",
+          "correct": false,
+          "why": "Editors check only open files; without a CI gate, type errors in untouched files ship."
+        },
+        {
+          "text": "Emit with the transpiler and run `tsc` with `incremental: false` to make it faster.",
+          "correct": false,
+          "why": "Turning off incremental makes tsc slower, not faster, and doesn't address what per-file transpilers can't see."
+        },
+        {
+          "text": "Emit with the transpiler, run `tsc` only before major releases.",
+          "correct": false,
+          "why": "Type errors pile up between releases and land on whoever cuts the release."
+        },
+        {
+          "text": "Transpile per file with esbuild/swc, turn on `isolatedModules` (or `verbatimModuleSyntax`), and keep `tsc --noEmit` as a CI gate.",
+          "correct": true,
+          "why": "The flags make tsc reject code a per-file transpiler can't compile correctly, and the CI check keeps full type safety while builds get fast."
+        }
+      ],
+      "explain": "Split \"produce JS\" from \"check types\". Per-file transpilers are fast but see one file at a time, so enable the flags that make tsc reject cross-file constructs, and keep a full type check as a separate CI step.",
+      "refs": [
+        "https://www.typescriptlang.org/tsconfig/#isolatedModules",
+        "https://www.typescriptlang.org/tsconfig/#verbatimModuleSyntax"
+      ]
+    },
+    {
+      "id": "typescript-v3-q19",
+      "domain": "toolchain",
+      "stem": "A platform team plans to publish an internal SDK as raw `.ts` (no build), since all consuming services run on Node 24 with type stripping. The first consumer fails at startup with `ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`. What should the team publish?",
+      "options": [
+        {
+          "text": "Raw `.ts` files, and have consumers copy the SDK into their own `src/` instead of installing it from the registry.",
+          "correct": false,
+          "why": "It dodges the `node_modules` rule, but versioning, updates and dependency resolution are lost, and every consumer now owns a fork."
+        },
+        {
+          "text": "Compiled JavaScript plus `.d.ts` files, with `exports` pointing at the JS.",
+          "correct": true,
+          "why": "Consumers load plain JS at runtime and get types from the declarations, which works for every runtime and toolchain."
+        },
+        {
+          "text": "Raw `.ts` files, and have each consumer bundle the SDK into its build.",
+          "correct": false,
+          "why": "Consumers that run with plain Node have no build step to bundle in, and each one now compiles your SDK with its own settings."
+        },
+        {
+          "text": "Only the `.d.ts` files, since the services already have the runtime code.",
+          "correct": false,
+          "why": "Declarations have no runtime code; the services would have types but nothing to execute."
+        }
+      ],
+      "explain": "Node's type stripping is for your own application code: it refuses `.ts` files inside `node_modules`. Libraries should still publish JavaScript and declaration files, so consumers don't depend on your source syntax or compiler settings.",
+      "refs": [
+        "https://nodejs.org/api/typescript.html#type-stripping",
+        "https://nodejs.org/api/packages.html"
+      ]
+    },
+    {
+      "id": "typescript-v3-q20",
+      "domain": "toolchain",
+      "stem": "A team upgraded from TypeScript 6.0 to 7.0. The type check went from 5 minutes to under 1, with no new errors. But a CI job that snapshot-tests compiler output for a set of \"known bad\" fixture files now fails on 60 snapshots, all where the message prints a union type. What should they change?",
+      "options": [
+        {
+          "text": "Roll back to 6.0, since changed messages mean 7.0 checks differently.",
+          "correct": false,
+          "why": "7.0 checks types essentially as 6.0 did; what changed is mostly the order in which union members are printed (`stableTypeOrdering`), though in rare cases ordering can also add or remove an error."
+        },
+        {
+          "text": "Regenerate the snapshots on every run so they always pass.",
+          "correct": false,
+          "why": "Snapshots that always regenerate test nothing; they would also hide real regressions."
+        },
+        {
+          "text": "Match fixture failures on error codes (for example TS2322, TS2578) rather than message text.",
+          "correct": true,
+          "why": "Error codes are stable across compiler versions, while union member order in messages differs in 7.0."
+        },
+        {
+          "text": "Run the fixture job with `tsc6` from `@typescript/typescript6` so the snapshots keep matching.",
+          "correct": false,
+          "why": "It keeps the snapshots green, but it tests a compiler you no longer ship and keeps two toolchains alive to protect message text."
+        }
+      ],
+      "explain": "Compiler messages are presentation, not contract. TS 7 always uses stable type ordering, so unions print differently from 6.0. Assert on error codes and locations in tests that check type errors.",
+      "refs": [
+        "https://devblogs.microsoft.com/typescript/?p=5246"
+      ]
+    }
+  ]
+}

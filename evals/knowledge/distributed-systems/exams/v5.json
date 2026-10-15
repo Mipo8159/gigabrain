@@ -1,0 +1,605 @@
+{
+  "topic": "distributed-systems",
+  "variant": 5,
+  "of": 5,
+  "title": "Distributed systems at scale — variant 5",
+  "description": "Durability claims, write skew, co-location, version vectors, unknown outcomes, stream recovery, stampedes, pool math and failback.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "consistency",
+      "name": "Consistency, replication and quorums",
+      "weight": 0.2
+    },
+    {
+      "id": "partitioning",
+      "name": "Partitioning, consensus and clocks",
+      "weight": 0.2
+    },
+    {
+      "id": "effects",
+      "name": "Idempotency, outbox and sagas",
+      "weight": 0.2
+    },
+    {
+      "id": "overload",
+      "name": "Timeouts, retries, breakers and load shedding",
+      "weight": 0.25
+    },
+    {
+      "id": "regions",
+      "name": "Multi-region, cells and blast radius",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "distributed-systems-v5-q01",
+      "domain": "consistency",
+      "stem": "A checkout service stores idempotency records in Redis (one primary, two replicas, Sentinel failover) and writes orders to Postgres. After a Redis failover, 37 retried checkouts found no record and charged customers a second time. A teammate proposes calling `WAIT 1 100` after each Redis write. What should the team do?",
+      "options": [
+        {
+          "text": "Adopt `WAIT 1 100`, so every write is acknowledged by at least one replica before the checkout continues.",
+          "correct": false,
+          "why": "It narrows the window, but Redis documents that WAIT doesn't make it strongly consistent: acknowledged writes can still be lost in a failover."
+        },
+        {
+          "text": "Turn on `appendfsync always` on the Redis primary.",
+          "correct": false,
+          "why": "It makes the primary's own disk durable, but failover promotes a replica that may never have received the write."
+        },
+        {
+          "text": "Keep the idempotency record in Postgres, in the same transaction as the order.",
+          "correct": true,
+          "why": "The record is then exactly as durable as the order and commits atomically with it, so a failover can't separate them."
+        },
+        {
+          "text": "Add a third Redis replica so a failover is less likely to pick a stale one.",
+          "correct": false,
+          "why": "More replicas change which one gets promoted, not whether replication is async, so writes can still be lost."
+        }
+      ],
+      "explain": "An idempotency or dedupe record must be at least as durable as the effect it protects, and ideally commit with it. Async-replicated stores, even with `WAIT`, can lose acknowledged writes in failover. Put such records in the transactional store that holds the business data."
+    },
+    {
+      "id": "distributed-systems-v5-q02",
+      "domain": "consistency",
+      "stem": "A hospital rota app on Postgres 17 enforces 'at least one doctor on call per shift'. Each request checks `SELECT count(*) ... WHERE on_call` and, if the count is ≥ 2, sets the requester off call. Two doctors went off call at the same moment, both at REPEATABLE READ, and the shift ended up with nobody. Which change enforces the rule?",
+      "code": "BEGIN ISOLATION LEVEL REPEATABLE READ;\nSELECT count(*) FROM rota\n  WHERE shift_id = $1 AND on_call;     -- both see 2\nUPDATE rota SET on_call = false\n  WHERE shift_id = $1 AND doctor_id = $2;\nCOMMIT;",
+      "options": [
+        {
+          "text": "Run it at SERIALIZABLE and retry the whole transaction on SQLSTATE `40001`.",
+          "correct": true,
+          "why": "Serializable snapshot isolation detects this write skew and aborts one transaction; the retry then sees only one doctor and refuses."
+        },
+        {
+          "text": "Keep REPEATABLE READ, because a snapshot already stops each transaction from seeing the other's change.",
+          "correct": false,
+          "why": "That is exactly the problem: each works on its own snapshot and updates a different row, so the database finds no conflict."
+        },
+        {
+          "text": "Add a unique index on `(shift_id, on_call)` so the rule is enforced by the database itself.",
+          "correct": false,
+          "why": "It would forbid two doctors on call at once, which is wrong, and no index can express 'at least one'."
+        },
+        {
+          "text": "Recheck the count in application code right after the `UPDATE`.",
+          "correct": false,
+          "why": "Each transaction still sees its own snapshot, so both rechecks pass and the race remains."
+        }
+      ],
+      "explain": "Write skew happens when two transactions read an overlapping set, then update different rows, so neither conflicts directly. Snapshot isolation (REPEATABLE READ in Postgres) allows it. Use SERIALIZABLE and retry whole transactions on `40001`, or lock the rows the decision depends on (`SELECT ... FOR UPDATE`)."
+    },
+    {
+      "id": "distributed-systems-v5-q03",
+      "domain": "consistency",
+      "stem": "A microservice platform uses a 3-node, consensus-backed service registry. Clients query it before every call and fail the call if the registry is unreachable. During a network partition that cut one AZ off from the registry's majority, every service in that AZ failed, although the services they called in the same AZ were healthy. How should clients behave?",
+      "options": [
+        {
+          "text": "Grow the registry to 7 nodes across the AZs so it is always reachable from every one of them.",
+          "correct": false,
+          "why": "More nodes tolerate more failures, but a partitioned AZ still can't reach the majority, so its clients fail the same way."
+        },
+        {
+          "text": "Block calls until the registry answers again, so services never use stale endpoints.",
+          "correct": false,
+          "why": "It keeps endpoint data fresh, but it turns a registry outage into an outage of every service, which is what happened."
+        },
+        {
+          "text": "Fall back to an endpoint list baked into the image at build time.",
+          "correct": false,
+          "why": "It is available, but it can be weeks old, and pods have moved since, so many endpoints in it are dead."
+        },
+        {
+          "text": "Keep serving from the last-known-good endpoint list cached in each client.",
+          "correct": true,
+          "why": "Slightly stale endpoints still work while the registry is cut off; only registry writes need the majority."
+        }
+      ],
+      "explain": "Pick the consistency per path. Control data such as endpoints, config and feature flags should be written through consensus, but read from a local last-known-good copy, so a partition or outage of the control system doesn't stop the data plane. Prefer stale-but-available over correct-but-down for routing data."
+    },
+    {
+      "id": "distributed-systems-v5-q04",
+      "domain": "consistency",
+      "stem": "An admin console writes pricing rules (a few per hour) to a Postgres 17 primary. A rules engine reads them from a single hot standby, which is listed in `synchronous_standby_names`. With `synchronous_commit = on`, the engine sometimes misses a rule for a few hundred milliseconds after the admin's commit returns. How can the admin write guarantee the rule is visible on that standby when the commit returns?",
+      "options": [
+        {
+          "text": "`SET LOCAL synchronous_commit = remote_write` in the admin transaction.",
+          "correct": false,
+          "why": "This waits only until the standby has received the WAL and handed it to its OS, before it is replayed, so the rule may not be visible yet."
+        },
+        {
+          "text": "Keep `on` and have the admin UI wait 1 s before reporting success.",
+          "correct": false,
+          "why": "It usually works, but replay can lag longer than 1 s under load, so it is a guess, not a guarantee."
+        },
+        {
+          "text": "`SET LOCAL synchronous_commit = remote_apply` in the admin transaction.",
+          "correct": true,
+          "why": "The commit returns only after the standby has applied it, so its queries see the rule, and only these rare writes pay the wait."
+        },
+        {
+          "text": "Set `synchronous_commit = remote_apply` for every transaction on the primary.",
+          "correct": false,
+          "why": "It gives the same guarantee, but it charges the apply wait to all writes instead of the few admin writes that need it."
+        }
+      ],
+      "explain": "Postgres lets each transaction choose how far its commit waits: `local`, `remote_write`, `on` (flushed on the standby) or `remote_apply` (replayed, visible to queries). Use the strongest level only for the transactions whose readers need it, with `SET LOCAL`."
+    },
+    {
+      "id": "distributed-systems-v5-q05",
+      "domain": "partitioning",
+      "stem": "An expense app shards Postgres by `user_id`. About 90% of writes (approvals, splits, team budgets) touch several users in the same company, so they run as two-phase commits across shards, with p99 at 900 ms and occasional in-doubt transactions. Companies range from 5 to 20,000 users. How should the data be partitioned?",
+      "options": [
+        {
+          "text": "Keep sharding by `user_id`, but replace the 2PC writes with sagas that run in the background.",
+          "correct": false,
+          "why": "It removes blocking 2PC, but 90% of writes become multi-step sagas with compensations and no isolation, a lot of complexity for routine work."
+        },
+        {
+          "text": "Shard by `company_id`, with a directory that can give the largest companies their own shards.",
+          "correct": true,
+          "why": "Most transactions become single-shard and local, and the directory handles the 20,000-user outliers."
+        },
+        {
+          "text": "Consolidate everything back onto a single Postgres primary.",
+          "correct": false,
+          "why": "Transactions become local, but it gives up the scale-out the app was sharded for."
+        },
+        {
+          "text": "Shard by `expense_id` so writes spread evenly across all shards.",
+          "correct": false,
+          "why": "Writes spread evenly, but every approval or budget operation then crosses even more shards."
+        }
+      ],
+      "explain": "Choose the partition key so the common transaction stays on one partition: co-locate data that changes together (tenant, company, account). Cross-partition transactions (2PC or sagas) should be the exception. Use a directory so outsized tenants can get special placement."
+    },
+    {
+      "id": "distributed-systems-v5-q06",
+      "domain": "partitioning",
+      "stem": "A storage cluster moves a node's partitions to other nodes after 10 s of missed heartbeats. One node hit long GC pauses, so its partitions began moving; the extra copy traffic slowed other nodes, which then missed heartbeats too, and within 20 minutes half the cluster was rebalancing. What should change?",
+      "options": [
+        {
+          "text": "Shorten the heartbeat timeout from 10 s to 2 s so that failed nodes are confirmed and replaced faster.",
+          "correct": false,
+          "why": "It detects real failures faster, but slow nodes get flagged even sooner, which feeds the cascade."
+        },
+        {
+          "text": "Add more nodes so there is spare capacity to absorb the copy traffic.",
+          "correct": false,
+          "why": "Extra headroom helps a little, but the trigger and the feedback loop stay, and more nodes means more possible moves."
+        },
+        {
+          "text": "Confirm failure over minutes, cap concurrent moves, and require approval for large rebalances.",
+          "correct": true,
+          "why": "Brief slowness no longer triggers moves, and capping moves stops rebalancing from creating more 'failures'."
+        },
+        {
+          "text": "Pause replication while partitions are moving so the copy traffic has more bandwidth.",
+          "correct": false,
+          "why": "Copies finish faster, but writes during the move are less protected, which trades a slow cluster for possible data loss."
+        }
+      ],
+      "explain": "Automatic rebalancing plus an aggressive failure detector is a feedback loop: moves add load, load looks like failure, and failure triggers more moves. Dampen it with longer confirmation windows, limited concurrent moves and a human in the loop for big moves. Moving data is expensive, so don't do it on a guess."
+    },
+    {
+      "id": "distributed-systems-v5-q07",
+      "domain": "partitioning",
+      "stem": "A monthly invoicing cron runs on 4 instances, guarded by a Redis lock with a 10-minute TTL. This month the lock holder stalled on a slow query for 14 minutes, the lock expired, a second instance started, and 6,000 customers got two invoices. The job must still run even if one instance is down. What makes it safe?",
+      "options": [
+        {
+          "text": "Run the cron on one designated instance only, and remove the lock entirely so there is nothing to expire.",
+          "correct": false,
+          "why": "There is no race, but if that instance is down at midnight on the 1st, nobody is invoiced, which breaks the requirement."
+        },
+        {
+          "text": "Raise the lock TTL to 2 hours so the job always finishes before the lock expires.",
+          "correct": false,
+          "why": "It covers this stall, but stalls have no upper bound, and a crashed holder now blocks invoicing for 2 hours."
+        },
+        {
+          "text": "Switch to Redlock across five Redis nodes.",
+          "correct": false,
+          "why": "Redlock makes the lock service more available, but it is still a time-based lease, so the stalled holder still runs after it expires."
+        },
+        {
+          "text": "Keep the lock to avoid duplicate work, and add a unique constraint on `(customer_id, billing_month)` for invoices.",
+          "correct": true,
+          "why": "Even if two runners overlap, each customer's invoice can only be created once; the lock only saves effort."
+        }
+      ],
+      "explain": "Locks with TTLs are leases and can't guarantee mutual exclusion against pauses. Use them to avoid duplicate *work*, and enforce correctness where the effect lands: an idempotency key or unique constraint per logical unit, such as one invoice per customer per month."
+    },
+    {
+      "id": "distributed-systems-v5-q08",
+      "domain": "partitioning",
+      "stem": "An offline-first notes app syncs edits from a user's phone, tablet and laptop through a server. When two versions of a note meet, the app must tell 'B was made after seeing A' (keep B) from 'A and B were made independently' (show both and ask the user). Device clocks are unreliable. What metadata should each version carry?",
+      "options": [
+        {
+          "text": "The device's wall-clock time of the edit, compared at merge time.",
+          "correct": false,
+          "why": "Easy to compare, but unreliable clocks pick the wrong winner, and wall time can't tell 'concurrent' from 'later'."
+        },
+        {
+          "text": "A Lamport timestamp, incremented on every edit and on every sync.",
+          "correct": false,
+          "why": "Lamport clocks are consistent with causality, but two independent edits still get comparable numbers, so concurrency can't be detected."
+        },
+        {
+          "text": "The time the server received the version, which is set by one trustworthy clock.",
+          "correct": false,
+          "why": "One clock gives a consistent order, but arrival order reflects when devices came online, not whether one edit saw the other."
+        },
+        {
+          "text": "A version vector: one counter per device, merged on sync.",
+          "correct": true,
+          "why": "Comparing vectors tells 'descends from' (one dominates) apart from 'concurrent' (neither dominates), so the app knows when to ask."
+        }
+      ],
+      "explain": "Lamport timestamps give an order that respects causality but can't reveal concurrency. Version (or vector) clocks can: if neither vector dominates the other, the edits were concurrent and need a merge. Use them whenever 'conflict or not' must be detected rather than guessed."
+    },
+    {
+      "id": "distributed-systems-v5-q09",
+      "domain": "effects",
+      "stem": "A marketplace calls a freight partner's `POST /shipments`, which has **no** idempotency support but accepts a client `reference` field and offers `GET /shipments?reference=…`. Calls time out at 5 s about 1% of the time, and in roughly 2% of those the shipment was actually created. What should the client do after a timeout?",
+      "options": [
+        {
+          "text": "Retry the POST up to 3 times with jittered exponential backoff.",
+          "correct": false,
+          "why": "It handles transient errors, but when the first call did succeed, each retry creates another shipment."
+        },
+        {
+          "text": "Send the order id as `reference`; after a timeout, look it up and create only if none exists.",
+          "correct": true,
+          "why": "The unknown outcome is resolved by reading the partner's state before writing again, so no duplicate is created."
+        },
+        {
+          "text": "Never retry; mark the order failed and ask the customer to try again later.",
+          "correct": false,
+          "why": "It avoids duplicates, but 98% of timed-out orders are lost sales, and 2% still have a shipment nobody tracks."
+        },
+        {
+          "text": "Raise the timeout to 60 s so timeouts almost never happen.",
+          "correct": false,
+          "why": "Timeouts get rarer, but the unknown outcome still exists, and each request now holds resources for up to a minute."
+        }
+      ],
+      "explain": "Without idempotency keys, a timeout leaves an unknown outcome that must be resolved before retrying. Tag requests with your own unique reference, and on an unknown outcome look up whether the effect happened (or reconcile asynchronously) before writing again. Ask partners for idempotency support where you can."
+    },
+    {
+      "id": "distributed-systems-v5-q10",
+      "domain": "effects",
+      "stem": "A stream job uses Kafka transactions to consume `orders`, compute totals and produce to `order-totals`. The downstream reporting consumer is configured with `isolation.level=read_uncommitted`. After the stream job crashed mid-transaction and retried, reports double-counted some totals. What should change?",
+      "options": [
+        {
+          "text": "Set the reporting consumer to `isolation.level=read_committed`.",
+          "correct": true,
+          "why": "It then sees only records from committed transactions, so the aborted attempt's output is skipped."
+        },
+        {
+          "text": "Turn off transactions in the stream job and enable `enable.idempotence` only.",
+          "correct": false,
+          "why": "The idempotent producer dedupes its own retries, but without transactions the stream job's output and offsets are no longer atomic, so reprocessing duplicates again."
+        },
+        {
+          "text": "Give each stream job instance a random `transactional.id` on every start.",
+          "correct": false,
+          "why": "A stable `transactional.id` is what lets Kafka fence the zombie instance and abort its open transaction; random ids defeat that."
+        },
+        {
+          "text": "Raise `transaction.timeout.ms` so transactions are less likely to abort, and add more partitions to `order-totals`.",
+          "correct": false,
+          "why": "Fewer aborts makes the problem rarer, but aborted records still exist and an uncommitted reader still sees them."
+        }
+      ],
+      "explain": "Kafka's exactly-once is a contract between producer and consumers: transactional producers mark records as committed or aborted, and only consumers reading with `read_committed` hide the aborted ones. Check both ends, and keep a stable `transactional.id` so zombie instances get fenced."
+    },
+    {
+      "id": "distributed-systems-v5-q11",
+      "domain": "effects",
+      "stem": "An order saga runs its compensations as `await refund(order).catch(log)`. During a 40-minute payments outage, 1,400 refunds failed and were only logged. A hotfix script that replayed refunds from the logs then refunded 200 customers twice, because some refunds had succeeded on a retry the logs didn't show. What should the saga do?",
+      "options": [
+        {
+          "text": "Wrap each compensation in try/catch and page on-call whenever a compensation fails.",
+          "correct": false,
+          "why": "Humans learn about it faster, but 1,400 refunds are still dropped and need manual recovery."
+        },
+        {
+          "text": "Run all compensations in parallel so they finish before the payments service can go down.",
+          "correct": false,
+          "why": "It is faster, but a down service fails all of them at once, and ordering between compensations is lost."
+        },
+        {
+          "text": "Persist pending compensations and retry them with backoff, keyed by saga id + step.",
+          "correct": true,
+          "why": "Refunds survive outages and crashes, eventually apply, and can never apply twice, whoever retries them."
+        },
+        {
+          "text": "Have finance run a daily reconciliation script that re-sends every logged refund failure.",
+          "correct": false,
+          "why": "It eventually refunds, but without an idempotency key it re-sends refunds that already succeeded, which is what caused the doubles."
+        }
+      ],
+      "explain": "Compensations are business-critical writes, not best-effort clean-up. Persist them, retry them until they succeed or are escalated, and make each one idempotent with a key derived from the saga and step, so retries from any source (process, operator, script) stay safe."
+    },
+    {
+      "id": "distributed-systems-v5-q12",
+      "domain": "effects",
+      "stem": "A Redis 8 Streams worker group processes payouts with `XREADGROUP GROUP g <consumer> COUNT 10 BLOCK 5000 STREAMS payouts >` and `XACK` after each payout. Pods are restarted often, and each one starts with a new random consumer name. Thousands of entries now sit pending forever and those payouts never ran. Which two changes recover them? (Choose two.)",
+      "options": [
+        {
+          "text": "Give each pod a stable consumer name, and on start read its own pending entries with ID `0` before switching to `>`.",
+          "correct": true,
+          "why": "`>` returns only never-delivered entries; reading from `0` replays this consumer's own unacknowledged entries."
+        },
+        {
+          "text": "Periodically run `XAUTOCLAIM` with a minimum idle time to take over entries left by dead consumers.",
+          "correct": true,
+          "why": "Entries owned by consumers that never come back are claimed by a live one and processed."
+        },
+        {
+          "text": "Read with `NOACK` so entries never get stuck pending.",
+          "correct": false,
+          "why": "Nothing gets stuck, but nothing is tracked either, so a crash mid-payout loses that payout silently."
+        },
+        {
+          "text": "Trim the stream with `XTRIM MAXLEN` to clear out the stuck entries.",
+          "correct": false,
+          "why": "It removes old entries, which deletes the unprocessed payouts instead of recovering them."
+        },
+        {
+          "text": "Raise `BLOCK` to 60,000 ms so consumers wait longer for entries.",
+          "correct": false,
+          "why": "It changes how long an empty read waits, and has nothing to do with entries already pending."
+        }
+      ],
+      "explain": "In consumer groups, delivered-but-unacknowledged entries sit in a consumer's pending list until that consumer acks them or someone claims them. A robust worker drains its own pending entries on start (ID `0`), periodically claims idle entries from dead consumers (`XAUTOCLAIM`), and sends entries delivered too many times to a dead-letter stream."
+    },
+    {
+      "id": "distributed-systems-v5-q13",
+      "domain": "overload",
+      "stem": "A news app caches the 'top stories' feed in Redis with a 60 s TTL. Building the feed takes an 800 ms database query. Every minute, at expiry, about 3,000 concurrent requests miss the cache at once, all run the query, and database CPU spikes to 100%. What fixes the spikes?",
+      "options": [
+        {
+          "text": "Raise the TTL to 1 hour so the feed expires less often.",
+          "correct": false,
+          "why": "Fewer expiries, but each one still triggers the same 3,000-query stampede, and the feed is now up to an hour stale."
+        },
+        {
+          "text": "Single-flight the rebuild per key, serve stale meanwhile, and refresh before expiry.",
+          "correct": true,
+          "why": "Each expiry costs one query instead of 3,000, and refreshing early means readers rarely see a miss at all."
+        },
+        {
+          "text": "Move the database to an instance with twice the CPU, so it can absorb the burst every minute.",
+          "correct": false,
+          "why": "It absorbs a bigger burst, but 3,000 identical queries a minute is wasted work that grows with traffic."
+        },
+        {
+          "text": "Retry the feed query with backoff when it times out.",
+          "correct": false,
+          "why": "Retries add more copies of the same expensive query during the spike, making it worse."
+        }
+      ],
+      "explain": "A cache stampede happens when many readers miss the same key together and all rebuild it. Coalesce rebuilds per key (single-flight or a short lock), serve stale while rebuilding, and refresh ahead of expiry (with jittered TTLs across keys), so the database sees one rebuild per key."
+    },
+    {
+      "id": "distributed-systems-v5-q14",
+      "domain": "overload",
+      "stem": "A webhook-delivery worker pool (concurrency 10) uses `pRetry(send, { retries: 10 })` with p-retry 8's defaults. During a partner's 2-hour outage, each failing job held a worker slot for about 17 minutes of sleeps, and webhooks for *all other* partners stalled behind them. What should change?",
+      "options": [
+        {
+          "text": "Raise the pool's concurrency from 10 to 200 so slow jobs can't fill every slot.",
+          "correct": false,
+          "why": "More slots delay the stall, but jobs sleeping for one dead partner still hold slots and memory as the backlog grows."
+        },
+        {
+          "text": "Cut `retries` to 2 and keep the other defaults.",
+          "correct": false,
+          "why": "Jobs fail faster, but delays stay un-jittered, and the dead partner's webhooks are dropped after a few seconds with no later redelivery."
+        },
+        {
+          "text": "Bound in-process retries (finite `maxTimeout`, `maxRetryTime`, jitter), then requeue with a delay or dead-letter.",
+          "correct": true,
+          "why": "A slot is freed within seconds, and long outages are handled by the queue's delayed redelivery, so other partners aren't blocked."
+        },
+        {
+          "text": "Wrap `send` in a circuit breaker per partner, and keep the same p-retry settings inside it.",
+          "correct": false,
+          "why": "A breaker per partner helps, but with p-retry's long sleeps inside it, each job still holds its slot while it waits."
+        }
+      ],
+      "explain": "In-process retries should be short and bounded (a cap, total time and jitter; p-retry defaults to no jitter, `maxTimeout: Infinity` and 10 retries). Long outages belong to the queue: give the message back with a delay or dead-letter it, so a dead dependency doesn't hold worker capacity that other work needs."
+    },
+    {
+      "id": "distributed-systems-v5-q15",
+      "domain": "overload",
+      "stem": "A ticket-presale API gets 5× its normal traffic within 60 s. Autoscaling needs about 4 minutes. Overloaded pods' event loops stall, they fail their load-balancer health checks and are removed, the remaining pods get even more traffic, and the whole fleet collapses within 2 minutes. What breaks this spiral?",
+      "options": [
+        {
+          "text": "Lower the autoscaling CPU target from 60% to 30%, so new pods launch at a much earlier stage of the spike.",
+          "correct": false,
+          "why": "Scaling starts sooner, but new pods still take minutes, and a 5× spike in 60 s outruns them."
+        },
+        {
+          "text": "Cap concurrent requests per pod and reject the excess at once with 503 and `Retry-After`.",
+          "correct": true,
+          "why": "Admitted requests stay fast and health checks keep passing, so no pods are removed and capacity is preserved while scaling catches up."
+        },
+        {
+          "text": "Turn off load-balancer health checks during the presale.",
+          "correct": false,
+          "why": "Pods are no longer removed, but genuinely broken pods keep receiving traffic, and overloaded pods still serve everyone slowly."
+        },
+        {
+          "text": "Move to instances with twice the CPU.",
+          "correct": false,
+          "why": "It buys about 2×, which is not enough for 5×, and the same spiral starts at a higher level."
+        }
+      ],
+      "explain": "Overload plus health-check eviction is a death spiral: each removed pod increases the load on the rest. Admission control (bounded concurrency with fast rejection) keeps every pod in its healthy range, so the fleet degrades by rejecting some requests rather than collapsing."
+    },
+    {
+      "id": "distributed-systems-v5-q16",
+      "domain": "overload",
+      "stem": "A NestJS 11 service runs 300 pods, each with a node-postgres pool of `max: 20`, against a Postgres 17 instance with `max_connections = 500`. During a rolling deploy (surge to 360 pods), new pods failed with 'too many clients already' and the database spent heavy CPU on connection churn. Each pod normally needs about 3 connections busy. What fixes this?",
+      "options": [
+        {
+          "text": "Raise `max_connections` to 7,500 so every pod can open its full pool.",
+          "correct": false,
+          "why": "Every connection is a backend process with its own memory, so thousands of mostly idle backends waste memory and add contention."
+        },
+        {
+          "text": "Retry connection errors with backoff in each pod.",
+          "correct": false,
+          "why": "Pods eventually connect, but demand still exceeds supply, and the retries add more connection churn."
+        },
+        {
+          "text": "Shrink per-pod pools to about 5 and add a pooler (such as PgBouncer) in front of Postgres.",
+          "correct": true,
+          "why": "Pods ask for what they actually use, and the pooler multiplexes them onto a few hundred server connections that survive deploy surges."
+        },
+        {
+          "text": "Cut the deployment to 25 pods so the total of pods × pool size fits under the 500 limit.",
+          "correct": false,
+          "why": "The arithmetic fits, but the service loses the compute it scaled out for."
+        }
+      ],
+      "explain": "Pool size × instance count is the real connection demand, and it grows with scale-out and deploy surges. Size per-instance pools from actual concurrency (Little's law), and put a pooler between many clients and Postgres. Note that transaction pooling breaks session features such as session-level advisory locks."
+    },
+    {
+      "id": "distributed-systems-v5-q17",
+      "domain": "overload",
+      "stem": "A shared search API serves 900 tenants. One tenant's nightly batch sends 20× its daytime rate, latency for every tenant triples, and support tickets pile up. The batch tenant pays for a higher plan with a contracted 200 req/s. What should the API do?",
+      "options": [
+        {
+          "text": "Set a global rate limit on the API, sized to the capacity of the whole fleet.",
+          "correct": false,
+          "why": "It protects the fleet, but when the batch fills the global limit, every tenant's requests are rejected alongside it."
+        },
+        {
+          "text": "Enforce a per-tenant token bucket matching each plan, returning 429 with `Retry-After` when it is exceeded.",
+          "correct": true,
+          "why": "The batch tenant is held to its contracted 200 req/s and told when to retry, while other tenants keep their share."
+        },
+        {
+          "text": "Scale the fleet out every night for the batch window.",
+          "correct": false,
+          "why": "It absorbs today's batch, but costs grow with one tenant's habits, and nothing stops a bigger batch."
+        },
+        {
+          "text": "Queue all requests in a single FIFO queue so the batch is served fairly in arrival order with everyone else.",
+          "correct": false,
+          "why": "Arrival order isn't fair when one tenant sends 20×: its requests fill the queue and everyone else waits behind them."
+        }
+      ],
+      "explain": "In multi-tenant systems, fairness needs per-tenant limits: quotas or token buckets at admission, with 429 and `Retry-After` so well-behaved clients back off. Global limits and shared FIFO queues let the noisiest tenant set everyone else's latency."
+    },
+    {
+      "id": "distributed-systems-v5-q18",
+      "domain": "regions",
+      "stem": "A ride-hailing app runs full stacks in eu-west and us-east, but every API request in either region validates its session by synchronously calling the auth service, which runs only in us-east. A us-east outage took the EU product down too. What design keeps regions independent?",
+      "options": [
+        {
+          "text": "Cache auth responses in eu-west for 5 minutes so EU traffic can ride out short us-east outages.",
+          "correct": false,
+          "why": "It helps sessions seen in the last 5 minutes, but new logins and longer outages still fail, so the dependency remains."
+        },
+        {
+          "text": "Retry failed auth calls with backoff until us-east recovers.",
+          "correct": false,
+          "why": "Retries can't reach a region that is down, and they add load on recovery."
+        },
+        {
+          "text": "Run auth in each region and validate signed tokens locally, with keys replicated to both.",
+          "correct": true,
+          "why": "No request path crosses a region, so a us-east outage no longer affects EU users."
+        },
+        {
+          "text": "Deploy the auth service across three AZs in us-east instead of two.",
+          "correct": false,
+          "why": "It improves auth's availability within us-east, but a regional outage still takes it out for both regions."
+        }
+      ],
+      "explain": "Regional independence: a region's request path should depend only on that region. Replicate what every request needs (keys, config, session validation) into each region and validate locally. Keep cross-region traffic asynchronous (replication), never synchronous on the request path."
+    },
+    {
+      "id": "distributed-systems-v5-q19",
+      "domain": "regions",
+      "stem": "After a 3-hour us-east outage, a team failed over to us-west, which was promoted from an async replica. When us-east came back, they restarted the old primary as a replica of us-west and failed back an hour later. Weeks later, finance found orders that existed only in us-east's data from the minutes before the outage, plus a few corrupted rows. What should the failback process be?",
+      "options": [
+        {
+          "text": "Fail back right away, as soon as us-east is healthy again, to keep the time spent running in the secondary region short.",
+          "correct": false,
+          "why": "Speed isn't the issue: rejoining a diverged primary without dealing with its unreplicated writes is."
+        },
+        {
+          "text": "Rebuild the old primary from us-west, reconcile its orphaned writes, then fail back as a planned switchover.",
+          "correct": true,
+          "why": "The old primary's extra writes are recovered on purpose instead of lost or mixed in, and failback becomes a controlled event with no data loss."
+        },
+        {
+          "text": "Promote us-east again and replay us-west's writes onto it.",
+          "correct": false,
+          "why": "It runs the same divergence in reverse, now with two sets of conflicting writes to merge by hand."
+        },
+        {
+          "text": "Make us-east and us-west active-active so failback is never needed.",
+          "correct": false,
+          "why": "It is a large redesign with its own conflict handling, and doesn't address the diverged writes already sitting in us-east."
+        }
+      ],
+      "explain": "After an async failover, the old primary may hold writes the new primary never got, so it has diverged. Never just reattach it: rebuild it from the new primary (for example with `pg_rewind` or a fresh clone), extract and reconcile its orphaned writes as a business process, and fail back as a planned, rehearsed switchover."
+    },
+    {
+      "id": "distributed-systems-v5-q20",
+      "domain": "regions",
+      "stem": "A food-delivery platform runs active-active with traffic split 90% us-east, 10% us-west. Both regions have enough instances for the full load. When us-east failed, DNS moved all traffic to us-west at once; its caches were cold, cache misses overwhelmed the us-west database, and the region fell over. What should change?",
+      "options": [
+        {
+          "text": "Shift traffic gradually with weighted routing, and shed low-priority traffic while caches warm.",
+          "correct": true,
+          "why": "The database sees misses ramp up instead of arriving all at once, and shedding protects the core flows during the shift."
+        },
+        {
+          "text": "Give the us-west database twice the instance size of us-east's, sized to survive a fully cold-cache failover.",
+          "correct": false,
+          "why": "It may absorb this cold start, but it is expensive idle capacity, and the cache-miss surge still grows with traffic."
+        },
+        {
+          "text": "Lower the DNS TTL so the shift happens even faster.",
+          "correct": false,
+          "why": "A faster shift makes the thundering herd on cold caches arrive even more suddenly."
+        },
+        {
+          "text": "Turn off the cache in us-west so its database is always sized for direct reads.",
+          "correct": false,
+          "why": "It removes the cold-start surprise, but the database must then carry every read all the time, which costs far more."
+        }
+      ],
+      "explain": "Instance count isn't the only capacity that must be warm: caches, connection pools and JIT state all are. Move traffic in steps, keep the standby serving a meaningful share of real traffic so its caches stay warm, and shed low-value load during the transition. Capacity planning has to include a cold-cache surge."
+    }
+  ]
+}

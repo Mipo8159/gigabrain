@@ -1,0 +1,669 @@
+{
+  "topic": "kafka",
+  "variant": 5,
+  "of": 5,
+  "title": "Kafka at scale — variant 5",
+  "description": "Fintech, travel booking and social feeds: fan-out and two-account keys, stuck partitions and deploy groups, offsets stored with the effect, enum evolution and poison handling, regional clusters and backlog maths.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "partitioning",
+      "name": "Partitioning, keys and ordering",
+      "weight": 0.2
+    },
+    {
+      "id": "groups",
+      "name": "Consumer groups, rebalancing and lag",
+      "weight": 0.2
+    },
+    {
+      "id": "delivery",
+      "name": "Delivery semantics, idempotence and transactions",
+      "weight": 0.2
+    },
+    {
+      "id": "integration",
+      "name": "Outbox, retries, DLQ and schema evolution",
+      "weight": 0.2
+    },
+    {
+      "id": "scale",
+      "name": "Replication, multi-region and capacity",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "kafka-v5-q01",
+      "domain": "partitioning",
+      "stem": "A social network writes one `FeedInsert` event per follower when someone posts, keyed by the **author's** user ID, to `feed-fanout` (128 partitions). When a celebrity with 40 million followers posts, one partition receives 40 million events and feeds for those followers lag by an hour. Each follower's feed must apply inserts in order. What key should the fan-out events use?",
+      "options": [
+        {
+          "text": "Keep the author ID but give celebrities a dedicated topic with one big partition",
+          "correct": false,
+          "why": "Isolates the blast radius, but 40 million events still queue on a single partition, so those feeds still lag an hour."
+        },
+        {
+          "text": "The follower's user ID",
+          "correct": true,
+          "why": "Each insert targets one follower's feed, so keying by follower keeps that feed ordered and spreads a celebrity's fan-out across all partitions."
+        },
+        {
+          "text": "A random key per event so the burst spreads evenly over every partition",
+          "correct": false,
+          "why": "Spreads the load, but two inserts for the same follower can land on different partitions and be applied out of order."
+        },
+        {
+          "text": "The post ID, so every insert from one post stays together on one partition",
+          "correct": false,
+          "why": "All 40 million inserts for one post still land on one partition, which is the same hot spot under a new name."
+        }
+      ],
+      "explain": "Key by the entity whose state the consumer updates, not by the entity that caused the event. In fan-out designs that is usually the recipient, which naturally spreads bursts.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_concepts_and_terms"
+      ]
+    },
+    {
+      "id": "kafka-v5-q02",
+      "domain": "partitioning",
+      "stem": "A neobank's ledger consumers keep a running balance per account and need each account's entries in order. A transfer moves money from account A to account B. Today the service emits one `TransferMade` event keyed by transfer ID, and both ledgers read it; balances sometimes go briefly negative because entries for an account arrive out of order. How should transfers be published?",
+      "options": [
+        {
+          "text": "Key `TransferMade` by the sender's account so at least debits are ordered",
+          "correct": false,
+          "why": "Fixes account A's ordering but B's credit is now on A's partition, out of order with B's other entries."
+        },
+        {
+          "text": "Publish `TransferMade` twice, once keyed by A and once by B, from two separate send calls after the DB commit",
+          "correct": false,
+          "why": "The keying is right, but sending after the commit is a dual write: a crash between the sends leaves one side unrecorded."
+        },
+        {
+          "text": "Write a debit keyed by A and a credit keyed by B through the outbox in the same DB transaction",
+          "correct": true,
+          "why": "Each account's entries share its own key, so each ledger sees its account in order, and the outbox guarantees both entries are published."
+        },
+        {
+          "text": "Put all ledger events on a single partition so every account is globally ordered",
+          "correct": false,
+          "why": "Solves ordering by capping the whole bank's ledger at one partition's throughput."
+        }
+      ],
+      "explain": "When one business action touches several ordered entities, emit one event per entity keyed by that entity, and publish them atomically through an outbox.",
+      "refs": [
+        "https://microservices.io/patterns/data/transactional-outbox.html"
+      ]
+    },
+    {
+      "id": "kafka-v5-q03",
+      "domain": "partitioning",
+      "stem": "A travel company keeps the latest fare per route in a compacted topic `fares` (8 partitions, keyed by route). To scale, someone increased it to 16 partitions. Weeks later, a service that rebuilds its fare cache from the topic shows stale fares for some routes even though newer fares were published. What happened?",
+      "options": [
+        {
+          "text": "Compaction stopped working after the partition change",
+          "correct": false,
+          "why": "Compaction keeps running per partition; it simply cannot see that the same key now lives in two partitions."
+        },
+        {
+          "text": "The cache needs `read_committed` to see the latest fares",
+          "correct": false,
+          "why": "Isolation level concerns transactions; these are plain records."
+        },
+        {
+          "text": "Some routes now hash to new partitions, so old values stay on the old partition",
+          "correct": true,
+          "why": "Compaction works per partition: a key's last pre-change value is never superseded on its old partition, and a rebuild may apply it after the newer one."
+        },
+        {
+          "text": "The cache reads partitions in parallel and should read them one at a time in order",
+          "correct": false,
+          "why": "Reading sequentially still sees both the stale and the current value; which wins depends on partition order, not the publish time."
+        }
+      ],
+      "explain": "Compacted topics are especially sensitive to partition changes: a key's history splits across partitions, and the old value lives forever. Re-partition by creating a new topic and re-publishing the latest values.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#compaction"
+      ]
+    },
+    {
+      "id": "kafka-v5-q04",
+      "domain": "partitioning",
+      "stem": "A hotel-booking platform publishes room holds to `room-holds`, keyed by hotel ID, and the consumer checks availability per hotel and night to prevent overbooking. A 4,000-room resort now produces so many holds that its partition lags 15 minutes during sales. The availability check only compares holds for the same hotel and night. Which key should holds use?",
+      "options": [
+        {
+          "text": "Hotel ID plus stay date",
+          "correct": true,
+          "why": "The overbooking check is per hotel and night, so that pair is the ordering unit; the resort's holds spread over many partitions."
+        },
+        {
+          "text": "The guest ID, so each guest's holds are processed in order across hotels",
+          "correct": false,
+          "why": "Two guests holding the last room for the same night land on different partitions and can both succeed."
+        },
+        {
+          "text": "Hotel ID, but with the resort's events sent to a separate high-priority topic",
+          "correct": false,
+          "why": "Isolation helps other hotels, but the resort is still one key on one partition, so its own lag remains."
+        },
+        {
+          "text": "Hotel ID with more partitions added so the resort gets a partition to itself",
+          "correct": false,
+          "why": "No partition count splits a single key; the resort still has exactly one partition."
+        }
+      ],
+      "explain": "Make the key exactly as coarse as the invariant you check. A compound key (entity plus date or shard) is often the real ordering unit and spreads hot entities.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_concepts_and_terms"
+      ]
+    },
+    {
+      "id": "kafka-v5-q05",
+      "domain": "groups",
+      "stem": "A card-authorisation consumer on `@confluentinc/kafka-javascript` shows partition 11's committed offset frozen at 88,412,903 for 40 minutes while its log-end offset keeps rising; other partitions are fine, the pod is healthy, and CPU on it is high. The handler rethrows errors. Which cause is most likely?",
+      "options": [
+        {
+          "text": "The member lost its assignment and nobody owns partition 11",
+          "correct": false,
+          "why": "An unowned partition shows no consumer activity; here the pod is busy at high CPU on that partition."
+        },
+        {
+          "text": "The broker leading partition 11 is down",
+          "correct": false,
+          "why": "Then producers could not append either, yet the log-end offset is rising."
+        },
+        {
+          "text": "Auto-commit is disabled for that partition only",
+          "correct": false,
+          "why": "Commit settings are per consumer, not per partition, and other partitions are committing fine."
+        },
+        {
+          "text": "A poison record at that offset, redelivered in a tight throw loop",
+          "correct": true,
+          "why": "On a throw the Confluent client seeks back to the same offset with no backoff or limit, so the partition spins on one record."
+        }
+      ],
+      "explain": "A frozen committed offset with a busy consumer means a retry loop on one record. Classify errors, send permanent failures to a DLQ, and add bounded backoff for transient ones.",
+      "refs": [
+        "https://github.com/confluentinc/confluent-kafka-javascript/blob/master/lib/kafkajs/_consumer.js"
+      ]
+    },
+    {
+      "id": "kafka-v5-q06",
+      "domain": "groups",
+      "stem": "A fraud service joins `card-swipes` and `card-limits` locally, in memory, by card ID. Both topics have 32 partitions and use the same partitioner, so partition N of each holds the same cards. The service runs on the new consumer protocol with the default `uniform` remote assignor, and many lookups find no limits for the card. What should change?",
+      "options": [
+        {
+          "text": "Set `group.remote.assignor` to `range`",
+          "correct": true,
+          "why": "Range gives the same partition numbers of co-partitioned topics to the same member; uniform balances partitions without that alignment."
+        },
+        {
+          "text": "Use two separate consumer groups, one per topic",
+          "correct": false,
+          "why": "Each group would assign partitions independently, so a pod would hold swipes and limits for different cards."
+        },
+        {
+          "text": "Increase `card-limits` to 64 partitions so lookups are faster",
+          "correct": false,
+          "why": "Breaks co-partitioning outright: card IDs on the two topics would map to different partition numbers."
+        },
+        {
+          "text": "Have every pod read all of `card-limits` with manual assignment, plus the swipes group",
+          "correct": false,
+          "why": "Works for a small reference table but multiplies reads by the pod count; an assignor setting solves it directly."
+        }
+      ],
+      "explain": "Co-partitioned local joins need an assignor that keeps partition N of each topic on one member. Under KIP-848 that is the broker-side `range` assignor, which co-partitions when members have identical subscriptions.",
+      "refs": [
+        "https://www.confluent.io/blog/kip-848-consumer-rebalance-protocol/"
+      ]
+    },
+    {
+      "id": "kafka-v5-q07",
+      "domain": "groups",
+      "stem": "A travel aggregator's consumer sends each booking to an airline API limited to 100 requests/s per client. To respect the limit, a developer added `await sleep(10_000)` in the handler whenever the airline returns 429. Since then, members keep leaving the group during busy hours and bookings are sent twice. How should the consumer apply backpressure instead?",
+      "options": [
+        {
+          "text": "Increase `max.poll.interval.ms` to 30 minutes so the sleeps fit",
+          "correct": false,
+          "why": "Members stop leaving, but a genuinely stuck consumer now goes unnoticed for 30 minutes."
+        },
+        {
+          "text": "Pause the partitions on 429, resume after a backoff timer, and keep polling",
+          "correct": true,
+          "why": "Pausing stops fetching without blocking the poll loop, so the member stays in the group and resumes when the rate window opens."
+        },
+        {
+          "text": "Drop bookings that get 429 and let the airline reconcile later",
+          "correct": false,
+          "why": "Fast, but it loses bookings the business must deliver."
+        },
+        {
+          "text": "Send 429 responses to a retry topic and continue at full speed",
+          "correct": false,
+          "why": "The retry topic gets hammered by the same rate limit, and later bookings for the same trip can overtake earlier ones."
+        }
+      ],
+      "explain": "Backpressure belongs in flow control, not in blocking handlers. Pause the affected partitions, keep polling, and resume after a backoff, so liveness checks stay happy.",
+      "refs": [
+        "https://kafka.js.org/docs/consuming"
+      ]
+    },
+    {
+      "id": "kafka-v5-q08",
+      "domain": "groups",
+      "stem": "A booking team does blue-green deploys of its `confirmation-sender` consumer. Green runs with group ID `confirmations-v2` (new, `auto.offset.reset=latest`) while blue keeps `confirmations-v1`. During the 20-minute overlap customers got duplicate confirmation emails, and events produced while green was starting were never sent by green. How should they deploy instead?",
+      "options": [
+        {
+          "text": "Keep the overlap but have green start from `earliest`",
+          "correct": false,
+          "why": "Green would then resend the entire retention window of confirmations, making duplicates far worse."
+        },
+        {
+          "text": "Run green under blue's group ID, sharing partitions during the overlap",
+          "correct": true,
+          "why": "One group splits partitions between blue and green, so each event is handled once, and green continues from blue's committed offsets."
+        },
+        {
+          "text": "Shorten the overlap to one minute",
+          "correct": false,
+          "why": "Fewer duplicates, but still some, and green's latest reset still skips events produced before it joined."
+        },
+        {
+          "text": "Dedupe emails in green by keeping a set of sent IDs in memory",
+          "correct": false,
+          "why": "Green cannot see what blue sent, and the set is lost on restart."
+        }
+      ],
+      "explain": "A group ID is a processing identity: same ID shares the work, a new ID gets every message again. Use the same group for version upgrades; use a new group only for a genuinely separate consumer, with its starting offsets set explicitly.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#intro_consumers"
+      ]
+    },
+    {
+      "id": "kafka-v5-q09",
+      "domain": "delivery",
+      "stem": "A fintech reconciliation service consumes `settlements` and writes to Postgres. It needs exactly-once *effects* and cannot add an inbox table because settlements carry no stable event ID (a legacy producer). Its partitions are processed by one member at a time. What design achieves it?",
+      "options": [
+        {
+          "text": "Kafka transactions with `sendOffsets` after each DB write",
+          "correct": false,
+          "why": "The DB write still commits separately; a crash after it and before the Kafka transaction commits replays the settlement."
+        },
+        {
+          "text": "Dedupe on a hash of the message payload",
+          "correct": false,
+          "why": "Two genuinely identical settlements (same amount, same accounts) would be wrongly dropped."
+        },
+        {
+          "text": "Store the next offset in Postgres with the effect; seek to it on assignment",
+          "correct": true,
+          "why": "Effect and position commit atomically in one database, so after any crash the consumer resumes exactly after the last applied record."
+        },
+        {
+          "text": "Auto-commit every 100 ms, with idempotent producer settings on the legacy upstream service",
+          "correct": false,
+          "why": "Narrows the window but cannot close it, and producer idempotence does nothing for consumer replays."
+        }
+      ],
+      "explain": "If the sink is a transactional database, you can make it the source of truth for consumer position: commit the offset with the effect and seek to it on assignment. Position and effect can then never disagree.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#design_consumerposition"
+      ]
+    },
+    {
+      "id": "kafka-v5-q10",
+      "domain": "delivery",
+      "stem": "A payments topic has replication factor 3 and producers use `acks=all`, so the team believed acknowledged writes were safe. After a disk incident, two followers had been out of sync for an hour, then the leader's disk failed and acknowledged payments from that hour were lost. Which setting let this happen?",
+      "options": [
+        {
+          "text": "`min.insync.replicas=1`, which let the leader alone satisfy `acks=all`",
+          "correct": true,
+          "why": "acks=all waits for the in-sync set; once both followers dropped out, the set was just the leader, so acks rested on one copy."
+        },
+        {
+          "text": "`acks=all` is only advisory; it should be `acks=-1` for full durability",
+          "correct": false,
+          "why": "`acks=-1` and `acks=all` are the same setting, so switching between them changes nothing."
+        },
+        {
+          "text": "Replication factor 3 is too low; use 5",
+          "correct": false,
+          "why": "More replicas would not help if they could also fall out of the ISR while min ISR stays at 1."
+        },
+        {
+          "text": "The producer lacked idempotence, so retries overwrote the records",
+          "correct": false,
+          "why": "Idempotence prevents duplicates and reordering; it does not affect how many copies exist at ack time."
+        }
+      ],
+      "explain": "`acks=all` means \"all in-sync replicas\", and the ISR can shrink to just the leader. Pair it with `min.insync.replicas` ≥ 2 so a shrunken ISR refuses writes instead of acking on one copy.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#topicconfigs_min.insync.replicas"
+      ]
+    },
+    {
+      "id": "kafka-v5-q11",
+      "domain": "delivery",
+      "stem": "An FX-quotes enrichment service uses a transactional producer per instance. After a network partition, one instance logged a fatal producer-fenced error, then kept retrying `beginTransaction` on the same producer object for hours while its partitions stayed unprocessed. What should the code do on such an error?",
+      "options": [
+        {
+          "text": "Call `abort()` and retry the same transaction on the same producer",
+          "correct": false,
+          "why": "Abort is the right move for abortable errors, but a fenced producer is permanently unusable."
+        },
+        {
+          "text": "Switch the producer to non-transactional mode and keep going",
+          "correct": false,
+          "why": "Removes the exactly-once guarantees silently; output may now duplicate."
+        },
+        {
+          "text": "Retry with exponential backoff up to an hour",
+          "correct": false,
+          "why": "No amount of waiting un-fences a producer; it only extends the outage."
+        },
+        {
+          "text": "Close it and build a new producer, rejoining with fresh state",
+          "correct": true,
+          "why": "Fatal errors such as fencing leave the producer unusable; a new instance re-initialises the transactional ID and continues safely."
+        }
+      ],
+      "explain": "Distinguish abortable from fatal transactional errors. Abortable: abort and retry the batch. Fatal (fenced, etc.): recreate the producer, and let the consumer side re-establish its position.",
+      "refs": [
+        "https://github.com/confluentinc/confluent-kafka-javascript/blob/master/MIGRATION.md"
+      ]
+    },
+    {
+      "id": "kafka-v5-q12",
+      "domain": "delivery",
+      "stem": "A cashback consumer dedupes events with Redis `SET eventId NX EX 3600` before crediting accounts in Postgres. Last week an operator replayed two days of `purchases` after a bug fix, and thousands of customers received cashback twice. What should replace the dedupe?",
+      "options": [
+        {
+          "text": "Keep Redis but raise the key TTL to 30 days so replays fall inside the window",
+          "correct": false,
+          "why": "Covers this replay length, but a longer replay or a Redis eviction under memory pressure brings duplicates back."
+        },
+        {
+          "text": "A Postgres inbox row per event ID in the credit's transaction",
+          "correct": true,
+          "why": "The dedupe record is durable, has no TTL, and commits atomically with the credit, so any replay window is safe."
+        },
+        {
+          "text": "Dedupe on partition and offset in Redis instead of event ID",
+          "correct": false,
+          "why": "A replay reads the same offsets, so this would catch it, but republished duplicates at new offsets would slip through."
+        },
+        {
+          "text": "Forbid replays of topics that feed money movements",
+          "correct": false,
+          "why": "Replays are a core recovery tool; banning them trades one risk for an inability to fix bugs."
+        }
+      ],
+      "explain": "A dedupe window must cover every way a message can come back, including deliberate replays. Store dedupe records durably next to the effect, in the same transaction.",
+      "refs": [
+        "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+      ]
+    },
+    {
+      "id": "kafka-v5-q13",
+      "domain": "integration",
+      "stem": "A booking service saves a reservation in Postgres, commits, and then calls `producer.send(ReservationCreated)`. Once or twice a week, a pod restart between the commit and the send means the hotel never hears about a confirmed reservation. Which fix is standard here?",
+      "options": [
+        {
+          "text": "Send the event first, then commit the database transaction",
+          "correct": false,
+          "why": "Flips the failure: a DB rollback after the send announces a reservation that does not exist."
+        },
+        {
+          "text": "Write it to an outbox table in the same transaction and relay it",
+          "correct": true,
+          "why": "The event row commits atomically with the reservation; the relay publishes it eventually even after crashes."
+        },
+        {
+          "text": "Retry the send in a `finally` block with a 30-second timeout",
+          "correct": false,
+          "why": "A killed pod runs no `finally` block, so the event is still lost."
+        },
+        {
+          "text": "Use a Kafka transaction around the DB write and the send",
+          "correct": false,
+          "why": "Kafka transactions do not include Postgres; the two still commit separately."
+        }
+      ],
+      "explain": "Writing to a database and to Kafka is a dual write that cannot be made atomic directly. The outbox (or CDC on it) makes the event part of the database transaction.",
+      "refs": [
+        "https://microservices.io/patterns/data/transactional-outbox.html"
+      ]
+    },
+    {
+      "id": "kafka-v5-q14",
+      "domain": "integration",
+      "stem": "A flight-status Avro schema has an enum `status` with symbols `SCHEDULED, DELAYED, CANCELLED`. Product wants to add `DIVERTED`. Twenty consumer services deploy independently, and some will lag weeks behind. The producer will start emitting `DIVERTED` soon after the change. What makes this safe for old consumers?",
+      "options": [
+        {
+          "text": "Nothing extra; Avro readers ignore unknown enum symbols",
+          "correct": false,
+          "why": "Without an enum default, an Avro reader fails to resolve a symbol its schema does not have."
+        },
+        {
+          "text": "Add an enum `default` (for example `SCHEDULED`) to the reader schemas before the producer emits `DIVERTED`",
+          "correct": false,
+          "why": "The mechanism is right, but `SCHEDULED` as a fallback would mislabel diverted flights as on schedule; the fallback should be an explicit unknown."
+        },
+        {
+          "text": "Replace the enum with a free-text string field in the same version",
+          "correct": false,
+          "why": "Changing a field's type is itself incompatible, and it loses validation for every producer."
+        },
+        {
+          "text": "Give the enum an `UNKNOWN` symbol as its default; roll that to consumers before emitting `DIVERTED`",
+          "correct": true,
+          "why": "With an enum default, old readers map unknown symbols to UNKNOWN instead of failing, and the neutral value is handled explicitly."
+        }
+      ],
+      "explain": "Adding enum symbols breaks old Avro readers unless the enum has a default. Plan enums with an explicit UNKNOWN default from the start, and treat new symbols as a forward-compatibility change.",
+      "refs": [
+        "https://avro.apache.org/docs/1.12.0/specification/#enums"
+      ]
+    },
+    {
+      "id": "kafka-v5-q15",
+      "domain": "integration",
+      "stem": "The booking team added a new event type, `BookingRebooked`, to the shared `booking-events` topic. Within minutes, three older consumer services were throwing \"unknown event type\" on every such message, and their partitions stalled behind them. Those services have no use for rebookings. How should consumers handle event types they don't know?",
+      "options": [
+        {
+          "text": "Throw, so the bad message gets attention from the producer team",
+          "correct": false,
+          "why": "It gets attention by stalling every partition that carries the new type; the message is not bad, just new."
+        },
+        {
+          "text": "Send unknown types to the DLQ and continue",
+          "correct": false,
+          "why": "Unblocks the partition, but floods the DLQ with valid events that need no repair."
+        },
+        {
+          "text": "Skip and commit unknown types, with a metric; treat it as a tolerant reader",
+          "correct": true,
+          "why": "Consumers that do not care about a type can safely ignore it, and the metric shows when a type is unexpectedly missed."
+        },
+        {
+          "text": "Require the producer to publish each new event type to its own topic",
+          "correct": false,
+          "why": "Sometimes reasonable, but types that share an entity's ordering belong in the same topic; this removes that guarantee."
+        }
+      ],
+      "explain": "Shared event topics evolve by adding types. Consumers should be tolerant readers: ignore what they don't handle, measure it, and reserve DLQs for messages that actually failed.",
+      "refs": [
+        "https://martinfowler.com/bliki/TolerantReader.html"
+      ]
+    },
+    {
+      "id": "kafka-v5-q16",
+      "domain": "integration",
+      "stem": "A lending platform is defining the error policy for its `loan-applications` consumer, which calls a credit bureau and writes to Postgres. Messages can be malformed, the bureau times out occasionally, and an application must never be lost. Which elements belong in the policy? (Choose three.)",
+      "options": [
+        {
+          "text": "Classify errors: permanent ones (bad payload, schema mismatch) go to the DLQ, transient ones (timeouts) get bounded retries with backoff",
+          "correct": true,
+          "why": "Retrying a malformed record never succeeds, while timeouts usually clear; treating them differently prevents both stalls and needless DLQ entries."
+        },
+        {
+          "text": "DLQ records keep the original key, value and headers plus origin topic, partition, offset and error",
+          "correct": true,
+          "why": "Without the origin and the unchanged payload, nobody can repair and replay the message correctly."
+        },
+        {
+          "text": "Advance the offset only after the DLQ produce is acknowledged",
+          "correct": true,
+          "why": "If the DLQ write fails and the offset still moves, the application is lost."
+        },
+        {
+          "text": "Catch every error, log it and commit, so the partition never stalls",
+          "correct": false,
+          "why": "No stalls, but every failed application is lost, which breaks the main requirement."
+        },
+        {
+          "text": "Rethrow every error so the client redelivers until it succeeds",
+          "correct": false,
+          "why": "A malformed message then loops forever and blocks the partition."
+        },
+        {
+          "text": "Send DLQ records fire-and-forget to keep latency low",
+          "correct": false,
+          "why": "A failed DLQ write would go unnoticed, and the message would be lost once the offset moves."
+        }
+      ],
+      "explain": "A consumer error policy is part of the design: classify, retry transient errors with limits, park permanent ones in a DLQ with full provenance, and gate the commit on the DLQ ack.",
+      "refs": [
+        "https://www.confluent.io/blog/error-handling-patterns-in-kafka/"
+      ]
+    },
+    {
+      "id": "kafka-v5-q17",
+      "domain": "scale",
+      "stem": "A social app serves users in North America, Europe and Asia; each user has a home region where their writes happen, and GDPR requires EU users' raw events to stay in the EU. The analytics team needs a global, anonymised aggregate. Which Kafka topology fits?",
+      "options": [
+        {
+          "text": "One stretched cluster across the three continents",
+          "correct": false,
+          "why": "Every acknowledged write would wait on intercontinental round trips, and EU data would be replicated outside the EU."
+        },
+        {
+          "text": "Regional clusters; MM2 copies only anonymised aggregates to analytics",
+          "correct": true,
+          "why": "Writes stay local and fast, EU raw data never leaves the EU, and only derived aggregates cross regions."
+        },
+        {
+          "text": "A single cluster in Europe that every region writes to",
+          "correct": false,
+          "why": "Keeps EU data local, but Asian and American users pay intercontinental latency on every write and depend on one region."
+        },
+        {
+          "text": "A cluster per region, with MM2 mirroring every topic to every other region",
+          "correct": false,
+          "why": "Gives everyone everything, but copies EU users' raw events out of the EU, breaking GDPR."
+        }
+      ],
+      "explain": "For global systems, write locally and replicate deliberately: decide per topic what may cross regions. Data residency usually means replicating derived or anonymised data, not raw events.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#georeplication"
+      ]
+    },
+    {
+      "id": "kafka-v5-q18",
+      "domain": "scale",
+      "stem": "At 02:00, brokers in a payments-events cluster are at 92% disk and rising 1% per hour, mostly from a debug topic `tx-trace` with 14-day retention that nobody consumes beyond one day. New brokers can be ordered but will take two days to arrive. Which immediate action is safest?",
+      "options": [
+        {
+          "text": "Reassign partitions across the existing brokers to even out disk",
+          "correct": false,
+          "why": "Reassignment copies data and needs temporary extra space on the destinations, which a nearly full cluster does not have."
+        },
+        {
+          "text": "Delete old segment files of `tx-trace` from broker disks by hand",
+          "correct": false,
+          "why": "Removing files under a running broker corrupts its log state and can crash it."
+        },
+        {
+          "text": "Lower `retention.ms` on `tx-trace` to two days",
+          "correct": true,
+          "why": "The broker deletes whole old segments on its own within minutes, freeing space safely from data nobody reads."
+        },
+        {
+          "text": "Set `retention.ms` to one hour on every topic in the cluster",
+          "correct": false,
+          "why": "Frees space fast but deletes payment events that consumers may not have read yet."
+        }
+      ],
+      "explain": "When disk runs out, the fastest safe lever is retention on the topics that matter least, which the broker enforces by deleting whole segments. Partition moves need headroom you no longer have.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#topicconfigs_retention.ms"
+      ]
+    },
+    {
+      "id": "kafka-v5-q19",
+      "domain": "scale",
+      "stem": "A ticket-sales consumer group can process at most 8,000 events/s. During a two-hour on-sale, events arrive at 10,000/s; the rest of the day they arrive at 6,000/s. Assuming nothing else changes, how long after the on-sale ends will the group be caught up?",
+      "options": [
+        {
+          "text": "About 30 minutes",
+          "correct": false,
+          "why": "This drains 14.4 million events at 8,000/s, forgetting that 6,000/s keep arriving meanwhile."
+        },
+        {
+          "text": "About 1 hour",
+          "correct": false,
+          "why": "This halves the drain time without a reason; the net drain rate is 2,000/s, not 4,000/s."
+        },
+        {
+          "text": "About 2 hours",
+          "correct": true,
+          "why": "Backlog is 2 h × 2,000/s = 14.4 million events; after the sale it drains at 8,000 − 6,000 = 2,000/s, which takes 7,200 s."
+        },
+        {
+          "text": "It never catches up",
+          "correct": false,
+          "why": "Capacity of 8,000/s exceeds the 6,000/s normal rate, so the backlog does shrink."
+        }
+      ],
+      "explain": "Recovery time = backlog ÷ (capacity − incoming rate). Headroom over normal load, not peak capacity alone, decides how fast you recover; size for it.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#monitoring"
+      ]
+    },
+    {
+      "id": "kafka-v5-q20",
+      "domain": "scale",
+      "stem": "A bank is building a production Kafka 4.3 cluster for card payments. To save nodes, an engineer proposes KRaft combined mode, with each of the six brokers also acting as a controller. Heavy broker load during peak sales is expected. What should the architect decide?",
+      "options": [
+        {
+          "text": "Accept combined mode on all six; more controllers means more resilience",
+          "correct": false,
+          "why": "Six voters still tolerate only two failures, like five, and heavy broker load now competes with metadata work on every node."
+        },
+        {
+          "text": "Accept combined mode, but on only three of the six brokers",
+          "correct": false,
+          "why": "Fewer voters, but those three still share resources with heavy broker load, which is the core risk."
+        },
+        {
+          "text": "Run three dedicated controller nodes, separate from the brokers",
+          "correct": true,
+          "why": "Kafka's docs advise against combined mode for critical deployments; isolated controllers keep metadata operations steady under broker load."
+        },
+        {
+          "text": "Use a single dedicated controller to keep costs low",
+          "correct": false,
+          "why": "One controller is a single point of failure for all metadata changes, including leader elections."
+        }
+      ],
+      "explain": "In KRaft, controllers hold the cluster's metadata quorum. For critical clusters, run an odd number of dedicated controllers (usually three) so broker load and controller work cannot interfere.",
+      "refs": [
+        "https://kafka.apache.org/documentation/#kraft"
+      ]
+    }
+  ]
+}
