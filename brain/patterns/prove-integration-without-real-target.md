@@ -32,5 +32,12 @@ offline validation.
    Use targets with no tokens so the worker ends with `sent:0` and nothing leaves the machine. An ORM getter can be what keeps an INTEGER id a
    string in the payload. Name it, because deleting it breaks every send silently when the
    send errors are swallowed.
-7. Unprovable without a device: OS display (foreground handling), the iOS APNs key in the
+7. **"Is it ready to give to the client?" means the end user's whole path, not the artifact.**
+   2026-10-15: the downloader itself was fine (tests, reproducible builds), but the gaps were
+   outside it. The server listened on localhost only, so the client's PC couldn't reach it.
+   The bundle's import guide named match columns the CSVs didn't have. Deal products sat in a
+   file the import wizard can't link. Walk the path step by step: the user's machine, the
+   network to the server, the data, the import in the target system, the docs. Check each claim
+   in a guide file against the actual output (headers, column count).
+8. Unprovable without a device: OS display (foreground handling), the iOS APNs key in the
    provider console, and real token validity. Name them as owner-side checks.

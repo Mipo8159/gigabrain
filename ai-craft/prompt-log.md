@@ -178,6 +178,11 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Away ~4 h, Mac kept awake. Do the exam fact-check (AWS first) then CORE regression evals. Done when each question has a sourced verdict, check-exam is 0 and a verifier confirms a sample. Fix in place, workflow ≤10 agents OK, stop cleanly at usage limit, no commits."
 - **Why:** handing the choice to Claude worked, since it picked from the handoff's open items. But the done-line, the limit rule and the agent budget all came from a 4-question round. Keeping the Mac awake would have saved 2 of 9 agents.
 
+## 2026-10-15: "I asked yu to create a portable and multiplatform tool … check if eveything is in place" (requirement-anchored audit)
+- **Before:** "I asked yu to create a portable and multiplatform tool for me to give to my client. an executable file … only configuration needed is the server address and API_KEY … formatted for bitrix system in a way that requires couple of clicks to upload. check if eveything is in place"
+- **After:** same requirement, plus: "Done when you give me a pass/fail per requirement, checked on the real files (latest bundle, binaries, server binding), and a fix order. Read-only: change nothing."
+- **Why:** restating the requirement was the strong part. It turned "is it ready?" into a checklist, and the audit found the gaps outside the tool (localhost-only server, import format). A done-line with the output shape and "read-only" would have fixed the report format and the boundary up front, instead of leaving both to Claude.
+
 ### 2026-10-17 · idle-time scan, then "do everything you listed"
 - **Before:** "time for an idle work … take a deep search for public market … analyze current weight of my repository … at what percentage would you evaluate we are utilizing claude codes powers", then "1. worktrees and agent teams … 2. observability … 3. anything cool … 4. everything you have listed".
 - **After:** "Idle, ~3 h, $10 cap. (1) Scan public Claude Code setups: ranked top 5 with a primary source and a cost for each. (2) Repo weight: one table, what to prune. (3) A utilization % against the docs' feature list. Then build items 1–4. Done when each has a proof (test, eval or run), the reviewer has passed the diff, and nothing is committed. Ask before deleting files or spending over $5."
