@@ -22,6 +22,14 @@ while these were inside:
 - Where docs conflicted (Node `keepAliveTimeout` 5 s vs 65 s), running the
   installed runtime settled it in one command.
 
+**Second pass, 2026-10-16:** the bank above (already targeted-checked) got a full
+per-question pass: 9 checker agents on disjoint files, each logging id | verdict |
+source. 1,112 questions checked, **61 more fixed (5.5%)**. Most were facts that
+changed after the model's training: Database Savings Plans (Dec 2025), 50 TB S3
+objects, SNS 1 MiB opt-in (Sept 2026), Nest 12 now current, Vite 8 Oxc. A few
+were wrong maths (gp2 IOPS). An independent verifier confirmed 19/19 sampled fixes.
+So the targeted pass catches flagged doubts; only a full pass catches what no author doubted.
+
 **How to apply:**
 - In the author brief, require a hand-back list: facts not in the source brief,
   and the 3 items it is least sure of. Tell authors to drop, not key, anything

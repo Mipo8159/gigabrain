@@ -167,3 +167,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "I need to be able to learn quick … please impart exams also in our studies. make 5 exam tickets for each parts … aws_associate … 5 variants for that exam, as close to it as possible … questions with 4 or more answers."
 - **After:** "Add exams: 5 variants per topic (20 scenario questions, 4+ options, architecture at scale, snippets OK), plus `aws-associate` = 5 × 65 SAA-C03-style variants, exams only. Done when every file passes a checker, a docs fact-check of ~10% AWS keys finds 0 wrong, and my first attempt lands in a log you can read. Long coding tickets are out; I code in real projects."
 - **Why:** sizes, audience and the AWS target were clear. Missing: the proof, and the "no long coding, snippets yes" boundary, which surfaced only in the answer to the lessons question.
+
+### 2026-10-15 · "I'll be away 3-4 hours, what can you work on?"
+- **Before:** "I am going to be away for 3-4 hours. is there anything productive you can work on for gigabrain? … advice me what can this 3-4-5 hours could be spend on? so you work while I will be absent"
+- **After:** "Away ~4 h, Mac kept awake. Do the exam fact-check (AWS first) then CORE regression evals. Done when each question has a sourced verdict, check-exam is 0 and a verifier confirms a sample. Fix in place, workflow ≤10 agents OK, stop cleanly at usage limit, no commits."
+- **Why:** handing the choice to Claude worked, since it picked from the handoff's open items. But the done-line, the limit rule and the agent budget all came from a 4-question round. Keeping the Mac awake would have saved 2 of 9 agents.
