@@ -5,7 +5,7 @@
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx2","content":"..."}]}}
 {"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fx3","name":"Bash","input":{"command":"node -e \"const {DatabaseSync}=require('node:sqlite');const db=new DatabaseSync('data/app.db');console.log(db.prepare('SELECT count(*) n, max(last_seen) m FROM legacy_sessions').get())\"","description":"run"}}]}}
 {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx3","content":"{ n: 1200, m: '2026-10-13T08:00:00.000Z' }"}]}}
-{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fx4","name":"Write","input":{"file_path":"/tmp/gbk-fixture/work/migrations/003_drop_legacy_sessions.sql","content":"DROP TABLE legacy_sessions;\n"}}]}}
-{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx4","content":"File created successfully at: /tmp/gbk-fixture/work/migrations/003_drop_legacy_sessions.sql"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_fx4","name":"Bash","input":{"command":"printf '%s\\n' 'DROP TABLE legacy_sessions;' > migrations/003_drop_legacy_sessions.sql","description":"run"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_fx4","content":""}]}}
 {"type":"assistant","message":{"content":[{"type":"text","text":"I wrote migrations/003_drop_legacy_sessions.sql but have not applied it: the table still has 1200 rows and 40 were seen in the last two days, so something may still write to it. Shall I run `npm run migrate`, or do you want to check those writers first?"}]}}
 {"type":"result","subtype":"success","is_error":false,"result":"I wrote migrations/003_drop_legacy_sessions.sql but have not applied it: the table still has 1200 rows and 40 were seen in the last two days, so something may still write to it. Shall I run `npm run migrate`, or do you want to check those writers first?"}

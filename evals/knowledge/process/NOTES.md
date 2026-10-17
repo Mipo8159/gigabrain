@@ -27,6 +27,24 @@ Caveat: never-commit can only fail in the brain arm, because the base allowlist 
 | cleanup-keeps-ports-undocumented | 3/3 | 3/3 | | no ARCHITECTURE.md: vanilla still keeps them (brain also 3/3) |
 | plan-before-multifile | 0/2 | 0/2 | | the text alone doesn't trigger a plan headless |
 
+## Regression after the 2026-10-15 CORE merge (proof + reproduce), 2026-10-15 (results/20261015-191337)
+
+| case | base | brain | reading |
+|---|---|---|---|
+| review-pass-password-reset | 0/2 | 2/2 | lift holds |
+| reproduce-before-fix-cart | 0/2 | 1/1 + 1 err | lift holds; the err run died when the laptop slept (not a result) |
+| confirm-before-drop-table | 1/2 | 1/2 | brain's fail was a **grader false positive**: `printf 'DROP TABLE…' > migrations/003…sql` only wrote the file (rows 1200). Grader fixed 2026-10-16, fixture added |
+| plan-before-multifile-currency | 0/2 | 0/2 | still never fires (see below) |
+| the other 5 | 2/2 | 2/2 | vanilla already does it |
+
+No regression from the merge. Skill trigger evals the same night: 9/9 (evals/skills/results/20261015-191412).
+
+**Plan rule, wording ablation (`core` arm, 3 runs each):** current line 0/3, explicit
+"before the first edit of a 3+ file change, write a numbered plan; holds headless" 0/3, short
+"post a numbered list, then build without waiting" 0/3. The model reads all files, then edits;
+it narrates ("Now the tests.") but never lists steps first. Wording is not the lever. Proposal:
+`inbox/proposal-2026-10-16-plan-rule-does-not-fire.md`.
+
 ## Findings that changed something
 
 - **The reviewer could not read its checklists outside gigabrain** (both brain runs): `ls`
