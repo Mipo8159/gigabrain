@@ -12,7 +12,11 @@ is found, and prove it loaded with a probe.
 memory index or background hooks are denied as self-modification (2026-10-01).
 Don't retry or work around it. Write the change as a script (`bin/install.sh`,
 `bin/link-project.sh`), show it, and let Giga run it. That's the right trust
-boundary, and it saves the failed attempts.
+boundary, and it saves the failed attempts. 2026-10-17: the same block hit
+`brain/CORE.md` (loaded into every session), `global/hooks/coach.py` and the
+`permissions.deny` list. Make the script refuse unless every old line
+matches exactly once, make it idempotent, and dry-run it first with
+`HOME=$(mktemp -d)` on a copy of the settings.
 
 **2. Where config is found (2026-10-02):**
 - A project agent with the same name **replaces** the global one.

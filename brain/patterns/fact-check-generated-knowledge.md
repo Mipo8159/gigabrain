@@ -30,6 +30,15 @@ objects, SNS 1 MiB opt-in (Sept 2026), Nest 12 now current, Vite 8 Oxc. A few
 were wrong maths (gp2 IOPS). An independent verifier confirmed 19/19 sampled fixes.
 So the targeted pass catches flagged doubts; only a full pass catches what no author doubted.
 
+**Third pass, 2026-10-17 (re-pin to a new major):** 3 checkers on disjoint
+files ran 119 questions against Nest 12 / current AWS: **28 changed (24%)**,
+and no keyed answer flipped. The fixes were wrong symptoms, stale explanations
+and dead docs anchors. A row the 10-16 docs-only pass had marked "confirmed"
+(the esbuild no-metadata symptom) was refuted by running code: Nest boots and
+injects `undefined`. Each checker listed cross-file hits instead of editing
+them, and the lead relayed each hit to the file's owner. A verifier then
+confirmed 9/9 sampled fixes.
+
 **How to apply:**
 - In the author brief, require a hand-back list: facts not in the source brief,
   and the 3 items it is least sure of. Tell authors to drop, not key, anything

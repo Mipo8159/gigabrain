@@ -23,7 +23,9 @@ Gigabrain moved from Linux to a Mac and four things broke the same day
 - **`sed -i ''`** on BSD vs `sed -i` on GNU. Prefer a small python edit.
 - **Absolute per-machine paths in committed config** (`sources.json` "local",
   `kit/projects.json`): resolve them with a fallback (env var, then
-  `~/.cache/...`), never assume they exist.
+  `~/.cache/...`), never assume they exist. A registry shared by both machines
+  holds the other machine's paths: report a missing path outside `$HOME` as
+  info, not an error (2026-10-17: 10 such errors hid 2 really deleted repos).
 
 **Why:** these failures don't crash. They produce a wrong-but-plausible result,
 like a clean scan or a 1-case eval run, and those get trusted.

@@ -32,9 +32,21 @@ Phase 1 (2026-10-12), checked against the live docs and CLI 2.1.x:
 **Why:** proved on a scratch Nest repo: 0 opt-in skills without the plugin,
 exactly the 10 prefixed ones with it. Trigger evals 9/9.
 
+- **Stage the brain too (2026-10-17).** Isolated evals can't see the most
+  likely miss: Giga's own context talking the model out of a skill. With the
+  same retro sign-off prompts, 11 skills gave 6/6 and 42 skills gave 6/6, but 42
+  skills plus CORE.md and the coach hook gave **0/6**. The replies quoted the
+  cue ("offer it in ONE line"). Live: 0 of 3 clear chances in 6 days. A rule
+  that says "suggest/offer /X" turns a skill into a reminder; write "load
+  skill X and run it" instead. Listing size was ruled out. Harness:
+  `evals/skills-live/run.sh` (arms s11, s42, s42ctx), ~$12 for the study.
+
 **How to apply:** a newly absorbed skill outside the daily stacks goes into a
 `library/plugins.json` bundle. Rerun `bin/eval-skills` after editing a global
 skill's description.
+
+**Next time:** a skill that never fires live: rerun the s42ctx arm, and grep
+CORE.md and coach.py for "suggest" or "offer" next to its name.
 
 **Signal:** "too many skills", skills from the wrong domain showing up, a
 skill not firing on natural phrasing, a new `/absorb` source.
