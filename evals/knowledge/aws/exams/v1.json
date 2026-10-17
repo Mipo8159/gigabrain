@@ -654,7 +654,7 @@
         {
           "text": "S3 Cross-Region Replication with Replication Time Control on the upload bucket.",
           "correct": true,
-          "why": "RTC replicates most objects within seconds and 99.99% within 15 minutes with metrics to alert on, giving a measurable RPO for uploads."
+          "why": "RTC replicates most objects within seconds and 99.9% within 15 minutes with metrics to alert on, giving a measurable RPO for uploads."
         },
         {
           "text": "Nightly DynamoDB export to S3 copied to the standby Region.",

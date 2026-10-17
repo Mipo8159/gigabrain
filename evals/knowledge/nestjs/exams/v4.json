@@ -128,7 +128,7 @@
       "explain": "Use events to remove dependencies that point the wrong way or to cross boundaries where eventual consistency is acceptable. When an invariant spans two modules and the dependency is already one-way, a direct call inside one transaction is the correct design.",
       "refs": [
         "https://docs.nestjs.com/techniques/events",
-        "https://docs.nestjs.com/techniques/database#transactions"
+        "https://docs.nestjs.com/data/typeorm#typeorm-transactions"
       ]
     },
     {
@@ -188,7 +188,7 @@
           "why": "It can work, but players must know their match before connecting, and a hot match overloads one pod."
         }
       ],
-      "explain": "A Nest singleton is one per process, not one per cluster. State or fan-out that must span pods needs a shared medium, such as the Redis adapter for WebSockets.",
+      "explain": "A Nest singleton is one per process, not one per cluster. State or fan-out that must span pods needs a shared medium, such as the Redis adapter for WebSockets. With Socket.IO's HTTP long-polling, the docs say Redis alone is not enough: also enable sticky sessions or use `transports: ['websocket']`.",
       "refs": [
         "https://docs.nestjs.com/websockets/adapter"
       ]
@@ -379,7 +379,7 @@
       ],
       "explain": "Every remote call needs a deadline and a planned failure response. Nest's `ClientProxy.send()` has no default timeout, so add one, and pair it with a fallback and a circuit breaker.",
       "refs": [
-        "https://docs.nestjs.com/microservices/basics#timeouts"
+        "https://docs.nestjs.com/microservices/basics#handling-timeouts"
       ]
     },
     {
@@ -452,7 +452,7 @@
     {
       "id": "nestjs-v4-q14",
       "domain": "operations",
-      "stem": "An HR platform's payslip worker runs BullMQ jobs that take up to 40 s, in Kubernetes with `terminationGracePeriodSeconds: 60`. `enableShutdownHooks()` is on. On every deploy, a few jobs are half-written and later retried, producing duplicate payslips. What should the shutdown path do?",
+      "stem": "An HR platform's payslip worker builds its BullMQ `Worker` by hand (not through `@nestjs/bullmq`) and runs jobs that take up to 40 s, in Kubernetes with `terminationGracePeriodSeconds: 60`. `enableShutdownHooks()` is on. On every deploy, a few jobs are half-written and later retried, producing duplicate payslips. What should the shutdown path do?",
       "options": [
         {
           "text": "Drain with `worker.close()` in a shutdown hook, and make jobs idempotent",
@@ -475,7 +475,7 @@
           "why": "It works, but stops all workers, including those in other deployments, and depends on CI never failing midway."
         }
       ],
-      "explain": "Graceful shutdown for workers means: stop taking new work, finish or hand back current work within the grace period, and design the work to be safely repeatable for the cases that still get killed.",
+      "explain": "Graceful shutdown for workers means: stop taking new work, finish or hand back current work within the grace period, and design the work to be safely repeatable for the cases that still get killed. `@nestjs/bullmq` already calls `worker.close()` in `onApplicationShutdown`; a hand-built worker needs its own hook.",
       "refs": [
         "https://docs.nestjs.com/fundamentals/lifecycle-events#application-shutdown",
         "https://docs.nestjs.com/techniques/queues"
@@ -540,7 +540,7 @@
       ],
       "explain": "Boot-time configuration is a snapshot. Values that rotate, such as credentials and tokens, must be read when they are used, through a callback or a refreshing provider, not captured once at startup.",
       "refs": [
-        "https://docs.nestjs.com/techniques/configuration#async-configuration",
+        "https://docs.nestjs.com/data/typeorm#async-configuration",
         "https://docs.nestjs.com/techniques/database"
       ]
     },
@@ -578,7 +578,7 @@
     {
       "id": "nestjs-v4-q18",
       "domain": "seams",
-      "stem": "A gaming studio's developers switched the Nest API's dev command from `nest start --watch` to `tsx watch src/main.ts` for faster reloads. Now startup fails with \"Nest can't resolve dependencies of the MatchService (?, ?)\", while CI builds with `tsc` and works. What should they do?",
+      "stem": "A gaming studio's developers switched the Nest API's dev command from `nest start --watch` to `tsx watch src/main.ts` for faster reloads. Now the app boots without errors, but the first request fails with `TypeError: Cannot read properties of undefined` inside `MatchService`, whose injected repositories are `undefined`; CI builds with `tsc` and works. What should they do?",
       "options": [
         {
           "text": "Add `emitDecoratorMetadata: true` to `tsconfig.json`",
@@ -601,7 +601,7 @@
           "why": "It gives up constructor injection across the codebase to work around a dev tool."
         }
       ],
-      "explain": "Development and production builds must agree on decorator metadata. If you want speed, pick SWC, which emits it, rather than an esbuild-based runner that silently drops it.",
+      "explain": "Development and production builds must agree on decorator metadata. Without `design:paramtypes`, Nest finds no constructor dependencies, so it boots and injects `undefined` instead of failing at startup. If you want speed, pick SWC, which emits the metadata, rather than an esbuild-based runner that silently drops it.",
       "refs": [
         "https://docs.nestjs.com/recipes/swc"
       ]

@@ -381,7 +381,7 @@
     {
       "id": "distributed-systems-v2-q13",
       "domain": "overload",
-      "stem": "A partner API in maintenance returns `503` with `Retry-After: Wed, 15 Oct 2026 09:30:00 GMT`. Your 400 sync workers parse it as shown, and the partner blocked your account for hammering them. Your jobs have a 2-minute budget. What should the client do?",
+      "stem": "A partner API in maintenance returns `503` with `Retry-After: Thu, 15 Oct 2026 09:30:00 GMT`. Your 400 sync workers parse it as shown, and the partner blocked your account for hammering them. Your jobs have a 2-minute budget. What should the client do?",
       "code": "const ra = res.headers.get('retry-after');\nconst waitMs = parseInt(ra, 10) * 1000;   // NaN for an HTTP-date\nawait sleep(waitMs);                       // sleep(NaN) resolves at once\nreturn retry();",
       "options": [
         {

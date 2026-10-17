@@ -312,10 +312,10 @@
         {
           "text": "Connect to that node and run `HOTKEYS START`, then `HOTKEYS GET` (Redis 8.6+)",
           "correct": true,
-          "why": "It samples traffic and ranks keys by CPU time and network bytes, which answers the question without streaming every command. Some cluster clients don't support it, so connect to the node directly."
+          "why": "It records per-key CPU time and network bytes in a compact top-K structure (with optional `SAMPLE` to cut overhead further), which answers the question without streaming every command. Some cluster clients don't support it, so connect to the node directly."
         }
       ],
-      "explain": "Hot keys and big keys are different problems with different tools: `--bigkeys`/`--memkeys` for size, `HOTKEYS START`/`HOTKEYS GET` (8.6+, sampled, by CPU and network) or LFU-based `--hotkeys` for access. Avoid MONITOR and KEYS on a node that is already struggling.",
+      "explain": "Hot keys and big keys are different problems with different tools: `--bigkeys`/`--memkeys` for size, `HOTKEYS START`/`HOTKEYS GET` (8.6+, top-K by CPU and network, optionally sampled) or LFU-based `--hotkeys` for access. Avoid MONITOR and KEYS on a node that is already struggling.",
       "refs": [
         "https://redis.io/docs/latest/commands/hotkeys/"
       ]

@@ -488,7 +488,7 @@
           "why": "It hides the symptom, but retrying non-idempotent POSTs can duplicate side effects, and the cause stays in place."
         }
       ],
-      "explain": "When two hops both keep idle connections open, the upstream one (the load balancer) must time out first, or it will sometimes send a request on a socket the downstream is closing. Node's default `keepAliveTimeout` of 5 s is far below a typical 60 s load-balancer idle timeout, so raise Node's or, less commonly, lower the load balancer's. Community guidance also keeps `headersTimeout` above `keepAliveTimeout`."
+      "explain": "When two hops both keep idle connections open, the upstream one (the load balancer) must time out first, or it will sometimes send a request on a socket the downstream is closing. Node 24's default `keepAliveTimeout` of 5 s is far below a typical 60 s load-balancer idle timeout (Node 26 raised the default to 65 s for this reason, but check it whenever the LB timeout is longer), so raise Node's or, less commonly, lower the load balancer's. Community guidance also keeps `headersTimeout` above `keepAliveTimeout`."
     },
     {
       "id": "distributed-systems-v3-q17",

@@ -272,7 +272,7 @@
         {
           "text": "Keep the timer and set `context.callbackWaitsForEmptyEventLoop = true`.",
           "correct": false,
-          "why": "That applies to callback-style handlers; with async handlers the response is sent when the promise resolves, and the environment can still freeze."
+          "why": "That flag applies only to callback-based handlers, which the Node 24 Lambda runtime no longer supports; an async handler's invocation ends when its promise resolves, and the environment can freeze."
         },
         {
           "text": "Move metrics to a `process.on('beforeExit')` handler.",
@@ -283,7 +283,8 @@
       "explain": "Serverless runtimes freeze the process between invocations; background timers and fire-and-forget promises stop with it. Finish work (or emit it synchronously, such as through logs) before returning.",
       "refs": [
         "https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html",
-        "https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html"
+        "https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html",
+        "https://docs.aws.amazon.com/lambda/latest/dg/nodejs-context.html"
       ]
     },
     {

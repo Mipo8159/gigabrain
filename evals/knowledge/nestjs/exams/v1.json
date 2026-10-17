@@ -132,7 +132,7 @@
     {
       "id": "nestjs-v1-q04",
       "domain": "modules",
-      "stem": "In an insurance monolith, `UsersModule` calls `BillingModule` to create a billing customer at sign-up, and `BillingModule` calls `UsersModule` to read a user's email when sending an invoice. After adding the second import, startup fails with \"The module at index [0] of the BillingModule imports array is undefined\". The team expects to extract Billing into its own service next year. What should they do?",
+      "stem": "In an insurance monolith, `UsersModule` calls `BillingModule` to create a billing customer at sign-up, and `BillingModule` calls `UsersModule` to read a user's email when sending an invoice. After adding the second import, startup fails with `The module at index [0] of the BillingModule \"imports\" array is undefined`. The team expects to extract Billing into its own service next year. What should they do?",
       "options": [
         {
           "text": "Merge the two modules into one `AccountsModule` so there is no import between them",
@@ -164,12 +164,12 @@
     {
       "id": "nestjs-v1-q05",
       "domain": "modules",
-      "stem": "After upgrading a ticketing platform to Nest 11, the Redis cluster hits `maxclients` during the evening on-sale. Six feature modules each import `RedisClientModule.forRoot({ url: process.env.REDIS_URL })`, and the platform runs 200 pods. Before the upgrade each pod opened one Redis connection. What should the team change?",
+      "stem": "After upgrading a ticketing platform from Nest 10 to Nest 12, the Redis cluster hits `maxclients` during the evening on-sale. Six feature modules each import `RedisClientModule.forRoot({ url: process.env.REDIS_URL })`, and the platform runs 200 pods. Before the upgrade each pod opened one Redis connection. What should the team change?",
       "options": [
         {
           "text": "Build `forRoot()` once as a shared constant (or once at the root) and import that object everywhere",
           "correct": true,
-          "why": "Nest 11 identifies dynamic modules by object reference, so six `forRoot()` calls are six modules and six clients; one shared object brings it back to one client per pod."
+          "why": "Since Nest 11 (and still in Nest 12), Nest identifies dynamic modules by object reference, so six `forRoot()` calls are six modules and six clients; one shared object brings it back to one client per pod."
         },
         {
           "text": "Raise the Redis `maxclients` limit and the cluster size to cover six connections per pod across 200 pods",
@@ -187,7 +187,7 @@
           "why": "Transient makes one instance per consumer, which multiplies connections further."
         }
       ],
-      "explain": "Nest 11 stopped deduplicating identical dynamic modules by metadata hash; it uses object identity. Build each configured dynamic module once and import the same object everywhere, or import it once at the root.",
+      "explain": "Nest 11 stopped deduplicating identical dynamic modules by metadata hash, and Nest 12 keeps that: it uses object identity. Build each configured dynamic module once and import the same object everywhere, or import it once at the root.",
       "refs": [
         "https://docs.nestjs.com/v11/migration-guide",
         "https://docs.nestjs.com/fundamentals/dynamic-modules"
@@ -315,7 +315,7 @@
           "why": "Middleware belongs to the HTTP adapter and never runs for messages arriving over the Kafka transport."
         }
       ],
-      "explain": "Global enhancers set with `useGlobalX()` belong to one application object. In hybrid apps either opt the microservice in with `inheritAppConfig`, or register enhancers inside the module tree, and remember that middleware is HTTP-only.",
+      "explain": "Global enhancers set with `useGlobalX()` belong to one application object. In hybrid apps either opt the microservice in with `inheritAppConfig` (and call the `useGlobalX()` methods before `connectMicroservice()`, which registers the handlers), or register enhancers inside the module tree, and remember that middleware is HTTP-only.",
       "refs": [
         "https://docs.nestjs.com/faq/hybrid-application",
         "https://docs.nestjs.com/pipes#global-scoped-pipes"
@@ -481,7 +481,7 @@
     {
       "id": "nestjs-v1-q15",
       "domain": "operations",
-      "stem": "For a Black Friday spike, SRE set `DB_POOL_MAX=50` in the deployment of a retail API that uses `@nestjs/config` 4. The pool stayed at 10. The config is loaded like this, and the pool is built from `config.get('DB_POOL_MAX')`. What fixes it with the smallest change?",
+      "stem": "For a Black Friday spike, SRE set `DB_POOL_MAX=50` in the deployment of a retail API that uses Nest 12 with `@nestjs/config` 12. The pool stayed at 10. The config is loaded like this, and the pool is built from `config.get('DB_POOL_MAX')`. What fixes it with the smallest change?",
       "code": "ConfigModule.forRoot({\n  isGlobal: false,\n  load: [() => ({ DB_POOL_MAX: 10, DB_POOL_MIN: 2 })],\n});",
       "options": [
         {
@@ -492,7 +492,7 @@
         {
           "text": "Read the environment inside the factory: `DB_POOL_MAX: Number(process.env.DB_POOL_MAX ?? 10)`",
           "correct": true,
-          "why": "In config 4, values from `load()` win over `process.env` for the same key, so the factory itself must prefer the environment variable."
+          "why": "Since config 4, and still in 12, values from `load()` win over `process.env` for the same key, so the factory itself must prefer the environment variable."
         },
         {
           "text": "Add `cache: true` to `ConfigModule.forRoot()` so the new environment value is picked up on the next `get()`",
@@ -505,9 +505,9 @@
           "why": "Variable expansion applies to `.env` file contents, not to values returned by a `load()` factory."
         }
       ],
-      "explain": "`@nestjs/config` 4 reversed the old precedence: internal config from `load()` and namespaces beats `process.env`. Defaults belong inside the factory as `process.env.X ?? default`, or under distinct keys.",
+      "explain": "`@nestjs/config` 4 (Nest 11) reversed the old precedence, and 12.x keeps it: internal config from `load()` and namespaces beats `process.env`. Defaults belong inside the factory as `process.env.X ?? default`, or under distinct keys.",
       "refs": [
-        "https://docs.nestjs.com/techniques/configuration",
+        "https://docs.nestjs.com/application/configuration",
         "https://docs.nestjs.com/v11/migration-guide"
       ]
     },
@@ -539,7 +539,8 @@
       ],
       "explain": "Anything that only happens in `main.ts` is invisible to tests, workers and other entry points. Put boot-time I/O like secrets into async providers (`forRootAsync`, `useFactory`), which Nest awaits and tests can override.",
       "refs": [
-        "https://docs.nestjs.com/techniques/configuration#async-configuration",
+        "https://docs.nestjs.com/data/typeorm#async-configuration",
+        "https://docs.nestjs.com/fundamentals/async-providers",
         "https://docs.nestjs.com/fundamentals/custom-providers#factory-providers-usefactory"
       ]
     },
@@ -608,7 +609,7 @@
     {
       "id": "nestjs-v1-q19",
       "domain": "seams",
-      "stem": "An order-export Lambda built from a Nest app is deployed with the CDK `NodejsFunction` construct, which bundles with esbuild. Locally, with `nest start`, everything works. In Lambda, the cold start fails with \"Nest can't resolve dependencies of the OrdersService (?). Please make sure that the argument at index [0] is available\". What is the fix?",
+      "stem": "An order-export Lambda built from a Nest app is deployed with the CDK `NodejsFunction` construct, which bundles with esbuild. Locally, with `nest start`, everything works. In Lambda, Nest boots without a DI error, but the first invocation fails with `TypeError: Cannot read properties of undefined (reading 'findAll')` inside `OrdersService`: its injected repository is `undefined`. What is the fix?",
       "options": [
         {
           "text": "Add `import 'reflect-metadata'` as the first line of the Lambda handler",
@@ -631,7 +632,7 @@
           "why": "The compiled JS already contains the constructor type metadata, which bundling then preserves."
         }
       ],
-      "explain": "Nest's constructor injection by type reads `design:paramtypes`, which only `tsc` and SWC emit. esbuild-based tools (tsx, Vitest's default transform, CDK `NodejsFunction`) drop it, so compile first or use an SWC plugin.",
+      "explain": "Nest's constructor injection by type reads `design:paramtypes`, which only `tsc` and SWC emit. esbuild-based tools (tsx, CDK `NodejsFunction`, Vitest on Vite 7 or older) drop it. Nest then sees a constructor with no parameter types, injects nothing and logs no error, so the dependency is simply `undefined`. Compile first or use an SWC plugin.",
       "refs": [
         "https://docs.nestjs.com/recipes/swc",
         "https://docs.nestjs.com/fundamentals/custom-providers"

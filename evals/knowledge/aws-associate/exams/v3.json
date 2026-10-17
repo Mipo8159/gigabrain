@@ -306,7 +306,7 @@
         {
           "text": "Keep the data in S3 Standard and buy a Savings Plan.",
           "correct": false,
-          "why": "Savings Plans apply to compute, not S3 storage."
+          "why": "Savings Plans cover compute and, since December 2025, database usage; none of them discount S3 storage."
         }
       ],
       "explain": "Unknown or changing access patterns point to S3 Intelligent-Tiering: automatic movement, no retrieval fees, a small monitoring charge per object (objects under 128 KB are not monitored or charged). Lifecycle rules suit known patterns.",
@@ -499,7 +499,7 @@
         {
           "text": "Create a KMS grant in the analytics account for the data account's key so that the analytics role inherits permissions.",
           "correct": false,
-          "why": "Grants are created on the key in the key's own account; you cannot attach one from the analytics account to someone else's key."
+          "why": "A grant lives on the key itself, and the analytics account could create one only if the key policy already allowed it, so it does not avoid the key policy change and adds a second mechanism to manage."
         },
         {
           "text": "Enable S3 Object Ownership with bucket owner enforced so that the analytics account can decrypt the objects.",
@@ -587,7 +587,7 @@
           "why": "It can work, but the team must build and maintain the rotation logic and handle the window where the database and parameter disagree."
         },
         {
-          "text": "Store the credential in AWS Secrets Manager with managed rotation every 30 days and have the tool retrieve the secret at connection time.",
+          "text": "Store the credential in AWS Secrets Manager with automatic rotation every 30 days and have the tool retrieve the secret at connection time.",
           "correct": true,
           "why": "Secrets Manager rotates RDS credentials on a schedule with built-in rotation, and the application reads the current value at runtime."
         },
@@ -780,7 +780,7 @@
         {
           "text": "Subscribe to AWS Shield Advanced, enable automatic application-layer DDoS mitigation on the ALB, and engage the Shield Response Team during attacks.",
           "correct": false,
-          "why": "Shield Advanced targets DDoS. It does not inspect logins for credential stuffing or block SQL injection payloads."
+          "why": "Shield Advanced targets DDoS. It does not inspect logins for credential stuffing or block SQL injection payloads. Its automatic layer 7 mitigation is also now a legacy feature, superseded in 2026 by the AWS WAF Anti-DDoS managed rule group."
         },
         {
           "text": "Deploy AWS Network Firewall in the VPC with Suricata rules that match SQL injection and login patterns.",
@@ -812,7 +812,7 @@
         {
           "text": "General Purpose SSD (gp3) volumes striped in RAID 0.",
           "correct": false,
-          "why": "gp3 per-volume limits are far below this target and striping adds complexity and failure risk; it is not built for sustained sub-millisecond IOPS at this level."
+          "why": "A gp3 volume tops out at 80,000 IOPS, so this needs several striped volumes, which adds complexity and failure risk, and gp3 latency is single-digit milliseconds, not sub-millisecond."
         },
         {
           "text": "Provisioned IOPS SSD (io2 Block Express) volumes.",
@@ -1575,7 +1575,7 @@
         {
           "text": "Enable S3 Cross-Region Replication with S3 Replication Time Control to a bucket in eu-central-1.",
           "correct": true,
-          "why": "Replication Time Control is backed by an SLA to replicate 99.99 percent of objects within 15 minutes and publishes replication metrics and events."
+          "why": "Replication Time Control is backed by an SLA to replicate 99.9 percent of objects within 15 minutes and publishes replication metrics and events."
         },
         {
           "text": "Use AWS Backup to copy the bucket to a vault in eu-central-1 every hour.",
@@ -1863,10 +1863,10 @@
         {
           "text": "Snapshot the instance, copy the snapshot with encryption using the customer managed key, and restore from the copy.",
           "correct": true,
-          "why": "Copying a snapshot is the supported way to add encryption; restoring the copy gives an encrypted instance to switch the application to."
+          "why": "Copying a snapshot with encryption is a supported way to add encryption; restoring the copy gives an encrypted instance to switch the application to."
         }
       ],
-      "explain": "RDS encryption at rest is chosen at creation time. To encrypt an existing database: snapshot, copy the snapshot with encryption, restore, cut over. The same pattern applies to EBS volumes.",
+      "explain": "RDS encryption at rest is chosen at creation time. To encrypt an existing database: snapshot, copy the snapshot with encryption, restore, cut over. The same pattern applies to EBS volumes. Newer option: an RDS blue/green deployment can create an encrypted green copy and switch over with less downtime.",
       "refs": [
         "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html",
         "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_CopySnapshot.html"

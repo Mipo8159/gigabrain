@@ -100,7 +100,7 @@
     {
       "id": "nestjs-v3-q03",
       "domain": "modules",
-      "stem": "On a crypto exchange, `OrdersService` and `RiskService` depend on each other through `forwardRef`. A new developer added `this.risk.loadLimits()` inside the `OrdersService` constructor. In CI it passes; in production about one pod in five crashes on boot with `Cannot read properties of undefined (reading 'loadLimits')`. What is the right fix?",
+      "stem": "On a crypto exchange, `OrdersService` and `RiskService` depend on each other through `forwardRef`. A new developer added `this.risk.loadLimits()` inside the `OrdersService` constructor. Unit tests with a mocked `RiskService` pass, but the real app crashes on boot with `Cannot read properties of undefined (reading 'maxExposure')`, thrown from inside `loadLimits()`. What is the right fix?",
       "options": [
         {
           "text": "Swap which side uses `forwardRef` so `RiskService` is always created first",
@@ -110,7 +110,7 @@
         {
           "text": "Mark `RiskService` `@Optional()` so a missing instance doesn't crash",
           "correct": false,
-          "why": "It hides the crash, and orders would then run without risk limits loaded."
+          "why": "`RiskService` can be resolved, so `@Optional()` changes nothing: Nest still injects the not-yet-constructed instance and the call still fails."
         },
         {
           "text": "Move the call to `onModuleInit`, and plan to break the cycle",
@@ -123,7 +123,7 @@
           "why": "Scope does not fix the ordering within a cycle, and a transient risk service would load limits once per consumer."
         }
       ],
-      "explain": "With circular dependencies, the order in which constructors run is not defined, so a constructor must not use the other side. Do work that needs collaborators in `onModuleInit`, and treat `forwardRef` as a sign to redesign.",
+      "explain": "With circular dependencies the order in which constructors run is not defined, and the reference one side receives may be an instance whose constructor has not run yet. So a constructor must not use the other side. Do work that needs collaborators in `onModuleInit`, and treat `forwardRef` as a sign to redesign.",
       "refs": [
         "https://docs.nestjs.com/fundamentals/circular-dependency",
         "https://docs.nestjs.com/fundamentals/lifecycle-events"
@@ -173,7 +173,7 @@
         {
           "text": "Add `ConfigService` to the feature module's `providers`",
           "correct": false,
-          "why": "That creates a second, unconfigured `ConfigService` instance, separate from the one `forRoot()` set up."
+          "why": "The factory resolves in `TypeOrmCoreModule`'s scope, not the feature module's, so the error stays; it would also be a second `ConfigService` instance."
         },
         {
           "text": "Replace `useFactory` with `useValue` built from `process.env` at import time",
@@ -188,7 +188,7 @@
       ],
       "explain": "Each module, including a dynamic module's async options provider, resolves only from its own providers, its imports and global modules. When an async factory needs a service, import its module in `imports` alongside `inject`.",
       "refs": [
-        "https://docs.nestjs.com/techniques/database#async-configuration",
+        "https://docs.nestjs.com/data/typeorm#async-configuration",
         "https://docs.nestjs.com/techniques/configuration#use-module-globally"
       ]
     },
@@ -218,9 +218,10 @@
           "why": "Interceptors can read handler metadata, short-circuit with a stored value, or tap the handler's result on the way out."
         }
       ],
-      "explain": "Choose the stage by what the concern needs: guards decide yes or no, pipes shape arguments, interceptors wrap the call and can replace or record its result. Idempotent replay needs to wrap the call.",
+      "explain": "Choose the stage by what the concern needs: guards decide yes or no, pipes shape arguments, interceptors wrap the call and can replace or record its result. Idempotent replay needs to wrap the call. Nest 12's docs add `@nestjs/idempotency`, which works this way: one app-wide interceptor that acts only on `@Idempotent()` handlers.",
       "refs": [
-        "https://docs.nestjs.com/interceptors#stream-overriding"
+        "https://docs.nestjs.com/interceptors#stream-overriding",
+        "https://docs.nestjs.com/reliability/idempotency"
       ]
     },
     {
@@ -370,14 +371,15 @@
           "why": "Card charges and the property's system are external calls; they cannot join a local database transaction."
         },
         {
-          "text": "No; persist process state and drive steps and compensations from durable messages",
+          "text": "No; persist process state, and drive steps and compensations from a durable workflow or messages",
           "correct": true,
           "why": "Every step and compensation survives restarts because progress is recorded, not held in memory."
         }
       ],
-      "explain": "In-process event streams are fine for reacting within one request's lifetime. Long-running, multi-step processes need persisted state: a durable orchestrator or a state table driven by an outbox and a broker.",
+      "explain": "In-process event streams are fine for reacting within one request's lifetime. Long-running, multi-step processes need persisted state: a durable workflow (Nest 12's docs add `@nestjs/workflows`, which journals each step in your database) or a state table driven by an outbox and a broker.",
       "refs": [
-        "https://docs.nestjs.com/recipes/cqrs#sagas"
+        "https://docs.nestjs.com/recipes/cqrs#sagas",
+        "https://docs.nestjs.com/reliability/workflows"
       ]
     },
     {
@@ -468,10 +470,11 @@
           "why": "It couples API capacity to a batch job and fails the moment autoscaling or a rollout adds pods."
         }
       ],
-      "explain": "`@nestjs/schedule` runs in every process that loads the module. Scheduled side effects need a single owner (a dedicated worker, a leader lock or a queue with job IDs) plus idempotency for the edge cases.",
+      "explain": "`@nestjs/schedule` runs every job in every process that loads the module. Scheduled side effects need a single owner (a dedicated worker, a lease such as `@OnOneInstance()` from `@nestjs/locks`, or a queue with job IDs) plus idempotency for the edge cases.",
       "refs": [
         "https://docs.nestjs.com/techniques/task-scheduling",
-        "https://docs.nestjs.com/standalone-applications"
+        "https://docs.nestjs.com/standalone-applications",
+        "https://docs.nestjs.com/reliability/locks"
       ]
     },
     {
@@ -570,10 +573,10 @@
     {
       "id": "nestjs-v3-q18",
       "domain": "seams",
-      "stem": "A hotel group bundles its Nest API with webpack to speed up container starts. The bundle builds, but at startup it fails with `Cannot find module '@nestjs/microservices'` and `'@nestjs/websockets/socket-module'`, packages the API never imports. What is the fix?",
+      "stem": "A hotel group bundles its Nest API with webpack to speed up container starts. The webpack build fails with `Module not found: Can't resolve '@nestjs/microservices/microservices-module'` and `'@nestjs/websockets/socket-module'`, packages the API never imports. What is the fix?",
       "options": [
         {
-          "text": "Install every optional Nest package so the requires resolve",
+          "text": "Install every optional Nest package so the imports resolve",
           "correct": false,
           "why": "It works, but pulls in packages and transitive dependencies the app doesn't use, undoing part of the bundle's purpose."
         },
@@ -588,12 +591,12 @@
           "why": "It starts, but the image ships the full dependency tree again, which undoes the faster container start the bundle was for."
         },
         {
-          "text": "Ignore Nest's lazily required optional packages unless installed, for example with `IgnorePlugin`",
+          "text": "Ignore Nest's lazily loaded optional packages unless installed, for example with `IgnorePlugin`",
           "correct": true,
           "why": "Nest requires them only if present, so leaving them out of the bundle when they aren't installed is safe."
         }
       ],
-      "explain": "Nest loads optional integrations with lazy `require()` calls inside `try` blocks. Bundlers see them as hard dependencies; tell the bundler to ignore the ones you don't install, and use a bundler that keeps decorator metadata.",
+      "explain": "Nest loads optional integrations lazily inside `try` blocks and carries on without them. Bundlers see them as hard dependencies; tell the bundler to ignore the ones you don't install, and use a bundler that keeps decorator metadata.",
       "refs": [
         "https://docs.nestjs.com/faq/serverless",
         "https://docs.nestjs.com/recipes/hot-reload"

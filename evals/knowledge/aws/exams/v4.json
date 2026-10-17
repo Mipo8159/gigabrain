@@ -512,7 +512,7 @@
     {
       "id": "aws-v4-q16",
       "domain": "storage",
-      "stem": "A document-signing SaaS presigns PUT URLs with `signableHeaders: new Set([\"content-type\"])` and `ContentType: \"application/pdf\"` so only PDFs are accepted. After a frontend refactor, every upload fails with `403 SignatureDoesNotMatch`. The new code uses `fetch(url, { method: 'PUT', body: file })`. What is the cause?",
+      "stem": "A document-signing SaaS presigns PUT URLs with `signableHeaders: new Set([\"content-type\"])` and `ContentType: \"application/pdf\"` so only PDFs are accepted. After a frontend refactor, every upload fails with `403 SignatureDoesNotMatch`. The new code uses `fetch(url, { method: 'PUT', body: await file.arrayBuffer() })`. What is the cause?",
       "options": [
         {
           "text": "Signed headers make S3 require HTTPS client certificates.",
@@ -522,7 +522,7 @@
         {
           "text": "`fetch` now omits `Content-Type: application/pdf`, so the signed header doesn't match.",
           "correct": true,
-          "why": "When `content-type` is signed, the client must send exactly the same value; a missing or different type fails the signature."
+          "why": "An `ArrayBuffer` body carries no type, so `fetch` sends no `Content-Type`. When `content-type` is signed, the client must send exactly the same value; a missing or different type fails the signature."
         },
         {
           "text": "The URL expired because the refactor added a few seconds of latency before each upload.",
@@ -566,7 +566,7 @@
           "why": "Parallelism improves speed but not the part count."
         }
       ],
-      "explain": "S3 multipart limits: 5 MiB minimum part (except the last), 10,000 parts, 5 TiB per object. Derive the part size from the object size, or let `lib-storage` `Upload` handle it.",
+      "explain": "S3 multipart limits: 5 MiB minimum part (except the last), 5 GiB maximum part, 10,000 parts, 48.8 TiB (50 TB) per object since December 2025. Derive the part size from the object size, or let `lib-storage` `Upload` handle it.",
       "refs": [
         "https://docs.aws.amazon.com/AmazonS3/latest/userguide/qfacts.html"
       ]

@@ -638,7 +638,7 @@
     {
       "id": "aws-v2-q20",
       "domain": "region",
-      "stem": "A ride-hailing company wants active-active in two Regions: riders served by the nearest Region, and a Region impairment shouldn't need manual DNS edits. Trips are stored in a DynamoDB global table. Which two decisions are needed? (Choose two.)",
+      "stem": "A ride-hailing company wants active-active in two Regions: riders served by the nearest Region, and a Region impairment shouldn't need manual DNS edits. Trips are stored in a DynamoDB global table in the default multi-Region eventual consistency (MREC) mode. Which two decisions are needed? (Choose two.)",
       "options": [
         {
           "text": "Route 53 latency-based records for each Region with health checks attached.",
@@ -658,7 +658,7 @@
         {
           "text": "Rely on global table condition expressions to prevent double-booking across Regions.",
           "correct": false,
-          "why": "Conditions are checked against the local replica only; concurrent writes in two Regions resolve by last writer wins."
+          "why": "In MREC mode, conditions are checked against the local replica only; concurrent writes in two Regions resolve by last writer wins."
         },
         {
           "text": "Run the single writer database in one Region and have the other Region forward writes to it over the backbone.",

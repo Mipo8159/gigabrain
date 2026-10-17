@@ -4,6 +4,8 @@ Researched 2026-10-12. The domain is **Nest 11**, but **Nest 12 is now `latest`*
 (12.0.0 shipped 2026-08-27; 12.1.3 shipped today). Nest 11 still gets fixes under the
 `legacy` dist-tag (11.2.7, 2026-09-30). The fixtures should pin 11.2.7 (see
 "Versions checked"). Nest 12 deltas are listed at the end of the traps.
+The **exams** (`exams/v*.json`) were re-pinned to **Nest 12.1.3** on 2026-10-17
+(fact-check reports in `factcheck/`); they name "Nest 12" where 11 and 12 differ.
 
 The behaviour claims marked **[probed]** were run against a scratch Nest 11.2.7 +
 Express 5.2.1 + Fastify 5.11.3 project on Node 24.21. Everything else is from the
@@ -207,7 +209,9 @@ cited docs only.
 - **Correct:** **[probed]** `init C, init A, destroy A, destroy C`. The
   dependency is initialised first and destroyed last. Global modules are
   initialised first and destroyed last.
-  - **Nest 12** goes further and orders by *component hierarchy level*.
+  - **Nest 12:** module order is unchanged [probed 12.1.3]. "Hierarchy level"
+    applies *inside* one module: its providers' hooks run level by level, where
+    Nest 11 ran them in parallel.
 - **Source:** https://docs.nestjs.com/v11/migration-guide (section "Termination
   lifecycle hooks order") , https://docs.nestjs.com/migration-guide
 - **Testable how:** A `QueueService` flushes to a `DbService` in
@@ -356,7 +360,7 @@ cited docs only.
   (TypeORM) or `tx` (Prisma interactive transaction) are rolled back. Pass the
   manager down, use a `QueryRunner`, or use a CLS-based helper such as
   `@nestjs-cls/transactional`.
-- **Source:** https://docs.nestjs.com/techniques/database#transactions ,
+- **Source:** https://docs.nestjs.com/data/typeorm#typeorm-transactions ,
   https://www.prisma.io/docs/orm/prisma-client/queries/transactions#interactive-transactions
 - **Testable how:** Use TypeORM with `sql.js` (no native build) or
   better-sqlite3. A `transfer()` debits A, credits B, then throws on purpose.
@@ -394,7 +398,30 @@ cited docs only.
   - **Body schemas:** `@Body({ schema })` with `StandardSchemaValidationPipe`.
   - **`ValidationPipe`:** new `errorFormat` option.
   - **Logging:** `ConsoleLogger` puts object params on the same entry.
-  - **Lifecycle:** ordering is by hierarchy level.
+  - **Lifecycle:** ordering is by hierarchy level, within a module only (see
+    trap 9). Shutdown has a new `prepareClose()` step before `onModuleDestroy`;
+    it returns 503 to new requests only with `return503OnClosing`. The Express
+    adapter now drains in-flight requests.
+  - **Missing type metadata** (esbuild, tsx, Vite 8/Oxc): Nest boots with no DI
+    error and injects `undefined` [probed 12.1.3, same on 11]. "Can't resolve
+    dependencies (?)" appears only when another param has an explicit `@Inject()`.
+  - **CommonJS:** bundling ESM-only Nest 12 into a CJS bundle with esbuild
+    works; an unbundled CJS app on Lambda needs `--experimental-require-module`.
+  - **Microservices:** with `inheritAppConfig`, call `useGlobal*()` before
+    `connectMicroservice()`; new `deferInitialization` option. Kafka still uses
+    kafkajs (with the `-server` group postfix) and accepts `RegExp` patterns.
+  - **WebSockets:** gateways can be request-scoped.
+  - **New packages** (docs section `/reliability`, all 0.0.x-0.1.x, published
+    2026-09-25 to 10-01): `@nestjs/outbox`, `@nestjs/idempotency`
+    (`@Idempotent()`), `@nestjs/workflows`, `@nestjs/locks` (`@OnOneInstance()`).
+    `@nestjs/cqrs` 12.1: pluggable publisher, `commit({ transaction })`.
+    `@nestjs/bullmq` 12 closes workers in `onApplicationShutdown`.
+  - **Docs moved:** `techniques/*` → `application/`, `data/`, `http/`. Old URLs
+    redirect, but some anchors are gone (`#async-configuration`, `#transactions`).
+  - **Unchanged** [probed 12.1.3]: Express 5.2.1 `simple` query parser,
+    dynamic modules by reference, `load()` beats `process.env`, last matching
+    global filter wins, `overrideGuard` vs `APP_GUARD`, no SIGTERM hooks without
+    `enableShutdownHooks()`, Fastify needs `ready()`, RMQ `noAck` default true.
 
   Source: https://docs.nestjs.com/migration-guide ,
   https://github.com/nestjs/nest/releases/tag/v12.0.0

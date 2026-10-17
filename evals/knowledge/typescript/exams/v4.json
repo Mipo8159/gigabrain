@@ -43,7 +43,7 @@
         {
           "text": "Have the vendor send `recordId` as a string and keep it a string (or `bigint`) end to end.",
           "correct": true,
-          "why": "JSON numbers become IEEE doubles in JavaScript, so precision is lost before any code runs; only a string on the wire keeps all 64 bits."
+          "why": "A plain `JSON.parse` turns JSON numbers into IEEE doubles, so precision is lost before your code sees them; a string on the wire keeps all 64 bits for every consumer, without relying on a source-text reviver."
         },
         {
           "text": "Change the type to `recordId: bigint` and keep parsing with `JSON.parse`.",
@@ -61,7 +61,7 @@
           "why": "It lowers the collision rate but keeps storing wrong ids, which then break reconciliation with the vendor."
         }
       ],
-      "explain": "JSON has no 64-bit integers in JavaScript: numbers beyond 2^53 are rounded during parsing, before your types are involved. Carry large ids and money as strings on the wire and convert deliberately at the edge.",
+      "explain": "JSON has no 64-bit integers in JavaScript: a plain `JSON.parse` rounds numbers beyond 2^53, before your types are involved (only a reviver reading the source text can recover them). Carry large ids and money as strings on the wire and convert deliberately at the edge.",
       "refs": [
         "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/BigInt",
         "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify"

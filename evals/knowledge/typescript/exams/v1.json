@@ -112,7 +112,7 @@
           "why": "Env vars are always strings, so `z.boolean()` rejects every value and the service fails to boot."
         },
         {
-          "text": "`z.stringbool()`, which maps \"true\"/\"false\"/\"1\"/\"0\"/\"yes\"/\"no\" and rejects anything else.",
+          "text": "`z.stringbool()`, which maps \"true\"/\"false\", \"1\"/\"0\", \"yes\"/\"no\" (and a few similar pairs) and rejects anything else.",
           "correct": true,
           "why": "It parses the string meaning, so \"false\" becomes `false`, and a typo such as \"flase\" fails at boot instead of silently enabling the feature."
         },
@@ -572,7 +572,7 @@
         {
           "text": "Install `@typescript/native-preview` and call `tsgo` to use TypeScript 7.",
           "correct": false,
-          "why": "That was the preview path; 7.0 ships as the normal `typescript` package with the `tsc` binary, and native-preview is frozen."
+          "why": "That was the preview path; 7.0 ships as the normal `typescript` package with the `tsc` binary, and nightlies now come from `typescript@next`."
         },
         {
           "text": "Nothing else changes: TypeScript 7 keeps the JavaScript API, so ts-jest and the codegen script keep working on the new compiler unchanged.",
@@ -653,7 +653,7 @@
     {
       "id": "typescript-v1-q20",
       "domain": "toolchain",
-      "stem": "A team moved its test suite to `node --test` running `.ts` files directly. The service now crashes at load with `SyntaxError: The requested module './models/index.ts' does not provide an export named 'Customer'`. `models/index.ts` has `export { Customer, createCustomer } from \"./customer.ts\"`, and `Customer` is an interface. What fix also stops this coming back?",
+      "stem": "A team moved its test suite to `node --test` running `.ts` files directly. The service now crashes at load with `SyntaxError: The requested module './customer.ts' does not provide an export named 'Customer'`. `models/index.ts` has `export { Customer, createCustomer } from \"./customer.ts\"`, and `Customer` is an interface. What fix also stops this coming back?",
       "options": [
         {
           "text": "Switch every relative import to `.js` extensions, which is what Node's ESM loader expects for TypeScript projects.",

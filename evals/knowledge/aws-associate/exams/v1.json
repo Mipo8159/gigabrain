@@ -496,9 +496,9 @@
           "why": "Manual monthly changes are not automatic and rely on a person remembering, which the assessor will not accept."
         },
         {
-          "text": "Store the credentials in AWS Secrets Manager with managed rotation every 30 days and have the function read the secret at runtime.",
+          "text": "Store the credentials in AWS Secrets Manager with automatic rotation every 30 days and have the function read the secret at runtime.",
           "correct": true,
-          "why": "Secrets Manager rotates RDS credentials on a schedule with a managed rotation function, and the code only fetches the current value."
+          "why": "Secrets Manager rotates RDS credentials on a schedule using an AWS-provided rotation function, and the code only fetches the current value."
         }
       ],
       "explain": "Rotating a secret is different from rotating the key that encrypts it. Secrets Manager owns the secret lifecycle, including scheduled rotation for RDS. Parameter Store is fine for configuration but leaves rotation to you.",
@@ -1703,7 +1703,7 @@
     {
       "id": "aws-associate-v1-q53",
       "domain": "cost",
-      "stem": "A retailer's order database runs on EC2 with 200 gp2 EBS volumes of 1 TB each. A performance review shows the volumes need about 4,000 IOPS each, which they already get, and storage cost is under review. Which change will lower cost with the LEAST risk and no downtime?",
+      "stem": "A retailer's order database runs on EC2 with 200 gp2 EBS volumes of 1 TB each. A performance review shows the volumes need about 3,000 IOPS each, which they already get, and storage cost is under review. Which change will lower cost with the LEAST risk and no downtime?",
       "options": [
         {
           "text": "Snapshot the volumes, delete them, and restore new gp3 volumes during a maintenance window.",
@@ -1721,7 +1721,7 @@
           "why": "st1 is cheaper but built for large sequential reads, not the random I/O of a database."
         },
         {
-          "text": "Change the volumes to io2 with 4,000 provisioned IOPS each.",
+          "text": "Change the volumes to io2 with 3,000 provisioned IOPS each.",
           "correct": false,
           "why": "io2 provides higher durability and IOPS but costs more than gp3 at this performance level."
         }
@@ -2000,7 +2000,7 @@
           "why": "The snapshot is the starting point; you cannot encrypt the running instance itself."
         }
       ],
-      "explain": "RDS encryption at rest is chosen when an instance is created. To encrypt an existing one: snapshot, copy the snapshot with a KMS key, then restore. The same pattern works for unencrypted EBS volumes.",
+      "explain": "RDS encryption at rest is chosen when an instance is created. To encrypt an existing one: snapshot, copy the snapshot with a KMS key, then restore. The same pattern works for unencrypted EBS volumes. Newer option: an RDS blue/green deployment can also create an encrypted green copy and switch over.",
       "refs": [
         "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html",
         "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_CopySnapshot.html"

@@ -224,7 +224,7 @@
         {
           "text": "Use `CREATE INDEX CONCURRENTLY`-style semantics by adding `CONCURRENTLY` to the ALTER TABLE.",
           "correct": false,
-          "why": "ALTER TABLE ADD COLUMN has no CONCURRENTLY form; that keyword exists for index builds and partition detach."
+          "why": "ALTER TABLE ADD COLUMN has no CONCURRENTLY form; in ALTER TABLE the keyword exists only for DETACH PARTITION (elsewhere for index builds, REINDEX and materialized-view refresh)."
         }
       ],
       "explain": "On a busy table the danger in DDL is the lock queue, not the run time: a waiting ACCESS EXCLUSIVE request blocks every later query. Always pair DDL with a short lock_timeout and a retry loop, and keep long transactions off the primary.",
@@ -235,7 +235,7 @@
     {
       "id": "postgres-v1-q07",
       "domain": "migrations",
-      "stem": "An ad-attribution service's `clicks.id` is `integer` and has reached 1.9 billion, so it will run out in about 6 weeks. The table is 2.5 TB, takes 25k inserts/s, and has a 99.95% SLA. Which plan avoids downtime?",
+      "stem": "An ad-attribution service's `clicks.id` is `integer` and has reached 1.9 billion and grows by about 6M a day, so it will run out in about 6 weeks. The table is 2.5 TB, is written around the clock, and has a 99.95% SLA. Which plan avoids downtime?",
       "options": [
         {
           "text": "Add a nullable `id_new bigint`, fill it for new rows with a trigger, backfill old rows in small batches, build a unique index concurrently, then swap the columns and the PK in one short transaction under lock_timeout.",
@@ -250,7 +250,7 @@
         {
           "text": "Restart the sequence at -2,147,483,648 to use the negative half of the integer range.",
           "correct": false,
-          "why": "A real emergency trick that buys time, but it breaks code and pagination that assume increasing ids, and in about 3 more years the same migration is still needed."
+          "why": "A real emergency trick that buys time, but it breaks code and pagination that assume increasing ids, and in about a year the same migration is still needed."
         },
         {
           "text": "Dump the table, create it with a bigint id, and restore it during a weekend maintenance window.",
@@ -421,7 +421,7 @@
     {
       "id": "postgres-v1-q13",
       "domain": "pooling",
-      "stem": "A multi-tenant SaaS moved from direct connections to PgBouncer in transaction mode. Row-level security reads `current_setting('app.tenant_id')`, which each request sets with `SET app.tenant_id = …` right after checkout and before its transaction. Since the move, support has two tickets where a user briefly saw another tenant's invoices. Which fix stops the leak?",
+      "stem": "A multi-tenant SaaS moved from direct connections to PgBouncer in transaction mode. Row-level security reads `current_setting('app.tenant_id')`, which each request sets with `SET app.tenant_id = …` right after checkout and before its transaction. Since the move, support has two tickets where a user briefly saw another tenant's invoices. Which fix stops the leak while keeping transaction pooling?",
       "options": [
         {
           "text": "Switch PgBouncer to session mode for this service.",
@@ -622,15 +622,15 @@
         {
           "text": "Run `VACUUM FULL` on the largest tables to rewrite them with fresh XIDs.",
           "correct": false,
-          "why": "It takes exclusive locks on the biggest tables and still cannot freeze past the slot's xmin, so it costs downtime without fixing the cause."
+          "why": "It takes exclusive locks on the biggest tables, needs an XID of its own, and leaves the slot holding the horizon; the docs say not to use it in this scenario."
         },
         {
-          "text": "Drop the abandoned slot, then run `VACUUM (FREEZE, VERBOSE)` on the oldest tables first and watch `age(relfrozenxid)` fall.",
+          "text": "Drop the abandoned slot, then run plain `VACUUM` on the tables with the oldest `relfrozenxid` first (or database-wide) and watch `age(datfrozenxid)` fall.",
           "correct": true,
-          "why": "Removing the xmin holder lets vacuum freeze old tuples; targeting the tables with the oldest relfrozenxid advances datfrozenxid fastest."
+          "why": "Removing the xmin holder lets vacuum freeze old tuples; the docs advise plain VACUUM here, since VACUUM FREEZE does more work than needed to restore normal operation."
         }
       ],
-      "explain": "XIDs are 32-bit, so Postgres must freeze old tuples before about 2 billion transactions pass, or it stops assigning new XIDs. Anything holding the xmin horizon (slots, prepared transactions, long transactions) blocks freezing. Alert on age(datfrozenxid) well before the warning and treat inactive slots as incidents.",
+      "explain": "XIDs are 32-bit, so Postgres must freeze old tuples before about 2 billion transactions pass, or it stops assigning new XIDs. Anything holding the xmin horizon (slots, prepared transactions, long transactions) blocks freezing. Remove the holder, then run plain VACUUM (not FULL or FREEZE). Alert on age(datfrozenxid) well before the warning and treat inactive slots as incidents.",
       "refs": [
         "https://www.postgresql.org/docs/17/routine-vacuuming.html#VACUUM-FOR-WRAPAROUND"
       ]

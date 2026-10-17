@@ -79,7 +79,7 @@
         {
           "text": "`z.coerce.date()`, which accepts any string `new Date()` can read.",
           "correct": false,
-          "why": "It accepts offsets, but `null` coerces to 1970-01-01 and unparseable strings become Invalid Date, so bad data passes silently as a real departure time."
+          "why": "It accepts offsets, but `null` coerces to 1970-01-01 and loose formats such as \"10/15/2026\" parse in the server's local time zone, so bad data passes silently as a real departure time."
         },
         {
           "text": "`z.iso.datetime({ offset: true }).transform(s => new Date(s))`",
@@ -526,9 +526,9 @@
           "why": "One cast instead of 40, but still an unchecked claim, and it hides the case where the mapping changes and returns something else."
         },
         {
-          "text": "`.filter(o => !!o)`",
+          "text": "`.filter(o => Boolean(o))`",
           "correct": false,
-          "why": "It reads the same as `Boolean`, and TypeScript doesn't infer a type predicate from truthiness checks, so the type stays `(Owner | null)[]`."
+          "why": "It reads the same as `filter(Boolean)`, and TypeScript doesn't treat a `Boolean(o)` call as a narrowing check, so no predicate is inferred and the type stays `(Owner | null)[]`."
         },
         {
           "text": "`.filter(o => o !== null)`",

@@ -587,7 +587,7 @@
         {
           "text": "Keep everything in S3 Standard and buy a Savings Plan.",
           "correct": false,
-          "why": "Savings Plans apply to compute, not to S3 storage."
+          "why": "Savings Plans cover compute and, since December 2025, database usage; none of them discount S3 storage."
         },
         {
           "text": "Use S3 Intelligent-Tiering for the tenant files.",
@@ -713,7 +713,7 @@
         {
           "text": "Subscribe to AWS Shield Advanced and enable automatic application-layer DDoS mitigation.",
           "correct": false,
-          "why": "Shield Advanced targets volumetric and DDoS events and adds a monthly subscription. A slow credential-stuffing attack below DDoS volume is a WAF job."
+          "why": "Shield Advanced targets volumetric and DDoS events and adds a monthly subscription. A slow credential-stuffing attack below DDoS volume is a WAF job. Its automatic layer 7 mitigation is also now a legacy feature, superseded in 2026 by the AWS WAF Anti-DDoS managed rule group."
         },
         {
           "text": "Reduce the ALB idle timeout and enable deletion protection on the load balancer.",
@@ -1047,7 +1047,7 @@
         {
           "text": "Amazon CloudFront with the NLBs as origins.",
           "correct": false,
-          "why": "CloudFront handles HTTP and HTTPS (and WebSocket) traffic, not a custom TCP protocol, and it doesn't offer a short list of fixed IP addresses."
+          "why": "CloudFront handles HTTP and HTTPS (and WebSocket) traffic, not a custom TCP protocol on port 7443; its Anycast static IP lists exist but only front HTTP(S) distributions."
         },
         {
           "text": "Route 53 latency-based routing to the two NLBs.",
@@ -1665,7 +1665,7 @@
           "why": "Versioning keeps overwritten objects, but a privileged user can still delete versions or change the lifecycle rule."
         }
       ],
-      "explain": "Audit logging at organization scale has two parts: collect with an organization trail, and protect in a separate log archive account with WORM storage (Object Lock compliance mode). AWS Control Tower sets up this layout by default.",
+      "explain": "Audit logging at organization scale has two parts: collect with an organization trail, and protect in a separate log archive account with WORM storage (Object Lock compliance mode). AWS Control Tower sets up the organization trail and a log archive account by default; confirm or add the WORM settings yourself.",
       "refs": [
         "https://docs.aws.amazon.com/awscloudtrail/latest/userguide/creating-trail-organization.html",
         "https://docs.aws.amazon.com/AmazonS3/latest/userguide/object-lock.html"
@@ -1973,7 +1973,7 @@
         {
           "text": "Take a snapshot of the instance and copy the snapshot with encryption enabled using the KMS key.",
           "correct": true,
-          "why": "Copying a snapshot is the step where RDS lets you add encryption to unencrypted data."
+          "why": "Copying a snapshot with encryption is a supported way to add encryption to unencrypted data."
         },
         {
           "text": "Restore a new DB instance from the encrypted snapshot and point the application at it.",
@@ -1991,7 +1991,7 @@
           "why": "This encrypts data in transit, which is good practice but doesn't meet the encryption-at-rest requirement."
         }
       ],
-      "explain": "Encryption at rest on RDS and EBS is chosen at creation. To encrypt existing data: snapshot it, copy the snapshot with encryption, restore from the copy, then switch over. Turn encryption on at creation for every new database so you never have to do this migration.",
+      "explain": "Encryption at rest on RDS and EBS is chosen at creation. To encrypt existing data: snapshot it, copy the snapshot with encryption, restore from the copy, then switch over. Turn encryption on at creation for every new database so you never have to do this migration. Newer option: an RDS blue/green deployment can create an encrypted green copy and switch over with less downtime.",
       "refs": [
         "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html",
         "https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_CopySnapshot.html"

@@ -58,7 +58,7 @@
         {
           "text": "Move to an SNS FIFO topic, which accepts larger messages.",
           "correct": false,
-          "why": "SNS has a smaller payload limit than SQS's 1 MiB, not a larger one, and ordering isn't the problem."
+          "why": "SNS is no larger: 256 KiB by default and at most 1 MiB on a topic that opts in (since September 2026), so a 3 MB study still fails, and ordering isn't the problem."
         }
       ],
       "explain": "Queues carry references, not blobs. When payloads can exceed the message limit (1 MiB for SQS since 2025), store the body in S3 and send the key (the claim-check pattern), with a lifecycle rule to clean up.",
@@ -101,7 +101,7 @@
     {
       "id": "aws-v5-q03",
       "domain": "delivery",
-      "stem": "A clinic-scheduling service has an EventBridge rule matching `{ \"source\": [\"scheduling\"] }` that triggers an enrichment Lambda. The Lambda publishes an `AppointmentEnriched` event with `source: \"scheduling\"`. After a deploy, Lambda invocations and EventBridge costs rose 400× within an hour. Which fix addresses the cause?",
+      "stem": "A clinic-scheduling service has an EventBridge rule on the account's default event bus matching `{ \"source\": [\"scheduling\"] }` that triggers an enrichment Lambda. The Lambda publishes an `AppointmentEnriched` event with `source: \"scheduling\"`. After a deploy, Lambda invocations and EventBridge costs rose 400× within an hour. Which fix addresses the cause?",
       "options": [
         {
           "text": "Lower the Lambda's reserved concurrency to cap the cost.",
@@ -124,8 +124,10 @@
           "why": "The function's output matches the rule that triggers it: a recursive loop. The fix is in the event contract and pattern."
         }
       ],
-      "explain": "Event-driven systems can loop when a consumer emits events that match its own trigger. Give each producer a distinct `source`/`detail-type` contract and keep rule patterns specific; Lambda's recursion detection only covers some services.",
+      "explain": "Event-driven systems can loop when a consumer emits events that match its own trigger. Give each producer a distinct `source`/`detail-type` contract and keep rule patterns specific; Lambda's recursive loop detection covers SQS, SNS, S3 and (since October 2026) EventBridge custom event buses, not the default bus, and it only stops a loop; it doesn't fix the contract.",
       "refs": [
+        "https://docs.aws.amazon.com/lambda/latest/dg/invocation-recursion.html",
+        "https://aws.amazon.com/about-aws/whats-new/2026/10/lambda-recursive-loops-eventbridge-custom/",
         "https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html"
       ]
     },
@@ -188,6 +190,7 @@
       ],
       "explain": "Step Functions Standard gives exactly-once workflow execution; Express asynchronous gives at-least-once and synchronous gives at-most-once. When you switch for cost or throughput, every side-effecting step must become idempotent.",
       "refs": [
+        "https://docs.aws.amazon.com/step-functions/latest/dg/choosing-workflow-type.html",
         "https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html"
       ]
     },
@@ -451,7 +454,7 @@
       ],
       "explain": "A Lambda in a VPC has only the network paths the VPC provides. For DynamoDB and S3 use gateway endpoints; for other AWS APIs use interface endpoints or NAT. Also set SDK connection timeouts so a missing route fails fast instead of hanging.",
       "refs": [
-        "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/vpc-endpoints-dynamodb.html"
+        "https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-ddb.html"
       ]
     },
     {
@@ -581,7 +584,7 @@
     {
       "id": "aws-v5-q18",
       "domain": "region",
-      "stem": "A clinic network uses a DynamoDB global table in `us-east-1` and `us-west-2`. Each Region runs a Lambda on its local DynamoDB stream that emails 'appointment confirmed' when the status changes to `CONFIRMED`. Patients receive two emails per confirmation. Which fix is correct?",
+      "stem": "A clinic network uses a DynamoDB global table in `us-east-1` and `us-west-2`, in the default eventually consistent (MREC) mode. Each Region runs a Lambda on its local DynamoDB stream that emails 'appointment confirmed' when the status changes to `CONFIRMED`. Patients receive two emails per confirmation. Which fix is correct?",
       "options": [
         {
           "text": "Run the email Lambda on `us-east-1`'s stream only, since it sees replicated writes too.",
@@ -607,7 +610,7 @@
       "explain": "In global tables, every replica's stream shows every change, including replicated ones. Side effects driven by streams need a single owner per item (home Region) or a globally consistent idempotency store; local conditional writes aren't enough.",
       "refs": [
         "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/V2globaltables_HowItWorks.html",
-        "https://docs.aws.amazon.com/lambda/latest/dg/services-ddb-errors.html"
+        "https://docs.aws.amazon.com/lambda/latest/dg/services-dynamodb-errors.html"
       ]
     },
     {
@@ -644,7 +647,7 @@
     {
       "id": "aws-v5-q20",
       "domain": "region",
-      "stem": "A healthcare SaaS claims an RTO of 15 minutes and RPO of 1 minute across two Regions, using DynamoDB global tables and Route 53 health checks. The last real failover test was 18 months ago. Which two practices would give evidence the claim still holds? (Choose two.)",
+      "stem": "A healthcare SaaS claims an RTO of 15 minutes and RPO of 1 minute across two Regions, using DynamoDB global tables (default MREC mode) and Route 53 health checks. The last real failover test was 18 months ago. Which two practices would give evidence the claim still holds? (Choose two.)",
       "options": [
         {
           "text": "Regular game days that fail over real traffic (all or a share) to the secondary Region and measure the time to recover.",

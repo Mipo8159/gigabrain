@@ -271,7 +271,7 @@
         {
           "text": "`ADD CONSTRAINT … UNIQUE … NOT VALID`, then `VALIDATE CONSTRAINT`.",
           "correct": false,
-          "why": "NOT VALID exists for CHECK and foreign-key constraints, not for UNIQUE, so this is rejected."
+          "why": "NOT VALID exists for CHECK, foreign-key and (since PG18) NOT NULL constraints, not for UNIQUE, so this is rejected."
         },
         {
           "text": "Build the unique index `CONCURRENTLY`, then attach it with `ADD CONSTRAINT … UNIQUE USING INDEX`.",
@@ -359,7 +359,7 @@
     {
       "id": "postgres-v3-q11",
       "domain": "indexing",
-      "stem": "A chat app updates `users.last_seen_at` on every heartbeat, about 50k updates/s. The `users` table has 9 indexes, one of which is on `last_seen_at` (used by a nightly 'inactive users' job). WAL volume is huge and the table and its indexes bloat quickly. Which change cuts the write cost the most?",
+      "stem": "A chat app updates `users.last_seen_at` on every heartbeat, about 50k updates/s. The `users` table has 9 indexes, one of which is on `last_seen_at` (used by a nightly 'inactive users' job). WAL volume is huge and the table and its indexes bloat quickly. Without adding another data store, which change cuts the write cost the most?",
       "options": [
         {
           "text": "Raise `checkpoint_timeout` and `max_wal_size` so the system writes fewer full-page images.",
@@ -398,7 +398,7 @@
           "why": "SQL-level PREPARE lives in the server session, which transaction pooling does not keep, so it fails the same way."
         },
         {
-          "text": "Upgrade to PgBouncer 1.21+ and set `max_prepared_statements` above 0.",
+          "text": "Upgrade to PgBouncer 1.21+ with `max_prepared_statements` above 0 (the default since 1.24).",
           "correct": true,
           "why": "PgBouncer then re-prepares statements on whichever server connection a transaction lands on, so the ORM keeps its prepared statements."
         },
@@ -586,7 +586,7 @@
         {
           "text": "Also set `autovacuum_freeze_max_age` very high for the table so that the forced wraparound vacuum never starts on it again.",
           "correct": false,
-          "why": "It delays the forced vacuum and makes the eventual one bigger; XID wraparound limits still force it before the hard stop."
+          "why": "Autovacuum ignores a per-table value above the system-wide setting, and a higher global value only delays the forced vacuum and makes it bigger."
         },
         {
           "text": "Re-enable autovacuum on the table, so insert-triggered vacuums freeze new pages in small steps as they fill.",

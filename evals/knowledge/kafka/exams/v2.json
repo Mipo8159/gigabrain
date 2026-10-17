@@ -162,7 +162,7 @@
     {
       "id": "kafka-v2-q05",
       "domain": "groups",
-      "stem": "A courier-tracking group of 12 pods shows a 45-second lag spike on a few partitions every time Kubernetes rolls a pod, even though new pods start in 5 seconds. The consumers run on the Confluent JS client with the default 45-second session timeout. What change removes the spike?",
+      "stem": "A courier-tracking group of 12 pods shows a 45-second lag spike on a few partitions every time Kubernetes rolls a pod, even though new pods start in 5 seconds. The consumers run on the Confluent JS client with a 45-second session timeout. What change removes the spike?",
       "options": [
         {
           "text": "Lower `session.timeout.ms` to 5 seconds",
@@ -361,9 +361,9 @@
           "why": "The zombie's transaction did commit, so read_committed readers see it too."
         },
         {
-          "text": "Use a stable `transactionalId` per instance so the new producer fences the old",
+          "text": "Send offsets with the consumer's group metadata so a stale generation's commit is fenced",
           "correct": true,
-          "why": "When a producer initialises with the same transactional ID, the broker bumps the epoch and rejects the older producer's writes and commits."
+          "why": "Since KIP-447 the broker checks the group generation sent with the offsets; the frozen member was removed from the group, so its offset commit fails and its transaction must abort."
         },
         {
           "text": "Add an `instanceId` header and have downstream consumers drop stale instances",
@@ -371,7 +371,7 @@
           "why": "It pushes fencing to every consumer and needs them to know which instance is current, which they cannot reliably know."
         }
       ],
-      "explain": "Zombie fencing works through the transactional ID's epoch. Random IDs give every instance a fresh identity, so nothing gets fenced; IDs must be stable per logical producer.",
+      "explain": "In read-process-write, zombie fencing comes from the consumer group generation sent with the offsets (KIP-447: `consumer.groupMetadata()` in Java, the `consumer` object in Confluent's `sendOffsets`). A stable transactional ID only fences a restart of the same instance; it cannot stop a zombie whose partitions moved to a different pod.",
       "refs": [
         "https://kafka.apache.org/documentation/#semantics"
       ]

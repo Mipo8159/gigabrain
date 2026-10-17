@@ -618,9 +618,9 @@
           "why": "It works, but it is a lot of code to maintain and misses calls inside libraries."
         },
         {
-          "text": "Register OTel's ESM loader hook in `tracing.mjs` and preload it with `node --import`.",
+          "text": "Register OTel's ESM loader hook and preload `tracing.mjs` with `node --import`.",
           "correct": true,
-          "why": "ESM bindings can't be patched after load, so OTel wraps modules through a loader hook (`module.register('@opentelemetry/instrumentation/hook.mjs', import.meta.url)`); `--import` registers it before any app module loads."
+          "why": "ESM bindings can't be patched after load, so OTel wraps modules through its loader hook `@opentelemetry/instrumentation/hook.mjs` (OTel documents `--experimental-loader=…`; `module.register` still works but is doc-deprecated since Node 24.15); `--import` runs the setup before any app module loads."
         },
         {
           "text": "Switch the whole service to CommonJS and preload the tracing setup with `node --require`.",
@@ -628,9 +628,9 @@
           "why": "CommonJS with `--require` can work, but it rewrites the module system of the whole service to avoid a startup-order fix."
         }
       ],
-      "explain": "Auto-instrumentation must be in place before the modules it patches load. In CommonJS that is `--require ./tracing.js`; in ESM, exports are live bindings that can't be monkey-patched, so OTel needs its loader hook registered (`module.register` or `--experimental-loader=@opentelemetry/instrumentation/hook.mjs`) together with `--import ./tracing.mjs`. Missing spans for specific libraries usually mean the instrumentation came too late.",
+      "explain": "Auto-instrumentation must be in place before the modules it patches load. In CommonJS that is `--require ./tracing.js`; in ESM, exports are live bindings that can't be monkey-patched, so OTel needs its loader hook (`--experimental-loader=@opentelemetry/instrumentation/hook.mjs`, or `module.register`, which Node 24.15+ marks deprecated in favour of `module.registerHooks`) together with `--import ./tracing.mjs`. Missing spans for specific libraries usually mean the instrumentation came too late.",
       "refs": [
-        "https://opentelemetry.io/docs/languages/js/esm-support/",
+        "https://github.com/open-telemetry/opentelemetry-js/blob/main/doc/esm-support.md",
         "https://nodejs.org/api/module.html#customization-hooks"
       ]
     },

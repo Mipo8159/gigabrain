@@ -102,7 +102,7 @@
         {
           "text": "Put an Amazon CloudFront distribution in front of the Network Load Balancers and cache nothing.",
           "correct": false,
-          "why": "CloudFront handles HTTP/HTTPS (and WebSocket) traffic, not a raw UDP game protocol, and it does not give static anycast IPs."
+          "why": "CloudFront serves HTTP/HTTPS (and WebSocket) traffic, not a raw UDP game protocol, so it cannot carry this traffic at all."
         },
         {
           "text": "Use Amazon Route 53 latency-based routing records pointing at each Region's Network Load Balancer.",
@@ -207,7 +207,7 @@
         {
           "text": "Convert to Aurora Global Database with a secondary cluster in us-east-1, promoted if eu-west-1 fails.",
           "correct": true,
-          "why": "Storage-level replication with typically sub-second lag, a readable secondary for local reads, and failover that promotes the secondary in about a minute."
+          "why": "Storage-level replication with typically sub-second lag, a readable secondary for local reads, and failover that promotes the secondary within minutes."
         },
         {
           "text": "Enable Multi-AZ by adding Aurora Replicas in two more Availability Zones of eu-west-1.",
@@ -1175,9 +1175,9 @@
           "why": "Cuts the cost of long-kept snapshots, but the bill here is the oversized gp2 volumes themselves, which this does not touch."
         },
         {
-          "text": "Modify the volumes in place to gp3 with Elastic Volumes, provisioning only the IOPS and throughput each needs, then shrink capacity at the next maintenance.",
+          "text": "Modify the volumes in place to gp3 with Elastic Volumes, provisioning only the IOPS and throughput each needs.",
           "correct": true,
-          "why": "gp3 costs less per GB and decouples IOPS from size; Elastic Volumes changes the type with no detach or downtime."
+          "why": "gp3 costs less per GB and decouples IOPS from size; Elastic Volumes changes the type with no detach or downtime (it cannot shrink a volume, so right-sizing capacity later means migrating to a new, smaller volume)."
         }
       ],
       "explain": "gp3 is cheaper per GB than gp2 and lets you buy IOPS and throughput separately from size, so oversized gp2 volumes are a common saving. Elastic Volumes changes volume type live.",

@@ -282,7 +282,7 @@
         {
           "text": "Rename the column and create a view named `parcels` that exposes both names.",
           "correct": false,
-          "why": "The view needs a new table name and an INSTEAD OF trigger or auto-updatable rules for writes, so it is a larger, riskier change than the rename itself."
+          "why": "The table must be renamed out of the way and every reader and writer goes through a view that must stay simple enough to be auto-updatable, so it is a larger, riskier change than the rename itself."
         },
         {
           "text": "Expand and contract: add `weight_grams`, write both, backfill, move reads, then drop `weight` once no code reads it.",
@@ -334,8 +334,8 @@
     {
       "id": "postgres-v2-q10",
       "domain": "indexing",
-      "stem": "A support desk has 200M tickets, 0.5% of them open. To speed the agent queue the team added `CREATE INDEX tickets_open ON tickets (team_id, created_at) WHERE status = 'open'`. psql shows an index scan, but in production (node-postgres, parameterised queries) the endpoint still does a large scan once the plan cache switches to a generic plan. Which change makes production use the index?",
-      "code": "await db.query(\n  `SELECT id, subject FROM tickets\n   WHERE team_id = $1 AND status = $2\n   ORDER BY created_at LIMIT 50`,\n  [teamId, 'open']);",
+      "stem": "A support desk has 200M tickets, 0.5% of them open. To speed the agent queue the team added `CREATE INDEX tickets_open ON tickets (team_id, created_at) WHERE status = 'open'`. psql shows an index scan, but in production (node-postgres named prepared statements) the endpoint still does a large scan once the plan cache switches to a generic plan. Which change makes production use the index?",
+      "code": "await db.query({\n  name: 'agent-queue',\n  text: `SELECT id, subject FROM tickets\n         WHERE team_id = $1 AND status = $2\n         ORDER BY created_at LIMIT 50`,\n  values: [teamId, 'open'],\n});",
       "options": [
         {
           "text": "Run `ANALYZE tickets` so the planner learns how rare open tickets are.",
@@ -607,7 +607,7 @@
           "why": "It rewrites 2B rows under ACCESS EXCLUSIVE, blocking the table for hours."
         }
       ],
-      "explain": "Autovacuum triggers on a fraction of the table (default 20%), which is fine for small tables and terrible for huge ones. Tune large, busy tables per table with a lower scale factor (or a fixed threshold) so vacuum runs often and briefly.",
+      "explain": "Autovacuum triggers on a fraction of the table (default 20%), which is fine for small tables and terrible for huge ones. Tune large, busy tables per table with a lower scale factor (or a fixed threshold) so vacuum runs often and briefly. PG18 also caps the trigger with autovacuum_vacuum_max_threshold (100M rows by default).",
       "refs": [
         "https://www.postgresql.org/docs/17/routine-vacuuming.html#AUTOVACUUM"
       ]

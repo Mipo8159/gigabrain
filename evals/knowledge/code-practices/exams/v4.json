@@ -157,7 +157,7 @@
         {
           "text": "Compare `now.toISOString().slice(0, 10) <= '2026-12-31'`.",
           "correct": false,
-          "why": "That is the UTC date, which rolls over at 19:00 New York time, the same early cutoff as before."
+          "why": "That is the UTC date, which rolls over at 19:00 New York time on 31 December, so the coupon still expires five hours early."
         }
       ],
       "explain": "Deadlines are instants. Turn 'end of day X in zone Z' into one exact instant (start of the next day in Z), store it, and compare against it; date-only strings in JS are UTC midnight, which is rarely what a promise means.",

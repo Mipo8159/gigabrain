@@ -664,7 +664,7 @@
         {
           "text": "Upgrade production to Node 26 so the types match.",
           "correct": false,
-          "why": "26 is the Current line, not LTS; upgrading production to match a types package reverses the dependency."
+          "why": "The production runtime should be chosen for support and stability, then the types follow it; upgrading production to match a types package reverses the dependency."
         }
       ],
       "explain": "Type definitions for a runtime are a claim about that runtime's version. Pin `@types/node` to the Node major you deploy and run CI on it, so the compiler only offers APIs production actually has.",

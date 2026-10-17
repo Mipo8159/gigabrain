@@ -722,7 +722,7 @@
           "why": "It hides the value but gives no rotation at all."
         },
         {
-          "text": "Store the credentials in AWS Secrets Manager with managed rotation for RDS, and reference the secret from the ECS task definition.",
+          "text": "Store the credentials in AWS Secrets Manager with automatic rotation for RDS, and reference the secret from the ECS task definition.",
           "correct": true,
           "why": "Secrets Manager rotates RDS credentials on a schedule, and ECS injects the current value at task start, so nothing is in plain text in configuration."
         },
@@ -1645,7 +1645,7 @@
         {
           "text": "Enable GuardDuty organization-wide through a delegated administrator, with auto-enable on.",
           "correct": true,
-          "why": "GuardDuty analyses CloudTrail, VPC Flow Logs and DNS logs for threats such as crypto-mining and unusual API use, and the delegated admin manages the whole organization."
+          "why": "GuardDuty analyses CloudTrail, VPC Flow Logs and DNS logs for threats such as crypto-mining and unusual API use, and the delegated admin manages every member account (set it up in each Region you use)."
         },
         {
           "text": "Enable Amazon Inspector in every account to scan EC2 instances.",
@@ -1663,7 +1663,7 @@
           "why": "Detective helps investigate after a finding exists; it does not raise the detection in the first place."
         }
       ],
-      "explain": "GuardDuty is the managed threat detector; with a delegated administrator and auto-enable it covers every account and Region. Inspector is vulnerabilities, Detective is investigation, Macie is sensitive data.",
+      "explain": "GuardDuty is the managed threat detector; with a delegated administrator and auto-enable it covers every account; it is Regional, so designate the same administrator in each Region. Inspector is vulnerabilities, Detective is investigation, Macie is sensitive data.",
       "refs": [
         "https://docs.aws.amazon.com/guardduty/latest/ug/guardduty_organizations.html"
       ]

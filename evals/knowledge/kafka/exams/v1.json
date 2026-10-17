@@ -284,7 +284,7 @@
           "why": "Tempting because the new protocol is heartbeat-driven, but the heartbeat interval is now set by the broker and the client rejects this key."
         }
       ],
-      "explain": "KIP-848 moves liveness and assignment to the broker: session timeout, heartbeat interval and assignor leave the client. Processing-time limits stay on the client. The Confluent client fails fast at construction if the old keys remain.",
+      "explain": "KIP-848 moves liveness and assignment to the broker: session timeout, heartbeat interval and assignor leave the client. Processing-time limits stay on the client. The Confluent client throws as soon as the consumer connects if the old keys remain.",
       "refs": [
         "https://www.confluent.io/blog/kip-848-consumer-rebalance-protocol/"
       ]

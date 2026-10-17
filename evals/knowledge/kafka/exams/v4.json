@@ -349,7 +349,7 @@
     {
       "id": "kafka-v4-q11",
       "domain": "delivery",
-      "stem": "A loyalty platform's batch job writes `points-adjustments` in one Kafka transaction per nightly run, which takes 40 minutes. Real-time consumers reading with `read_committed` from the same partitions stop receiving any new records, including unrelated ones from other producers, for the whole run. What explains this and what should change?",
+      "stem": "A loyalty platform's batch job writes `points-adjustments` in one Kafka transaction per nightly run, which takes 40 minutes (the team raised the transaction timeouts to allow it). Real-time consumers reading with `read_committed` from the same partitions stop receiving any new records, including unrelated ones from other producers, for the whole run. What explains this and what should change?",
       "options": [
         {
           "text": "The broker throttles other producers while a transaction is open",
@@ -372,7 +372,7 @@
           "why": "They would flow again but would also see records from aborted runs, which `read_committed` was there to hide."
         }
       ],
-      "explain": "Read-committed consumers stop at the last stable offset, so a long-open transaction blocks everything behind it in that partition. Keep transactions short and bounded by `transaction.timeout.ms`.",
+      "explain": "Read-committed consumers stop at the last stable offset, so a long-open transaction blocks everything behind it in that partition. Keep transactions short; the broker caps them with `transaction.max.timeout.ms` (15 minutes by default) for exactly this reason.",
       "refs": [
         "https://kafka.apache.org/documentation/#consumerconfigs_isolation.level"
       ]

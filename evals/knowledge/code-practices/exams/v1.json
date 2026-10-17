@@ -94,7 +94,7 @@
         {
           "text": "Pass the raw value to `LIMIT $1` and translate the database's cast error into a 400 response for the client.",
           "correct": false,
-          "why": "It costs a database round trip per bad request, couples the API contract to driver error text, and some values (like `2.5`) are coerced instead of rejected."
+          "why": "It costs a database round trip per bad request, couples the API contract to driver error text, and some malformed values (like `+20` or ` 20 `) are coerced instead of rejected."
         }
       ],
       "explain": "Validate at the boundary: say exactly what you accept and reject the rest with a 400. Lenient parsing (`Number(x) || d`, `parseInt`) hides client bugs and makes the contract fuzzy; treat 'missing' and 'invalid' as two different cases.",

@@ -628,7 +628,7 @@
           "why": "Pub/sub would drop every event sent during the outage instead of some of them."
         }
       ],
-      "explain": "Stream trimming is a retention policy, not back-pressure: by default it ignores consumer progress. Size retention by time and worst-case lag, monitor group lag, and decide up front what happens when consumers fall further behind than that.",
+      "explain": "Stream trimming is a retention policy, not back-pressure: by default it ignores consumer progress (Redis 8.2+ adds an `ACKED` trim option that keeps entries until every group has acknowledged them, at the cost of unbounded growth while consumers are down). Size retention by time and worst-case lag, monitor group lag, and decide up front what happens when consumers fall further behind than that.",
       "refs": [
         "https://redis.io/docs/latest/commands/xadd/",
         "https://redis.io/docs/latest/develop/data-types/streams/"

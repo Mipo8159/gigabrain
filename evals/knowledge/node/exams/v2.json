@@ -417,7 +417,7 @@
     {
       "id": "node-v2-q13",
       "domain": "streams-memory",
-      "stem": "A Georgian e-commerce site ingests partner product files as NDJSON over HTTP with `for await (const c of res.body) buf += c;` and splits on newlines. ASCII-only test files pass, but in production about 1 in 2 000 product names contains `�` characters at random positions. Which fix is right?",
+      "stem": "A Georgian e-commerce site ingests partner product files as NDJSON with `http.get` and `for await (const c of res) buf += c;` and splits on newlines. ASCII-only test files pass, but in production about 1 in 2 000 product names contains `�` characters at random positions. Which fix is right?",
       "options": [
         {
           "text": "Ask partners to send smaller files so lines don't span chunks.",

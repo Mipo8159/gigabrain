@@ -231,7 +231,7 @@
         {
           "text": "The interceptor skips raw SQL results; add `@SerializeOptions({ strategy: 'excludeAll' })` to the handler",
           "correct": false,
-          "why": "Options change how class-transformer treats class instances; the raw rows are still plain objects, so `@Exclude()` never applies."
+          "why": "On plain rows `excludeAll` finds no `@Expose()` metadata, so it strips every field and the endpoint returns empty objects; the rows need a class before `@Exclude()` can apply."
         },
         {
           "text": "Map the rows to response DTO instances before returning them",
@@ -249,7 +249,7 @@
           "why": "It fixes this endpoint, but the next raw query leaks again because nothing in the response path enforces the rules."
         }
       ],
-      "explain": "Serialization decorators live on classes, so they only apply to instances of those classes. Return response DTO instances, not raw rows or spread objects, and make that the convention.",
+      "explain": "Serialization decorators live on classes, so they only apply to instances of those classes. Return response DTO instances, not raw rows or spread objects (or set `@SerializeOptions({ type: UserEntity })` so the interceptor converts plain objects first), and make that the convention.",
       "refs": [
         "https://docs.nestjs.com/techniques/serialization"
       ]
@@ -288,7 +288,7 @@
     {
       "id": "nestjs-v5-q09",
       "domain": "pipeline",
-      "stem": "A lending API moves from Express to the Fastify adapter. Its global error filter does `response.status(code).json(body)`. After the switch, any thrown error produces a crash inside the filter and a bare 500 with no body. The team wants the filter to keep working if they ever change adapters again. What should the filter do?",
+      "stem": "A lending API moves from Express to the Fastify adapter. Its global error filter does `response.status(code).json(body)`. After the switch, every thrown error crashes inside the filter (`response.status(...).json is not a function`), and clients get Fastify's generic error body instead of the team's format. The team wants the filter to keep working if they ever change adapters again. What should the filter do?",
       "options": [
         {
           "text": "Use `response.code(code).send(body)`, the Fastify reply API",
@@ -512,9 +512,9 @@
       "stem": "A logistics API runs 80 pods and ships logs to a central store. It uses Nest's default `ConsoleLogger`. Ops reports that multi-line stack traces are split into separate events, logs can't be filtered by tenant or request ID, and the first lines of each boot are in a different format. What should the team set up?",
       "options": [
         {
-          "text": "A JSON logger (`nestjs-pino`) via `useLogger()` and `bufferLogs`",
+          "text": "A JSON logger from boot: `ConsoleLogger` with `json: true`, or `nestjs-pino` with `bufferLogs`",
           "correct": true,
-          "why": "Structured logs keep fields such as request ID together, and buffering formats boot-time lines with the same logger."
+          "why": "Structured logs keep fields such as request ID together, and installing it at bootstrap (or buffering until it is set) formats boot-time lines the same way."
         },
         {
           "text": "Keep `ConsoleLogger` and pipe stdout through a regex-based parser in the log agent",
@@ -532,7 +532,7 @@
           "why": "More lines in the same unstructured format make the problem bigger, not smaller."
         }
       ],
-      "explain": "Production logs should be structured (JSON) and carry correlation fields. In Nest, install a structured logger with `bufferLogs` so even bootstrap messages go through it.",
+      "explain": "Production logs should be structured (JSON) and carry correlation fields. In Nest, turn on the built-in logger's `json` mode or install a library such as pino, from bootstrap (or with `bufferLogs`), so even bootstrap messages go through it.",
       "refs": [
         "https://docs.nestjs.com/techniques/logger"
       ]
@@ -565,7 +565,7 @@
       ],
       "explain": "Microservice clients are providers with tokens, so they are test seams like any other. Override the token with a recorder to assert on messages without a broker.",
       "refs": [
-        "https://docs.nestjs.com/microservices/basics#client",
+        "https://docs.nestjs.com/microservices/basics#client-producer-class",
         "https://docs.nestjs.com/fundamentals/testing"
       ]
     },

@@ -133,7 +133,7 @@
     {
       "id": "nestjs-v2-q04",
       "domain": "modules",
-      "stem": "A logistics codebase uses an `index.ts` barrel in every folder. After a refactor, startup fails with \"Nest can't resolve dependencies of the RoutePlanner (?). Please make sure that the argument dependency at index [0] is available\". The dependency is a plain singleton in the same module, and it is clearly listed in `providers`. What is the most likely cause?",
+      "stem": "A logistics codebase, compiled to CommonJS, uses an `index.ts` barrel in every folder. After a refactor, startup fails with \"Nest can't resolve dependencies of the RoutePlanner (?). Please make sure that the argument at index [0] is available in the current module\". The dependency is a plain singleton in the same module, and it is clearly listed in `providers`. What is the most likely cause?",
       "options": [
         {
           "text": "The provider must also be added to the module's `exports`",
@@ -323,22 +323,22 @@
     {
       "id": "nestjs-v2-q10",
       "domain": "messaging",
-      "stem": "A ride-pricing gateway uses Nest's Kafka client for request-reply: `send('price.quote', ...)` with `subscribeToResponseOf('price.quote')` before `connect()`. It worked with 3 pods. After scaling to 12 pods for a holiday, about two thirds of the pods time out on every quote while the pricing service shows all requests answered. The topic `price.quote.reply` has 4 partitions. What is the fix?",
+      "stem": "A ride-pricing gateway uses Nest's Kafka client for request-reply: `send('price.quote', ...)` with `subscribeToResponseOf('price.quote')` before `connect()`. It worked with 3 pods. After scaling to 12 pods for a holiday, about two thirds of the pods fail every quote at once with \"The client consumer did not subscribe to the corresponding reply topic\", while the pricing service is healthy. The topic `price.quote.reply` has 4 partitions. What is the fix?",
       "options": [
         {
           "text": "Add `timeout(10000)` to the `send()` pipeline so slow replies are tolerated",
           "correct": false,
-          "why": "The replies are not slow; they go to partitions those pods never read, so any timeout expires."
+          "why": "Nothing is slow; those pods fail before sending because they own no reply partition, so a timeout never comes into play."
         },
         {
           "text": "Raise the pricing service's consumer concurrency so it answers faster",
           "correct": false,
-          "why": "Pricing already answers every request; the bottleneck is on the reply side."
+          "why": "Pricing is healthy; the failing pods cannot even send a request because they have no reply partition."
         },
         {
           "text": "Give `price.quote.reply` at least as many partitions as gateway pods",
           "correct": true,
-          "why": "Each client instance must own at least one reply partition; with 12 pods and 4 partitions, eight pods have none and never receive replies."
+          "why": "Each client instance must own at least one reply partition; with 12 pods and 4 partitions, eight pods have none, so Nest refuses to send their requests."
         },
         {
           "text": "Give each gateway pod its own consumer `groupId` so that every pod reads every partition of the reply topic",
@@ -408,9 +408,10 @@
           "why": "It is still a dual write: a crash between commit and publish loses the event exactly as before."
         }
       ],
-      "explain": "The CQRS module's `EventBus` is an in-process, in-memory bus. Anything that must survive a crash needs the event persisted atomically with the state change, typically with a transactional outbox.",
+      "explain": "By default the CQRS module's `EventBus` publishes in process, from memory. Anything that must survive a crash needs the event persisted atomically with the state change, typically with a transactional outbox; Nest 12's docs add an `@nestjs/outbox` package for exactly this.",
       "refs": [
-        "https://docs.nestjs.com/recipes/cqrs"
+        "https://docs.nestjs.com/recipes/cqrs",
+        "https://docs.nestjs.com/reliability/outbox"
       ]
     },
     {
@@ -479,7 +480,7 @@
     {
       "id": "nestjs-v2-q15",
       "domain": "operations",
-      "stem": "On Nest 11, an `AuditBuffer` service injects `DatabaseService` and flushes buffered rows in its `onModuleDestroy`. `DatabaseService` closes its pool in its own `onModuleDestroy`. A developer had added a 2-second `setTimeout` before the pool close because flushes failed with 'pool is closed' on Nest 9. What should the team do now?",
+      "stem": "On Nest 12, an `AuditBuffer` service in `AuditModule` injects `DatabaseService` from `DatabaseModule`, which `AuditModule` imports, and flushes buffered rows in its `onModuleDestroy`. `DatabaseService` closes its pool in its own `onModuleDestroy`. A developer had added a 2-second `setTimeout` before the pool close because flushes failed with 'pool is closed' on Nest 9. What should the team do now?",
       "options": [
         {
           "text": "Keep the timeout, because Nest still runs destroy hooks in module registration order",
@@ -487,9 +488,9 @@
           "why": "That was the old behaviour; Nest 11 changed the termination order."
         },
         {
-          "text": "Remove the timeout: Nest 11 destroys a dependency after the providers that depend on it",
+          "text": "Remove the timeout: since Nest 11 an imported module is terminated after the modules that import it",
           "correct": true,
-          "why": "Because `AuditBuffer` injects `DatabaseService`, its `onModuleDestroy` runs first and the pool closes after the flush."
+          "why": "`AuditModule` imports `DatabaseModule`, so its `onModuleDestroy` runs first and the pool closes after the flush."
         },
         {
           "text": "Move the flush into `beforeApplicationShutdown` so it runs after every destroy hook",
@@ -497,15 +498,15 @@
           "why": "It runs after all `onModuleDestroy` hooks, which is after the pool has closed, so the flush would always fail."
         },
         {
-          "text": "Make `DatabaseService` `@Global()` so it is destroyed last",
+          "text": "Make `DatabaseModule` `@Global()` so it is destroyed last",
           "correct": false,
-          "why": "Global modules are destroyed late, but the real guarantee comes from the injection dependency, which already exists here."
+          "why": "Global modules are destroyed late, but the import of `DatabaseModule` already guarantees this order, so global adds nothing."
         }
       ],
-      "explain": "Nest 11 runs termination hooks in reverse dependency order: dependencies are initialised first and destroyed last. Express ordering through injection, not through sleeps.",
+      "explain": "Since Nest 11, termination hooks run in the reverse of init order, module by module: imported modules are initialised first and destroyed last. Nest 12 keeps that and also orders providers inside one module by dependency level. Express ordering through module imports, not through sleeps.",
       "refs": [
-        "https://docs.nestjs.com/v11/migration-guide",
-        "https://docs.nestjs.com/fundamentals/lifecycle-events"
+        "https://docs.nestjs.com/fundamentals/lifecycle-events",
+        "https://docs.nestjs.com/migration-guide"
       ]
     },
     {
@@ -542,7 +543,7 @@
     {
       "id": "nestjs-v2-q17",
       "domain": "seams",
-      "stem": "A media team moves its Nest unit tests from Jest with `ts-jest` to Vitest for speed. Suddenly every service built through `Test.createTestingModule` has `undefined` dependencies, although nothing else changed. What is the fix?",
+      "stem": "A media team moves its Nest unit tests from Jest with `ts-jest` to Vitest (on Vite 7) for speed. Suddenly every service built through `Test.createTestingModule` has `undefined` dependencies, although nothing else changed. What is the fix?",
       "options": [
         {
           "text": "Add `import 'reflect-metadata'` to the Vitest setup file",
@@ -552,7 +553,7 @@
         {
           "text": "Use the SWC plugin for Vitest (`unplugin-swc`) so decorator metadata is emitted",
           "correct": true,
-          "why": "Vitest transforms TypeScript with esbuild, which drops `emitDecoratorMetadata`; SWC emits it."
+          "why": "On Vite 7 Vitest transforms TypeScript with esbuild, which drops decorator metadata (Vite 8's Oxc supports it only partly); SWC emits it."
         },
         {
           "text": "Replace every constructor injection with `moduleRef.get()` calls in `onModuleInit`",
@@ -565,7 +566,7 @@
           "why": "It would work if `tsc` built `dist`, but you lose fast source-mapped test runs, which was the point of switching."
         }
       ],
-      "explain": "Nest's type-based DI depends on `design:paramtypes`. Any esbuild-based toolchain (Vitest by default, tsx, many bundlers) drops it; use SWC or `tsc` wherever Nest code is compiled.",
+      "explain": "Nest's type-based DI depends on `design:paramtypes`. Any esbuild-based toolchain (tsx, Vitest on Vite 7, many bundlers) drops it; use SWC or `tsc` wherever Nest code is compiled.",
       "refs": [
         "https://docs.nestjs.com/recipes/swc#vitest"
       ]
@@ -629,7 +630,7 @@
       ],
       "explain": "Only queries issued through the transaction's manager (or `tx` in Prisma) are inside it. In hexagonal code, model the transaction boundary as a port and let adapters pick up the active transaction from context.",
       "refs": [
-        "https://docs.nestjs.com/techniques/database#transactions",
+        "https://docs.nestjs.com/data/typeorm#typeorm-transactions",
         "https://docs.nestjs.com/recipes/async-local-storage"
       ]
     },
