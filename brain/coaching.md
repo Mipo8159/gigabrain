@@ -27,4 +27,5 @@
   - /curate 2026-10-03: 12% of October prompts held several tasks; 6 of 15 build prompts were 3–13k-character pastes with several tasks.
   - 2026-10-04/05: ~40 prompts in one client session (explain, scope, explore the DB, full build). Giga chose to stay when offered a fresh session; it held, anchored by STATE.md and memory.
   - 2026-10-06: analysis, keep-or-rebuild and a full lab build in one session (~210k tokens). It held because answers came in one batch; step 1 is set up for a fresh session.
-  - Claude: when an explanation turns into "now build X", suggest a fresh session seeded with a 5-line summary. When a paste holds several tasks, propose the split (a session or worktree each) first.
+  - 2026-10-18: an unrelated side project grew inside a gigabrain session over two builds. Claude suggested its own folder only after the second build, and Giga then had it moved to a new sibling repo and scrubbed from gigabrain: a migration that an up-front offer would have avoided.
+  - Claude: when an explanation turns into "now build X", suggest a fresh session seeded with a 5-line summary. When a paste holds several tasks, propose the split (a session or worktree each) first. When a build request has nothing to do with the current repo, offer its own repo and session in the first question batch, before writing anything.
