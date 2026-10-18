@@ -37,9 +37,7 @@ come first. A bug in either is multiplied by N.
   (hash in the output), not from the current kit.
 - Start the reviewer on the kit at the same moment as the first builders, and
   tell running builders when the rules change.
-- Give each parallel builder its own work dir (see [[steer-parallelism-and-agent-roles]]),
-  and name it in the prompt. 2026-10-15: 14 exam writers shared one scratchpad and one
-  overwrote another's `patch.py`; the rule was here but not in the prompts.
+- Name each builder's own work dir in its prompt ([[steer-parallelism-and-agent-roles]]).
 - Before tightening a checker rule mid-run, run it on content that already passes.
   2026-10-15: a stricter "definition question" rule flagged normal "What is the MOST
   likely cause?" stems, and 5 writers reworded good questions to dodge it.

@@ -25,8 +25,8 @@ the work over.
 
 **How to apply:**
 
-- Writing the code, deploying it and verifying it against real AWS are still
-  Claude's job.
+- Writing the code, deploying it (after the confirmation CORE requires) and
+  verifying it against real AWS are still Claude's job.
 - **Then stop.** Leave the changes in the working tree. No `git add`, no
   `git commit`, no new branches.
 - Close by saying what changed and what was verified, so Giga can write their

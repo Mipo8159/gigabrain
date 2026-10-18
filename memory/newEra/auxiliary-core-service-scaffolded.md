@@ -49,7 +49,7 @@ Verified the reference resolves: packaged template contains
 IAM → authorizer, so the first `JOB#` item written will appear with no code
 change. Deliberately built this way rather than faking data.
 
-**Not deployed yet.** `cd core && npm run deploy`.
+**Deployed 2026-08-18** as `core-dev`.
 
 ## Two things on the clock
 

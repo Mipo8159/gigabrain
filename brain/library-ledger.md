@@ -23,14 +23,14 @@ Evidence is one dated, general line: no client names, URLs or schemas.
 | skill `react-testing` | ecc | 2026-10-03 | 0.4 | — |
 | skill `python-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `python-testing` | ecc | 2026-10-03 | 0.4 | — |
-| skill `fastapi-patterns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `golang-patterns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `golang-testing` | ecc | 2026-10-03 | 0.4 | — |
+| skill `fastapi-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-18 · stack audit · no registered project has this stack; moved to opt-in plugin `knowledge` (enable per repo) |
+| skill `golang-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-18 · stack audit · no registered project has this stack; moved to opt-in plugin `knowledge` (enable per repo) |
+| skill `golang-testing` | ecc | 2026-10-03 | 0.4 | 2026-10-18 · stack audit · no registered project has this stack; moved to opt-in plugin `knowledge` (enable per repo) |
 | skill `postgres-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift; 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
 | skill `redis-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-13 · knowledge eval, 8 cases of its own domain · 8/8 pass but fired 0–1/8; vanilla passes the same cases, so no lift; 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
 | skill `database-migrations` | ecc | 2026-10-03 | 0.4 | 2026-10-14 · /curate · moved to opt-in plugin `knowledge` (no measured lift; enable per repo) |
 | skill `docker-patterns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `kubernetes-patterns` | ecc | 2026-10-03 | 0.4 | — |
+| skill `kubernetes-patterns` | ecc | 2026-10-03 | 0.4 | 2026-10-18 · stack audit · no registered project has this stack; moved to opt-in plugin `knowledge` (enable per repo) |
 | skill `deployment-patterns` | ecc | 2026-10-03 | 0.4 | — |
 | skill `verification-loop` | ecc | 2026-10-03 | 0.4 | — |
 | skill `search-first` | ecc | 2026-10-03 | 0.4 | — |

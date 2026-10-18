@@ -16,7 +16,8 @@ like the app had crashed.
 
 **How to apply:** start background servers with `cmd & echo $! > pidfile` and
 stop them with `kill "$(cat pidfile)"`, or find the listener with
-`ss -ltnp 'sport = :3000'` and kill that PID.
+`lsof -nP -iTCP:3000 -sTCP:LISTEN -t` (macOS) or `ss -ltnp 'sport = :3000'`
+(Linux) and kill that PID.
 
 **Same trap with `pgrep -f` wait loops (2026-10-13).** `until ! pgrep -f 'eval-knowledge …'; do sleep 30; done`
 matched its own shell, so queued eval jobs waited forever or died unnoticed.

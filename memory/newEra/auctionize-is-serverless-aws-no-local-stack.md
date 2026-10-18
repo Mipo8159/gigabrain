@@ -8,11 +8,12 @@ metadata:
   modified: 2026-08-14T12:57:56.551Z
 ---
 
-`newEra/auctionize` holds three separately-deployable Serverless Framework v3
+`newEra/auctionize` holds three separately-deployable Serverless Framework v4
 services — `auction/`, `auth/`, `notification/` — each with its own
 `package.json`, `node_modules`, `serverless.yml` and CloudFormation stack. There
 is no root workspace, so every command runs from inside a service directory.
 Only `auction/` is a git repo; the folder as a whole is not.
+Since 2026-08-17 `auth/` lives in newEra/auxiliary; auctionize keeps `auction/` + `notification/` (legacy).
 
 **Why this changes how work is verified:** there is no LocalStack, no
 `serverless-offline`, no docker compose, and no test runner or `scripts` block
@@ -39,7 +40,8 @@ Recipe in [[auctionize-esbuild-breaks-tsyringe-di]].
 Deploy order is `auth` before `auction`: auction reaches the authorizer by
 constructed ARN string (`auth-${stage}-authorizer`), not a CloudFormation
 import, so nothing enforces it and a missing auth stack fails silently at
-request time instead of at deploy time.
+request time instead of at deploy time. (2026-08-18: auxiliary's auth dropped the custom
+authorizer, so auction's authorizer ARN likely dangles. Check before any auction deploy.)
 
 Details live in the three project skills — see
 [[auctionize-has-its-own-claude-setup]].

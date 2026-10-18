@@ -45,13 +45,11 @@ exactly the 10 prefixed ones with it. Trigger evals 9/9.
 `library/plugins.json` bundle. Rerun `bin/eval-skills` after editing a global
 skill's description.
 
-**Next time:** a skill that never fires live: rerun the s42ctx arm, and grep
-CORE.md and coach.py for "suggest" or "offer" next to its name.
-
 **Signal:** "too many skills", skills from the wrong domain showing up, a
 skill not firing on natural phrasing, a new `/absorb` source.
 
-**Next time:** check `claude plugin details <p>` for token cost, and add a
-trigger case before you edit a description.
+**Next time:** add a trigger case before editing a description, and check
+`claude plugin details <p>` for token cost. A skill that never fires live: rerun
+the s42ctx arm and grep CORE.md and coach.py for "suggest"/"offer" next to its name.
 
 Related: [[claude-config-changes-need-human-installer]], [[import-knowledge-on-demand]]

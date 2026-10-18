@@ -33,7 +33,7 @@
       ]
     },
     "knowledge": {
-      "description": "Backend stack knowledge (opt-in): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14: evals showed no lift over vanilla.",
+      "description": "Backend/infra stack knowledge (opt-in): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling, Go, FastAPI, Kubernetes. Retired from global 2026-10-14 (no eval lift over vanilla) and 2026-10-18 (off-stack).",
       "skills": [
         "postgres-patterns",
         "redis-patterns",
@@ -41,7 +41,11 @@
         "backend-patterns",
         "database-migrations",
         "api-design",
-        "error-handling"
+        "error-handling",
+        "golang-patterns",
+        "golang-testing",
+        "fastapi-patterns",
+        "kubernetes-patterns"
       ]
     }
   }

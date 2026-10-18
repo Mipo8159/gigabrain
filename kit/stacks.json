@@ -117,12 +117,12 @@
         }
       ],
       "skills": [
-        "fastapi-patterns",
         "contract-first"
       ],
       "checklists": [
         "python"
-      ]
+      ],
+      "notes": "FastAPI skills are in plugin knowledge: claude plugin install knowledge@gigabrain --scope local"
     },
     "go": {
       "indicators": [
@@ -130,14 +130,12 @@
           "file": "go.mod"
         }
       ],
-      "skills": [
-        "golang-patterns",
-        "golang-testing"
-      ],
+      "skills": [],
       "checklists": [
         "go",
         "silent-failures"
-      ]
+      ],
+      "notes": "Go skills are in plugin knowledge: claude plugin install knowledge@gigabrain --scope local"
     },
     "postgres": {
       "indicators": [
@@ -335,7 +333,6 @@
         }
       ],
       "skills": [
-        "kubernetes-patterns",
         "deployment-patterns",
         "production-audit"
       ],
@@ -352,7 +349,8 @@
           "Bash(helm upgrade:*)",
           "Bash(helm uninstall:*)"
         ]
-      }
+      },
+      "notes": "Kubernetes skills are in plugin knowledge: claude plugin install knowledge@gigabrain --scope local"
     },
     "aws": {
       "indicators": [

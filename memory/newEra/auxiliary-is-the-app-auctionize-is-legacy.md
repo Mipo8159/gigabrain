@@ -13,12 +13,6 @@ metadata:
 table be called" question: *"call it auxiliary. that is going to be the
 application name."* Then they ended the session to reopen it from that folder.
 
-⚠️ **Spelling was flagged and not corrected.** The standard English spelling is
-**auxiliary**; the user wrote **auxiliary** and that is what is on disk, in the
-table name, and in the SSM paths. Deliberate fidelity to the instruction, not a
-typo of mine. Nothing is deployed, so renaming is still free — offer it once,
-early, then drop it.
-
 ## What is where now
 
 - **`newEra/auxiliary/`** — `auth/`, `web/`, a copied `.claude/`, `.gitignore`.
@@ -27,13 +21,6 @@ early, then drop it.
   `.claude/`, and **the `.git`**. Its working tree now shows `auth/` and `web/`
   as deleted, **uncommitted**. Left that way on purpose: committing a deletion
   of their own work is the user's call, not mine.
-
-**⚠️ `auxiliary/` is under NO version control at all.** `git init` + a first
-commit is the single most important thing to do at the start of the next
-session. The *committed* state of auth/web is still recoverable from
-auctionize's history at `6e1e561`, but everything from 2026-08-17 — the Facebook
-removal, the `email_verified` gate, the pool hardening, the rename — exists only
-as untracked files in one directory.
 
 **The global skill symlinks still work.** `~/.claude/skills/{add-lambda,
 add-aws-resource,deploy-auctionize}` point into `auctionize/.claude/skills/`,
@@ -82,11 +69,6 @@ Retain policies on the table **and** on the pool,
 the real client id, the `GoogleIdentityProvider` resource, and
 `SupportedIdentityProviders → [COGNITO, Google]`.
 
-**The user authorized a full `auth` + `web` deploy to account 755352605221 in
-this session, and it was never run** — the folder move landed in the same answer
-and took priority. Treat that authorization as still standing, but re-confirm,
-since it predates the move.
-
 ## ⚠️ UPDATED 2026-08-18 — most of the below is now DONE
 
 Items 2 and 3 of the old plan are complete. **`auth` and `web` are deployed** to
@@ -102,22 +84,7 @@ site  https://d88xibvknol3i.cloudfront.net   (dist E3EQ01RB3IJ6EO)
 pool  us-east-1_H8C1OZa6z    client 2sh3e39f828oli44glkqjhqvdu
 ```
 
-What actually remains, in order:
-
-1. **`git init` + first commit — STILL NOT DONE.** Everything since 2026-08-17
-   exists only as untracked files. This is still the single most valuable
-   first action.
-   ⚠️ **Before the first commit: rotate the Google client secret.** The user
-   pasted the live `GOCSPX-…` value into `README.md`. I redacted it to `'...'`
-   when repairing that file and told them, but the credential itself has not
-   been rotated and must not enter git history.
-2. **Deploy `web`** — the redesigned SPA is built and verified but *not*
-   published; live bundle hash still differs from `dist/`. `cd web && npm run deploy`.
-3. **Deploy `core`** — scaffolded and verified, never deployed. See
-   [[auxiliary-core-service-scaffolded]].
-4. **The upload pipeline**, blocked at step 4 on MediaConvert. See
-   [[auxiliary-upload-pipeline-plan]] and
-   [[auxiliary-free-plan-blocked-four-services]].
+Remaining: the upload pipeline. See [[auxiliary-upload-pipeline-plan]].
 
 The third service is called **`core/`**, not `upload/`.
 

@@ -15,7 +15,6 @@
 #                                      session-log (PreCompact/SessionEnd), statusline
 #                                      (only if none is set), agent teams env flag
 #   4b. ~/.local/bin/kit            -> bin/kit (per-project apply/doctor)
-#   5. memory: prune the 6 promoted habits from memory/newEra/MEMORY.md, fix links
 #   6. newEra repos: autoMemoryDirectory -> gigabrain/memory/newEra
 #   7. git: core.hooksPath=.githooks (secret scan on commit), if this is a repo
 #   7b. ~/.gitconfig include.path    -> global/gitconfig (shared aliases, e.g. git last)
@@ -101,27 +100,6 @@ EOF
 echo "4b. kit on PATH"
 mkdir -p "$HOME/.local/bin"; link "$G/bin/kit" "$HOME/.local/bin/kit"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) echo "  note: add ~/.local/bin to PATH to type 'kit'";; esac
-
-echo "5. memory/newEra: drop promoted habits from the index, fix renamed link"
-python3 - "$G" <<'EOF'
-import pathlib, sys
-G = pathlib.Path(sys.argv[1]); mem = G / "memory" / "newEra"
-moved = ["working-style-interview-then-autonomous-loop.md", "giga-wants-argued-recommendations.md",
-         "claude-permissions-are-wide-open.md", "giga-commits-are-mine-to-make.md",
-         "dont-strip-architecture-during-cleanup.md", "auxiliary-secrets-land-in-readme.md"]
-idx = mem / "MEMORY.md"
-lines = [l for l in idx.read_text().splitlines() if not any(m in l for m in moved)]
-pointer = "- [gigabrain is the brain](gigabrain-is-the-brain.md) — cross-project habits live in gigabrain/brain (loaded via ~/.claude/CLAUDE.md); this folder holds newEra-only facts."
-if pointer not in lines: lines.insert(0, pointer)
-idx.write_text("\n".join(lines) + "\n")
-for f in list(mem.glob("*.md")) + list((G / "brain").rglob("*.md")):
-    t = f.read_text()
-    if "auxiliary-secrets-land-in-readme" in t:
-        f.write_text(t.replace("auxiliary-secrets-land-in-readme", "secrets-land-in-readme"))
-h = G / "brain/habits/claude-permissions-are-wide-open.md"
-h.write_text(h.read_text().replace("defaultMode: acceptEdits", "defaultMode: auto"))
-print(f"  index now {len(lines)} lines")
-EOF
 
 echo "6. newEra repos -> shared memory in gigabrain"
 for d in "$NEWERA" "$NEWERA/issue-flow" "$NEWERA/auctionize" "$NEWERA/auxiliary" "$NEWERA/mogulkhan"; do

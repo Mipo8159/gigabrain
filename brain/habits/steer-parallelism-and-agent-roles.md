@@ -43,13 +43,15 @@ Rules:
 - **Isolate parallel agents.** Give each one its own work dir named after its task,
   absolute paths only. 2026-10-14: 3 lesson builders shared one scratchpad; one
   ran another's script, whose unset `$S` created `undefined/figs/` inside the repo
-  (caught and removed by the agent; the repo stayed clean).
+  (caught and removed by the agent; the repo stayed clean). 2026-10-15: 14 exam
+  writers shared one scratchpad and one overwrote another's `patch.py`. The rule
+  existed but was not in the prompts, so put the dir in each prompt.
 - **Argue the split.** Parallel work has costs: agents start without context,
   merges can conflict, and it takes Giga's attention. Say which part stays in
   order and why. A small fix in one file gets no worktree.
 - **The agent definitions** live in `gigabrain/global/agents/`: `researcher`,
-  `reviewer` and `verifier` (added 2026-10-02, after Claude called a diagnosis
-  "confirmed" too early). Propose a new role only after a session shows it
+  `reviewer`, `verifier` (added 2026-10-02, after Claude called a diagnosis
+  "confirmed" too early) and `intent-reviewer` (2026-10-12). Propose a new role only after a session shows it
   would have been used, never in advance.
 - How agents are discovered and overridden, and how to prove one loads: see
   [[claude-config-changes-need-human-installer]].

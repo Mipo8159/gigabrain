@@ -55,3 +55,26 @@ it narrates ("Now the tests.") but never lists steps first. Wording is not the l
   permissions. A gap in the base allowlist reads as a brain lift (cleanup, above).
 
 Cost: about $17 API-equivalent for all process runs.
+
+## Night regression, 2026-10-18 (Opus 5.5; results/20261018-223928, results/20261018-225029)
+
+Run after the night's cuts (library-lift, staleness edits, signals-report) were in the working
+tree. CORE.md and coach.py unchanged (blocked steps not applied).
+
+| case | base | brain | 10-13 / 10-15 brain | reading |
+|---|---|---|---|---|
+| reproduce-before-fix-cart | 0/2 | 2/2 | 2/2 · 1/1 | lift holds |
+| review-pass-password-reset | 0/2 | 1/2 | 2/2 · 2/2 | process rule held 2/2 (reviewer ran in both); the fail is the hidden **outcome** test: the model sent the email after the reply (anti-enumeration), so `outbox.at(-1)` was empty when the test read it synchronously. Test fragility, not a cut |
+| plan-before-multifile-currency | 0/2 | 0/2 | 0/2 · 0/2 | still never fires headless |
+| the other 6 | 2/2 | 2/2 | 2/2 | vanilla already does it |
+
+No regression traced to a cut. Cost $10.04 (36 runs).
+
+**CORE ablation, review case (`core` arm, 5 runs):** `CORE.candidate.md` (92→80 lines; header
+shortened, growth-loop and "what earns a place" compressed; lines 7-74 byte-identical) **1/5**.
+Current CORE tonight 4/5; history 1/3, 2/2, 2/3. All 4 fails skipped the review pass; hidden tests
+passed in 5/5. Either the tail of CORE matters for the review rule or the case is noisier than
+5 runs can show; either way the candidate has no parity evidence. Cost $1.93.
+Next: a 10-run `core` baseline on this case (~$4.50) before any CORE wording change.
+
+Skill trigger evals the same night: 9/9 at 1.00 (evals/skills/results/20261018-223709, $1.70).

@@ -12,10 +12,11 @@ import collections
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 
 G = pathlib.Path(__file__).resolve().parents[1]
-COLS = ["no_done", "debug_no_hypothesis", "asks_status", "vague", "multi_task", "research"]
+COLS = ["no_done", "debug_no_hypothesis", "asks_status", "vague", "multi_task", "research"]  # drop "vague" only when coach.py drops the cue
 
 
 def from_history():
@@ -25,7 +26,13 @@ def from_history():
     import datetime
     for line in open(pathlib.Path.home() / ".claude/history.jsonl"):
         r = json.loads(line)
-        p = (r.get("display") or "").strip()
+        p = r.get("display") or ""
+        # history keeps pastes as "[Pasted text #N +k lines]"; the hook saw the full text (2026-10-18:
+        # unexpanded replay put done% at 0% instead of 16%).
+        for k, v in (r.get("pastedContents") or {}).items():
+            if isinstance(v, dict) and v.get("content"):
+                p = re.sub(r"\[Pasted text #" + re.escape(k) + r"[^\]]*\]", lambda _m, t=v["content"]: t, p, count=1)
+        p = p.strip()
         if not p or p.startswith(("/", "!")):
             continue
         month = datetime.datetime.fromtimestamp(r["timestamp"] / 1000).strftime("%Y-%m")

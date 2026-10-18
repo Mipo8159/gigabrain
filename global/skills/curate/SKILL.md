@@ -76,7 +76,7 @@ Entry format = memory format: frontmatter `name` / `description` /
   `G/bin/kit doctor --all` (install + every project), `G/bin/kit audit --all`
   (config security; a new critical/high goes under "Ask Giga"), and
   `G/bin/kit budget` (always-on context; CORE.md over 120 lines is a FAIL to fix now).
-- Run `G/.githooks/pre-commit` (secret scan; it prints masked output only).
+- Run `G/.githooks/pre-commit --all` (secret scan; it prints masked output only).
 - **Don't commit.** Report in this shape:
 
 ```

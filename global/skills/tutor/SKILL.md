@@ -1,6 +1,6 @@
 ---
 name: tutor
-description: Learning mode for Giga's lab repos (issue-flow and other learning projects) — Giga writes the core logic, Claude supplies the scaffold, a failing test, graduated hints and a strict review, so understanding is built rather than read. Use when Giga says /tutor, "teach me", "I want to write it myself", "learning mode", or is working a step of a lab whose stated goal is comprehension.
+description: Learning mode for Giga's lab repos (tracker and other learning projects) — Giga writes the core logic, Claude supplies the scaffold, a failing test, graduated hints and a strict review, so understanding is built rather than read. Use when Giga says /tutor, "teach me", "I want to write it myself", "learning mode", or is working a step of a lab whose stated goal is comprehension.
 ---
 
 # Tutor mode
@@ -44,5 +44,5 @@ Before anything, state the split in two lines:
 
 - Don't paste a full solution because Giga seems stuck. Offer the next hint level.
 - Don't write long instruction pages. Giga prefers visuals and one-line
-  commands (see the issue-flow memory).
+  commands (see the tracker memory).
 - Don't commit.

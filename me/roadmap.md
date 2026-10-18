@@ -21,20 +21,14 @@ coach hook adds to every session. There is no second tracker.
 | 4 | 2026-11-15 | no PHP/Bitrix knowledge (lutecia) | `researcher` + `verifier` on a remote-only target | generic Bitrix/PHP skill from live docs (no client facts); used in one lutecia session; ledger evidence line | both | |
 | 5 | 2026-11-29 | Terraform / observability depth | `search-first`, `/code-review` on infra diffs | Terraform + observability skills (absorbed or written), mapped in `kit/stacks.json`; each used once with evidence | both | |
 | 6 | 2026-11-15 | 6 newEra CLAUDE.md drafts never filled in | `/onboard-project`, **one short session per repo** | `bin/kit doctor --all` shows 0 warnings | **Giga runs it** (about 1 a week, alongside other work) | |
-| 7 | 2026-11-30 | 52 library entries unproven at 0.4 | `reviewer` or `/code-review` on every diff over 100 lines | at least 10 entries moved off 0.4 in `brain/library-ledger.md` | `/retro` | |
+| 7 | 2026-11-30 | 57 library entries unproven at 0.4 (2026-10-18) | `reviewer` or `/code-review` on every diff over 100 lines | at least 10 entries moved off 0.4 in `brain/library-ledger.md` | `/retro` | |
 
 **Library growth is planned in `library/candidates/README.md`** (from a
 parallel session, 2026-10-05). Its phases are called C1–C4 here so the numbers
 don't clash. It feeds this roadmap instead of competing with it. C1 (absorb the
 Tier A backend, Kubernetes and cloud subset) is the first source to check for
 phase 5. C3 (our own teach, lab and visualise skill) runs with phase 3's tutor
-work. Do C1 *after* phase 1, so new skills land in a scoped plugin, not the
-global pile.
-
-Phase 1 retirement list (confirm with Giga at its start): `cisco-ios-patterns`,
-`netmiko-ssh-automation`, `network-*` (3), `homelab-*` (5), `seo`. **Keep**
-`remotion-video-creation` / `video-editing` (pala's stack maps them). Ask about
-`manim-video`, `fal-ai-media`, `content-engine`, `brand-voice`, `email-ops`.
+work.
 
 ## Scorecard targets (re-score 2026-11-01, 2026-12-01, 2026-12-31)
 
@@ -55,8 +49,6 @@ after 2026-12-31: all 11 dimensions at 8 or more, holding for two re-scores.
 
 ## Firm coaching contract
 
-- A build prompt with no done-line, environment or access: Claude adds that to
-  its one up-front question batch before building (one question, no lecture).
-- A multi-part task: a "Split" line before starting. Giga launches the worktree halves.
-- At most one `💡` per reply, and only when it would clearly change the outcome.
-- A session ending with no `/retro`: offer it once.
+Coaching is **firm** (agreed 2026-10-05): enforced by CORE.md (one question
+batch incl. access, Split block, at most one 💡) and the coach hook cues
+(global/hooks/coach.py).

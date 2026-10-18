@@ -51,7 +51,7 @@ A frontend was also scoped just before this: React SPA on S3 + CloudFront (OAC, 
 
 **Two replacement hazards, both flagged in-file:** changing the pool's `UsernameAttributes` after deploy **replaces the User Pool** (all users lost), and renaming `AppTable`'s `TableName` **replaces the table**. Settle both before the first deploy.
 
-**Social login completed 2026-08-16 (A2 done).** Google **and** Facebook identity providers, plus the email/password door, all wired.
+**Social login completed 2026-08-16 (A2 done).** Google **and** Facebook identity providers, plus the email/password door, all wired. (Facebook dropped 2026-08-17; IdentityLinkService replaced by signUpGuard on 2026-08-18; SSM now /auxiliary/<stage>/…)
 
 - **Cognito does NOT merge accounts by email.** A Google sign-in creates a separate user `Google_<subject>` with its own `sub`, even when a native email/password user exists at the same address — one human, two profiles, two job lists. Fixed with a **PreSignUp Lambda trigger** (`IdentityLinkService`) that calls `AdminLinkProviderForUser` to link the federated identity onto the existing native user. This is the standard Cognito account-linking pattern and is *not* optional when offering both doors.
 - **Providers are conditional on SSM.** `iac/resource/{Google,Facebook}IdentityProvider.yml` carry `Condition: HasGoogle` / `HasFacebook`, driven by `${ssm:/auctionize/<stage>/<provider>/client-id, ''}`. The stack packages and deploys with zero credentials; adding the SSM parameters and redeploying switches a provider on with no code change. `SupportedIdentityProviders` is built with `Fn::Split`/`Fn::Sub`/`Fn::If`, and the client `DependsOn` both providers (CloudFormation ignores a DependsOn whose target Condition is false).
@@ -73,14 +73,12 @@ Verified: tsc + `sls print` + `sls package` green for auction and auth; generate
 ### Identity decisions settled 2026-08-17
 
 - **Facebook DROPPED and removed.** Meta's Graph API exposes **no email-verification signal at all**, and a Facebook account can carry no email. Neither the linking rule nor the notification pipeline could be applied to one. With one provider, `SupportedIdentityProviders` collapses from `Fn::Split`/`Fn::Sub`/`Fn::If` to a plain `!If [HasGoogle, [COGNITO, Google], [COGNITO]]`.
-- **Linking KEPT, not blocking.** The user initially wanted "one email, one sign-in method, block the second" (their ecommerce `registerSource`/`oauthId` model). After weighing it they chose to keep `AdminLinkProviderForUser`. The argument that landed: blocking creates permanent lockouts, and the real risk in linking is an *unverified* provider email, which is fixed by verifying rather than banning.
-- **`email_verified` gate added — this is load-bearing.** Linking on an unverified address is an account-takeover primitive. `email_verified: email_verified` is now in Google's `AttributeMapping`, and the trigger returns early unless `userAttributes.email_verified === "true"` (Cognito delivers mapped attributes as **strings**). **Fails closed:** if the mapping ever stops populating, sign-in creates a separate account rather than silently linking. Not yet confirmed against real AWS that Cognito accepts this mapping for `ProviderType: Google`.
+- Superseded 2026-08-18: linking and the email_verified gate were deleted for symmetric blocking. See [[auxiliary-identity-and-brand-decisions]].
 
 ### Two replacement hazards — corrected, and one is worse than previously recorded
 
 - **`AppTable` is SAFER than feared.** It carries `DeletionPolicy: Retain` **and** `UpdateReplacePolicy: Retain`, so renaming `TableName` orphans the old table with data intact and creates a new empty one. A migration, not a loss.
 - **`CognitoUserPool` has NO `DeletionPolicy`.** Changing `UsernameAttributes` after deploy genuinely **deletes the pool and every user**, with no orphan to recover from. This is the real one-way door.
-- Two mutable improvements offered and **not yet applied**: `DeletionPolicy: Retain` on the pool, and `UserAttributeUpdateSettings: { AttributesRequireVerificationBeforeUpdate: [email] }` (currently absent — without it a user changing their email moves the sign-in identifier *before* the new address is verified; a typo locks them out, a deliberate one is a hijack vector).
 - **`UsernameAttributes: [email]` does not make the email the literal username.** Cognito assigns an internal UUID and treats email as the sign-in identifier — which is *why* users can change their email later.
 
 ### Resolved later on 2026-08-17 — all four closed

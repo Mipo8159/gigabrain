@@ -54,4 +54,4 @@ validates shape.
 **Next time:** author brief asks for the memory-facts and least-sure lists;
 the researcher checks them before handover.
 
-Related: [[shared-kit-and-checker-before-fan-out]], [[measure-before-writing-a-knowledge-skill]].
+Related: [[shared-kit-and-checker-before-fan-out]], [[import-knowledge-on-demand]].

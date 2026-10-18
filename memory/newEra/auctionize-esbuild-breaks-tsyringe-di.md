@@ -52,12 +52,4 @@ node /tmp/probe.js   # print Reflect.getMetadata(...) and typeof each injected d
 
 **`esbuild-plugin-tsc` is also unavailable** — it calls `ts.transpileModule`, and `typescript@7` (the Go native port, pinned per [[auctionize-dependency-ceilings]]) exposes no legacy JS API; `require("typescript").transpileModule` is `undefined`.
 
-Three fixes, all verified by probe, ranked by effort — **user had not chosen as of 2026-08-14**:
-
-1. **tsyringe + explicit `@inject(SomeClass)`** (~5 params, 2 files). tsyringe stores those under its own `INJECTION_TOKEN_METADATA_KEY` at decoration time, so `design:paramtypes` is never needed; esbuild preserves parameter decorators. Smallest diff but stays fragile — a future `@autoInjectable` class without `@inject` breaks silently again.
-2. **Drop the container, use default-parameter injection** (~8 lines). *This matches the idiom the codebase already uses everywhere else* — `ScheduleService`, `AuthProvider` and `AuctionRepository` all default their AWS client in the constructor. All five injected classes are zero-arg constructible (`DateService` and `SecurityService` have no constructor at all), so the container was resolving things `new` already handles. Keep `reflect-metadata` for class-validator/class-transformer.
-3. **Awilix** (~60 lines/service, adds a dep). The only *container* that works here.
-
-**DI container landscape for this repo:** decorator containers that auto-read constructor types all have the identical bug — **InversifyJS and TypeDI both read `design:paramtypes`** (TypeDI is also unmaintained since ~2022). **Awilix 13.x needs zero decorators and zero metadata**; verified resolving deps and holding singletons under Serverless's esbuild, *including with `--minify`*. Use `InjectionMode.PROXY` (deps arrive as one destructured object) — PROXY survives minification, CLASSIC reads parameter names via `Function.toString()` and would not. The current build does not minify (class names are intact in the real bundle).
-
 See [[auctionize-is-serverless-aws-no-local-stack]].
