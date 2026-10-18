@@ -11,7 +11,9 @@
 #   3. ~/.claude/agents/<a>.md      -> global/agents/<a>.md
 #   4. ~/.claude/settings.json      += cleanupPeriodDays 365, SessionStart inbox
 #                                      notice, ask-before git commit/push, guard hooks
-#                                      (PreToolUse/PostToolUse/Stop/SessionStart)
+#                                      (PreToolUse/PostToolUse/Stop/SessionStart),
+#                                      session-log (PreCompact/SessionEnd), statusline
+#                                      (only if none is set), agent teams env flag
 #   4b. ~/.local/bin/kit            -> bin/kit (per-project apply/doctor)
 #   5. memory: prune the 6 promoted habits from memory/newEra/MEMORY.md, fix links
 #   6. newEra repos: autoMemoryDirectory -> gigabrain/memory/newEra
@@ -47,7 +49,7 @@ if command -v claude >/dev/null; then  # opt-in skill bundles, loaded in place f
     [ -n "$mp" ] && claude plugin marketplace remove gigabrain >/dev/null
     claude plugin marketplace add "$G/library" >/dev/null && echo "  marketplace gigabrain -> $G/library"; fi
 else echo "  note: claude CLI not on PATH; add the marketplace later: claude plugin marketplace add $G/library"; fi
-chmod +x "$G"/global/hooks/*.sh "$G"/bin/*.sh "$G"/bin/*.py "$G"/.githooks/pre-commit
+chmod +x "$G"/global/hooks/*.sh "$G"/global/hooks/*.py "$G"/global/statusline.py "$G"/bin/*.sh "$G"/bin/*.py "$G"/.githooks/pre-commit
 
 echo "4. settings.json (backup: $C/backups/settings.json.pre-gigabrain)"
 mkdir -p "$C/backups"
@@ -83,9 +85,17 @@ ensure("PreToolUse", guard, "Bash|Edit|Write|MultiEdit", 10)
 ensure("PostToolUse", guard, "Edit|Write|MultiEdit", 10)
 ensure("SessionStart", guard, None, 10)
 ensure("Stop", guard, None, 150)
+# 2026-10-17: pointer rows for /retro to catch up on sessions that ended without one.
+log = f"python3 {G}/global/hooks/session-log.py"
+ensure("PreCompact", log)
+ensure("SessionEnd", log)
+s.setdefault("statusLine", {"type": "command", "command": f"python3 {G}/global/statusline.py", "padding": 0})
+# Agent teams (experimental, opted in 2026-10-17). Side effect from the docs: named
+# subagents (reviewer, verifier) may launch as teammates; set "0" here to undo.
+s.setdefault("env", {}).setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
 json.dump(s, open(path, "w"), indent=2); open(path, "a").write("\n")
 print("  cleanupPeriodDays=365, ask: git commit/push, allow: Read library/**, SessionStart: inbox-status+guard, UserPromptSubmit: coach,"
-      " PreToolUse/PostToolUse/Stop: guard")
+      " PreToolUse/PostToolUse/Stop: guard, PreCompact/SessionEnd: session-log, statusLine (if unset), env: agent teams")
 EOF
 
 echo "4b. kit on PATH"

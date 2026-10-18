@@ -465,6 +465,9 @@ class Report:
     def ok(self, m):
         print(f"  ok    {m}")
 
+    def info(self, m):
+        print(f"  info  {m}")
+
 
 def doctor_global(r):
     print("global (~/.claude)")
@@ -508,10 +511,14 @@ def doctor_global(r):
 
 
 def doctor_project(repo, r):
-    repo = pathlib.Path(repo).resolve()
+    given, repo = pathlib.Path(repo), pathlib.Path(repo).resolve()
     print(f"{repo}")
     if not repo.is_dir():
-        return r.err("path no longer exists (kit remove it from kit/projects.json)")
+        # 2026-10-17: the registry is shared by the Mac and the Linux box, so each machine's
+        # repos are missing on the other; 10 such errors hid the 2 really deleted repos.
+        if not given.is_relative_to(pathlib.Path.home()):
+            return r.info("not on this machine (registered from another home)")
+        return r.err("path no longer exists (drop it: kit remove <path>)")
     req, st = load_json(repo / REQ, None), load_json(repo / STATE, None)
     if not req or not st:
         return r.err("not applied (run kit apply)")
@@ -590,7 +597,17 @@ def status():
 
 
 def remove(repo, dry):
-    repo = pathlib.Path(repo).resolve()
+    given, repo = str(pathlib.Path(repo)), pathlib.Path(repo).resolve()
+    if not repo.exists():  # 2026-10-17: deleted/moved repos had no way out of the registry (doctor said "kit remove", which exited)
+        reg = registry()
+        key = next((k for k in (str(repo), given) if k in reg["projects"]), None)
+        if not key:
+            sys.exit(f"kit: {repo} does not exist and is not in kit/projects.json")
+        reg["projects"].pop(key)
+        if not dry:
+            dump_json(REGISTRY, reg, False)
+        print(f"removed {key} from kit/projects.json (path gone)" + (" (dry run)" if dry else ""))
+        return
     st = load_json(repo / STATE, None)
     if not st:
         sys.exit(f"kit: {repo} has no {STATE}; nothing to remove")

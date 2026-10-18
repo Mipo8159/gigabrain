@@ -27,7 +27,8 @@ skill grows. `brain/CORE.md` is already loaded (via `~/.claude/CLAUDE.md`).
 ## Rules for this repo
 
 - **Never commit** (see CORE). Hand over a summary instead.
-- Before handover, run `.githooks/pre-commit` manually; it is the secret scan.
+- Before handover, run `.githooks/pre-commit --all`; it is the secret scan (without
+  `--all` it scans only staged files and prints "clean (0 files)").
 - To change a skill, agent or hook, edit it under `global/`. The symlinks make
   it live immediately. Say which sessions need a restart (hooks and CLAUDE.md load at
   session start).

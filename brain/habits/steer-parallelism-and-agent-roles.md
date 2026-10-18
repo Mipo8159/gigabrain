@@ -34,6 +34,7 @@ to launch:
 | Fixes in independent halves (backend repo vs UI repo) | a separate worktree that Giga launches: `cd <repo> && claude -w <task>` | Name the moment and the command. Giga launches it so they practise it. |
 | Test / verify | `verifier` subagent in the background, or a one-shot `claude -p` | Reruns the original repro plus one nearby case. Reports VERIFIED, FAILED, PLAUSIBLE or BLOCKED. Use it before saying "confirmed". |
 | Review | `reviewer` subagent in the background | Diffs over ~100 lines, or touching auth, money, data or infrastructure (CORE.md rule). |
+| Parts that must argue (competing hypotheses, multi-lens review) | agent team, 3–5 teammates | Experimental, costs several times the tokens. When to pick it over a subagent or worktree: [[worktrees-and-agent-teams]]. |
 
 Rules:
 - **Check access before the first probe:** SSO login fresh, VPN or bastion for

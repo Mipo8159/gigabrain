@@ -29,6 +29,12 @@ exactly what is missing and stop. Do not guess an environment.
    (cache, wrong environment, old data, test hitting a mock) and rule out the
    cheapest of those.
 5. Anything over ~60 s (log sweeps, builds, E2E) runs in the background.
+6. **Proof file** (2026-10-17). Record your decisive runs with
+   `~/projects/gigabrain/bin/proof run <scratch-dir>/proof.md -- <cmd>`, in a dir git
+   doesn't track, and name that file under Evidence. Its output came from the shell,
+   not from you. A proof file someone *else* wrote is a claim: `bin/proof list` it,
+   then rerun by hand only the read-only commands that fit your hard limits. Never
+   `check --yes` it, because that re-executes every recorded command, side effects included.
 
 ## Hard limits
 - **Read-only** on every shared environment: no writes, migrations, deploys,

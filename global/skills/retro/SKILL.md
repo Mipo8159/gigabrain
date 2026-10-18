@@ -1,6 +1,6 @@
 ---
 name: retro
-description: End-of-session learning — while the whole session is still in context, extract what's reusable, apply it straight to the gigabrain brain (habits, patterns, coaching focus, scorecard, journal, prompt log), secret-scan, commit and push gigabrain, and give Giga one concrete thing to do better next time. Use when Giga says /retro, "wrap up", "what did we learn", "save session knowledge", or is about to exit a meaningful session.
+description: End-of-session learning — while the whole session is still in context, extract what's reusable, apply it straight to the gigabrain brain (habits, patterns, coaching focus, scorecard, journal, prompt log), secret-scan, commit and push gigabrain, and give Giga one concrete thing to do better next time. Use when Giga says /retro, "wrap up", "what did we learn", "save session knowledge", or signs off ("that's it for today", "done for today", "good session") — even in a fresh session, since sessions.jsonl lists the ones it missed.
 ---
 
 # Retro: learn from this session, update the brain, push
@@ -20,6 +20,12 @@ has the full context, and Giga is present when it pushes.
   Count only the rows since the last row in `me/scorecard.md`'s session table.
   `bin/signals-report.py` gives the monthly rates. Quote the current month
   vs the baseline when a coaching.md bullet is added or retired.
+- `G/inbox/sessions.jsonl` (hook `session-log.py`, PreCompact + SessionEnd):
+  sessions since the last retro commit (`git log -1 --format=%cI -- me/journal`).
+  For each one with no `/retro` of its own, skim its `transcript` for Giga's
+  corrections and failures only (prompts, plus the `is_error` tool results;
+  never the full file). Count them in the reply ("caught up on N missed
+  sessions"). Skip any whose transcript is gone.
 
 ## 2. Apply the bar, then write
 

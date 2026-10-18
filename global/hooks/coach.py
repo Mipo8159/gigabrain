@@ -60,6 +60,26 @@ def worktree_hint(cwd):
     return "worktrees need a git repo (`git init` first)"
 
 
+# Sub-bullets of coaching.md that steer behaviour. The dated evidence bullets stay in
+# the file for /curate; injecting them cost ~1.6k tokens per firing (2026-10-17).
+KEEP = ("Ask for", "Next", "Claude:", "Giga:", "Open:")
+
+
+def compact(focus):
+    """coaching.md minus its evidence: each focus title, plus its Ask for / Next / Claude / Giga lines."""
+    out = []
+    for line in focus.splitlines():
+        if line.startswith("- **"):
+            m = re.match(r"- \*\*(.+?)\*\*\s*(\([^)]*\))?", line)
+            head = f"- **{m.group(1).rstrip('.')}**" + (f" {m.group(2)}" if m and m.group(2) else "") if m else line[:80]
+            ask = line.find("Ask for:")
+            out.append(head + (" " + line[ask:] if ask >= 0 else ""))
+        elif line.lstrip().startswith("- ") and line.lstrip()[2:].startswith(KEEP):
+            out.append(line)
+    out.append("(Evidence per focus: brain/coaching.md.)")
+    return "\n".join(out)
+
+
 def milestone():
     """The roadmap's `**Now:**` line, or ''."""
     try:
@@ -162,7 +182,7 @@ def main():
     except OSError:
         pass
 
-    focus = FOCUS.read_text().strip() if FOCUS.exists() else ""
+    focus = compact(FOCUS.read_text().strip()) if FOCUS.exists() else ""
     sid = data.get("session_id", "")
     first = False
     if sid and not os.environ.get("GIGABRAIN_NO_SIGNALS"):

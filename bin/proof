@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Proof files: commands with their *real* output, re-checkable later.
+
+    bin/proof run   <proof.md> [--timeout S] -- <command...>   run, append command + output + exit
+    bin/proof note  <proof.md> <text>                          append a line of prose
+    bin/proof list  <proof.md>                                 show what check would run
+    bin/proof check <proof.md> --yes [--timeout S]             re-run every block
+
+The idea is Simon Willison's Showboat (simonwillison.net/2026/Feb/10/showboat-and-rodney):
+a handover's "it passes" becomes a file whose output came from the shell, not from
+the model. Re-implemented here (stdlib only) because the PyPI tool needs uv and
+the npm package is an unofficial port (2026-10-17).
+
+Format. Each block is a header `<!-- proof {json} -->` (cmd, cwd, exit, sha, len), then
+a fence, then exactly `len` characters of output, then the fence again. The parser walks
+the file by those lengths, so output that contains fences or fake headers can't add
+blocks (reviewer 2026-10-17: a recorded `cat README.md` could plant commands).
+Anything it can't parse exactly makes `check` refuse.
+
+Safety. `check` re-executes shell commands, so it lists them and runs only with
+`--yes`. Check only proof files you wrote yourself; a file from someone else is
+a claim to read, not a script to run. Commands run in their recorded cwd, with
+no stdin and a timeout. A command or output that matches a secret pattern is
+stored redacted, and that block is skipped on check. Keep proof files in a
+scratch dir that git doesn't track.
+"""
+import datetime
+import hashlib
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+
+LIMIT = 4000  # output chars shown per block; the sha covers all of it
+FENCE = "~~~~proof-output"
+HEAD = "<!-- proof "
+SECRETS = [re.compile(p, re.I) for p in (  # same names as .githooks/pre-commit, plus bearer headers
+    r"(AKIA|ASIA)[A-Z0-9]{16}", r"GOCSPX-[A-Za-z0-9_-]{10,}", r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+    r"gh[pousr]_[A-Za-z0-9]{30,}", r"sk-ant-[A-Za-z0-9_-]{20,}", r"xox[baprs]-[A-Za-z0-9-]{10,}",
+    r"(password|passwd|secret|api_?key|token)\s*[:=]\s*[\"']?[A-Za-z0-9/+_-]{12,}",
+    r"bearer\s+[A-Za-z0-9._~+/-]{12,}")]
+
+
+def redact(s):
+    hit = False
+    for p in SECRETS:
+        s, n = p.subn("[REDACTED]", s)
+        hit = hit or n > 0
+    return s, hit
+
+
+def execute(cmd, cwd, timeout):
+    try:
+        r = subprocess.run(cmd, shell=True, cwd=cwd, capture_output=True, text=True, errors="replace",
+                           stdin=subprocess.DEVNULL, timeout=timeout)
+        code, out = r.returncode, r.stdout + r.stderr
+    except subprocess.TimeoutExpired:
+        code, out = 124, f"[timed out after {timeout}s]\n"
+    except OSError as e:  # e.g. the recorded cwd is gone
+        code, out = 127, f"[could not run: {e}]\n"
+    return code, out, hashlib.sha256(out.encode()).hexdigest()[:16]
+
+
+def run(path, cmd, timeout):
+    cwd = os.getcwd()
+    code, out, sha = execute(cmd, cwd, timeout)
+    shown = out if len(out) <= LIMIT else out[:LIMIT] + f"\n… ({len(out) - LIMIT} more chars)\n"
+    shown, hit_out = redact(shown)
+    stored, hit_cmd = redact(cmd)
+    head = {"cmd": stored, "cwd": cwd, "exit": code, "sha": sha, "len": len(shown),
+            "t": datetime.datetime.now().isoformat(timespec="seconds")}
+    if hit_cmd:
+        head["redacted"] = True  # can't be re-run: the real command isn't stored
+    with open(path, "a") as f:
+        f.write(f"\n{HEAD}{json.dumps(head)} -->\n{FENCE}\n{shown}\n{FENCE}\n")
+    sys.stdout.write(out if not (hit_out or hit_cmd) else shown)
+    if hit_out or hit_cmd:
+        print("[proof: secret pattern matched; stored redacted]", file=sys.stderr)
+    return code
+
+
+def parse(text):
+    """Blocks in order, or raise ValueError where the file stops matching the format.
+    Output bodies are skipped by their recorded length, never scanned."""
+    blocks, i = [], 0
+    while (j := text.find(HEAD, i)) >= 0:
+        if j > 0 and text[j - 1] != "\n":
+            raise ValueError(f"header not at line start at char {j}")
+        end = text.find(" -->\n", j)
+        if end < 0:
+            raise ValueError(f"unterminated header at char {j}")
+        head = json.loads(text[j + len(HEAD):end])
+        body = end + len(" -->\n")
+        if not text.startswith(FENCE + "\n", body):
+            raise ValueError(f"missing opening fence after header at char {j}")
+        out_end = body + len(FENCE) + 1 + int(head["len"])
+        if not text.startswith("\n" + FENCE + "\n", out_end):
+            raise ValueError(f"output length does not match header at char {j} (edited?)")
+        blocks.append(head)
+        i = out_end + len(FENCE) + 2
+    return blocks
+
+
+def check(path, yes, timeout):
+    try:
+        blocks = parse(open(path).read())
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        print(f"REFUSED {path}: not a valid proof file ({e})")
+        return 2
+    if not blocks:
+        print(f"{path}: no proof blocks")
+        return 1
+    if not yes:
+        for b in blocks:
+            print(f"  [{b['cwd']}] $ {b['cmd']}")
+        print(f"{len(blocks)} command(s) would run. Re-run with --yes, only if you wrote this file.")
+        return 3
+    bad = 0
+    for b in blocks:
+        if b.get("redacted"):
+            print(f"SKIP  secret redacted: {b['cmd']}")
+            continue
+        code, _, now = execute(b["cmd"], b["cwd"], timeout)
+        if code != b["exit"]:
+            bad += 1
+            print(f"FAIL  exit {b['exit']} -> {code}: {b['cmd']}")
+        elif now != b["sha"]:
+            print(f"DRIFT output changed (exit same): {b['cmd']}")
+        else:
+            print(f"ok    {b['cmd']}")
+    print(f"{len(blocks)} block(s), {bad} failing")
+    return 1 if bad else 0
+
+
+def main(argv):
+    if len(argv) < 3 or argv[1] not in ("run", "note", "list", "check"):
+        sys.exit(__doc__)
+    cmd, path, rest = argv[1], argv[2], argv[3:]
+    timeout = 120
+    if "--timeout" in rest:
+        k = rest.index("--timeout")
+        timeout = int(rest[k + 1])
+        rest = rest[:k] + rest[k + 2:]
+    if cmd in ("check", "list"):
+        return check(path, cmd == "check" and "--yes" in rest, timeout)
+    if cmd == "note":
+        text = " ".join(rest).replace(HEAD, "<!- proof ")  # prose can't forge a header
+        with open(path, "a") as f:
+            f.write("\n" + text + "\n")
+        return 0
+    if rest[:1] == ["--"]:
+        rest = rest[1:]
+    if not rest:
+        sys.exit("bin/proof run <proof.md> -- <command...>")
+    return run(path, rest[0] if len(rest) == 1 else shlex.join(rest), timeout)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

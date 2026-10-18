@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+"""How Giga actually uses Claude Code, read from the local transcripts.
+
+    bin/usage-report [--days 30] [--project gigabrain] [--json]
+
+Reads ~/.claude/projects/*/*.jsonl (no network, no model call) and prints, per
+real project: sessions, prompts, tokens, peak context, hook-injected bytes,
+which skills / agents / slash commands fired, and how many sessions ended
+without /retro. Eval and temp-dir sessions (/private/..., gbk-*-work) are
+counted apart, because they would drown the real numbers.
+
+Feeds /curate (which skills earn their place: brain/library-ledger.md) and the
+scorecard (dims 5 context, 6 parallel, 9 review, 10 automation). Prompt text is
+never printed.
+"""
+import argparse
+import collections
+import datetime
+import json
+import pathlib
+import sys
+
+PROJECTS = pathlib.Path.home() / ".claude" / "projects"
+TEMP_MARKERS = ("-private-", "-var-folders-", "-tmp-")
+
+
+def is_temp(d):
+    return d.name.startswith(TEMP_MARKERS)   # prefix only: "-projects-my-private-api" is real
+
+
+def project_name(d):
+    # "-Users-g-kvachakhia-projects-newEra-admin" -> "newEra-admin"
+    n = d.name
+    i = n.find("-projects-")
+    return n[i + len("-projects-"):] if i >= 0 else n.strip("-")
+
+
+def prompt_text(r):
+    """The typed prompt of a user record, or None for tool results and meta rows."""
+    if r.get("type") != "user" or r.get("isMeta") or r.get("isSidechain") or r.get("isCompactSummary"):
+        return None
+    c = r.get("message", {}).get("content")
+    if isinstance(c, str):
+        return c
+    if isinstance(c, list) and c and c[0].get("type") == "text":
+        return c[0].get("text", "")
+    return None
+
+
+def scan(f, since):
+    s = {"prompts": 0, "turns": 0, "in": 0, "out": 0, "peak": 0, "hook_bytes": 0,
+         "skills": collections.Counter(), "agents": collections.Counter(),
+         "commands": collections.Counter(), "tools": collections.Counter(), "start": None}
+    seen = set()   # one assistant record per content block, each repeating message.id + usage (reviewer 2026-10-17: 2-3x over-count)
+    for line in f.open(errors="replace"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        ts = r.get("timestamp")
+        if ts and s["start"] is None:
+            s["start"] = ts
+        t = r.get("type")
+        p = prompt_text(r)
+        if p is not None:
+            if "<command-name>" in p[:300]:   # "<command-message>retro</command-message>\n<command-name>/retro…"
+                name = p.split("<command-name>", 1)[1].split("</command-name>", 1)[0]
+                s["commands"][name] += 1
+            elif not p.startswith(("<", "[Request interrupted")):
+                s["prompts"] += 1
+        elif t == "attachment" and r.get("attachment", {}).get("type") == "hook_additional_context":
+            s["hook_bytes"] += sum(len(x) for x in r["attachment"].get("content", []) if isinstance(x, str))
+        elif t == "assistant":
+            m = r.get("message", {})
+            mid = m.get("id")
+            first = mid not in seen
+            seen.add(mid)
+            u = (m.get("usage") or {}) if first else {}
+            ctx = u.get("input_tokens", 0) + u.get("cache_creation_input_tokens", 0) + u.get("cache_read_input_tokens", 0)
+            if first and not r.get("isSidechain"):
+                s["turns"] += 1
+                s["peak"] = max(s["peak"], ctx)
+            s["in"] += ctx
+            s["out"] += u.get("output_tokens", 0)
+            for c in m.get("content") or []:
+                if c.get("type") != "tool_use":
+                    continue
+                name, inp = c.get("name", "?"), c.get("input") or {}
+                s["tools"][name] += 1
+                if name == "Skill":
+                    s["skills"][str(inp.get("skill", "?")).split(":")[-1]] += 1
+                elif name in ("Agent", "Task"):
+                    s["agents"][inp.get("subagent_type") or "general-purpose"] += 1
+    if s["start"] is None or s["start"][:10] < since:
+        return None
+    return s
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--days", type=int, default=30)
+    ap.add_argument("--project", default="", help="substring of the project name")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args()
+    since = (datetime.date.today() - datetime.timedelta(days=a.days)).isoformat()
+
+    per = collections.defaultdict(list)
+    temp = {"dirs": 0, "sessions": 0, "bytes": 0}
+    for d in sorted(PROJECTS.iterdir()) if PROJECTS.exists() else []:
+        if not d.is_dir():
+            continue
+        if is_temp(d):
+            temp["dirs"] += 1
+            for f in d.rglob("*.jsonl"):
+                temp["sessions"] += 1
+                temp["bytes"] += f.stat().st_size
+            continue
+        name = project_name(d)
+        if a.project and a.project not in name:
+            continue
+        for f in d.glob("*.jsonl"):   # top level only: subagent transcripts live in subdirs
+            s = scan(f, since)
+            if s and (s["prompts"] or s["commands"]):
+                per[name].append(s)
+
+    total = collections.Counter()
+    skills, agents, commands, tools = (collections.Counter() for _ in range(4))
+    rows = []
+    for name, ss in sorted(per.items(), key=lambda kv: -len(kv[1])):
+        n = len(ss)
+        retro = sum(1 for s in ss if s["skills"]["retro"] or s["commands"]["/retro"])
+        row = {"project": name, "sessions": n, "prompts": sum(s["prompts"] for s in ss),
+               "tokens_in_M": round(sum(s["in"] for s in ss) / 1e6, 1),
+               "tokens_out_k": round(sum(s["out"] for s in ss) / 1e3),
+               "peak_ctx_k_max": round(max(s["peak"] for s in ss) / 1e3),
+               "peak_ctx_k_median": round(sorted(s["peak"] for s in ss)[n // 2] / 1e3),
+               "hook_kB_per_session": round(sum(s["hook_bytes"] for s in ss) / n / 1e3, 1),
+               "sessions_without_retro": n - retro}
+        rows.append(row)
+        for s in ss:
+            skills.update(s["skills"]); agents.update(s["agents"])
+            commands.update(s["commands"]); tools.update(s["tools"])
+        total.update({k: v for k, v in row.items() if isinstance(v, (int, float)) and k in
+                      ("sessions", "prompts", "sessions_without_retro")})
+
+    report = {"since": since, "projects": rows, "skills": dict(skills.most_common()),
+              "agents": dict(agents.most_common()), "commands": dict(commands.most_common()),
+              "tools": dict(tools.most_common(15)), "temp": temp}
+    if a.json:
+        json.dump(report, sys.stdout, indent=1)
+        print()
+        return
+
+    print(f"Claude Code usage since {since} (real projects; eval/temp sessions listed last)\n")
+    cols = ["project", "sessions", "prompts", "tokens_in_M", "tokens_out_k", "peak_ctx_k_median",
+            "peak_ctx_k_max", "hook_kB_per_session", "sessions_without_retro"]
+    heads = ["project", "sess", "prompts", "in M", "out k", "ctx med k", "ctx max k", "hook kB/s", "no retro"]
+    w = [max(len(h), *(len(str(r[c])) for r in rows)) if rows else len(h) for h, c in zip(heads, cols)]
+    print("  ".join(h.ljust(x) for h, x in zip(heads, w)))
+    for r in rows:
+        print("  ".join(str(r[c]).ljust(x) for c, x in zip(cols, w)))
+    for title, c in (("skills fired", skills), ("subagents", agents), ("slash commands", commands),
+                     ("top tools", collections.Counter(report["tools"]))):
+        print(f"\n{title}: " + (", ".join(f"{k} {v}" for k, v in c.most_common(20)) or "none"))
+    disk = sum(f.stat().st_size for f in PROJECTS.rglob("*") if f.is_file()) / 1e6
+    print(f"\neval/temp: {temp['sessions']} sessions in {temp['dirs']} dirs, {temp['bytes'] / 1e6:.0f} MB. "
+          f"All transcripts incl. subagents: {disk:.0f} MB (kept for cleanupPeriodDays).")
+
+
+if __name__ == "__main__":
+    main()

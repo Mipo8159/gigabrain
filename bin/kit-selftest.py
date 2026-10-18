@@ -222,6 +222,28 @@ def kit_cases():
           and str(repo) not in json.loads((TMP / "projects.json").read_text())["projects"])
     excl = (repo / ".git/info/exclude").read_text()
     check("remove: .git/info/exclude cleaned", "gigabrain" not in excl)
+    # 2026-10-17: a deleted repo stayed in the registry forever (remove needed its state file).
+    reg = json.loads((TMP / "projects.json").read_text())
+    gone = "/nonexistent/old-machine/repo"
+    reg["projects"][gone] = {"kind": "client", "memory": None, "applied": "2026-01-01"}
+    (TMP / "projects.json").write_text(json.dumps(reg))
+    r = kit("remove", gone)
+    check("remove: a vanished path is dropped from the registry",
+          r.returncode == 0 and gone not in json.loads((TMP / "projects.json").read_text())["projects"])
+    check("remove: unknown vanished path errors", kit("remove", gone).returncode != 0)
+    # 2026-10-17: the registry is shared across machines; another home's repos are info, a deleted
+    # repo under this home is still an error.
+    elsewhere, deleted = "/nonexistent/other-home/repo", str(pathlib.Path.home() / "gf-selftest-deleted-repo")
+    for p in (elsewhere, deleted):
+        reg["projects"][p] = {"kind": "own", "memory": None, "applied": "2026-01-01"}
+    (TMP / "projects.json").write_text(json.dumps(reg))
+    d1, d2 = kit("doctor", elsewhere), kit("doctor", deleted)
+    check("doctor: another machine's repo is info, not an error",
+          d1.returncode == 0 and "not on this machine" in d1.stdout and "ERROR" not in d1.stdout)
+    check("doctor: a deleted repo under this home is still an error",
+          d2.returncode != 0 and "no longer exists" in d2.stdout)
+    for p in (elsewhere, deleted):
+        kit("remove", p)
     # client: memory never points into gigabrain
     crepo = TMP / "client"
     crepo.mkdir()
@@ -307,6 +329,14 @@ def installer_cases():
           == {"PreToolUse", "PostToolUse", "SessionStart", "Stop"})
     check("install: merge idempotent (no duplicate hooks after 2 runs)", len(cmds) == len(set(cmds)))
     check("install: unrelated settings kept", s["model"] == "x" and "Read" in s["permissions"]["allow"])
+    # 2026-10-17: session-log, statusline and agent teams; never overwrite a statusline that is already set.
+    check("install: session-log on PreCompact + SessionEnd", {ev for ev, c in cmds if "session-log.py" in c}
+          == {"PreCompact", "SessionEnd"})
+    check("install: statusline + agent teams flag", "statusline.py" in s["statusLine"]["command"]
+          and s["env"]["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] == "1")
+    st.write_text(json.dumps({"statusLine": {"type": "command", "command": "mine.sh"}}))
+    subprocess.run([sys.executable, str(TMP / "step4.py"), str(st), str(G)], capture_output=True, check=True)
+    check("install: an existing statusline is kept", json.loads(st.read_text())["statusLine"]["command"] == "mine.sh")
 
 
 def brain_commit_cases():

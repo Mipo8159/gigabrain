@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# A/B: do gigabrain's skills trigger better with the forced-eval prompt hook
+# (evals/skills-hard/forced-eval.sh) than with their descriptions alone?
+#
+#   bin/eval-forced [--runs N] [--max-cost USD] [claude plugin eval flags]
+#                   (defaults: 3 runs per case per arm, $5 ceiling per arm)
+#
+# Stages two throwaway plugins from global/skills, "plain" and "forced" (the same
+# plus the hook), and runs evals/skills-hard on both: 7 indirect trigger
+# prompts + 3 prompts that must load nothing. Real model calls: ~$0.09 a run,
+# ~$5 at the defaults. Results under
+# evals/skills/results/forced-<timestamp>/{plain,forced} (gitignored).
+# Keep the hook only if forced wins on triggers AND keeps the negatives at 0.
+set -euo pipefail
+G="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+runs=3; cap=5
+while [ $# -gt 0 ]; do case "$1" in
+  --runs) runs="$2"; shift 2;; --max-cost) cap="$2"; shift 2;; *) break;;   # the rest go to claude plugin eval
+esac; done
+T="$(mktemp -d "${TMPDIR:-/tmp}/gb-eval-forced.XXXXXX")"
+trap 'rm -rf "$T"' EXIT
+out="$G/evals/skills/results/forced-$(date +%Y%m%d-%H%M%S)"
+stage() {  # $1 = arm dir
+  mkdir -p "$1/.claude-plugin" "$1/evals"
+  printf '{"name": "core", "description": "gigabrain global skills, staged for evals", "version": "0.0.0"}\n' \
+    > "$1/.claude-plugin/plugin.json"
+  cp -R "$G/global/skills" "$1/skills"
+  for c in "$G"/evals/skills-hard/*/; do cp -R "${c%/}" "$1/evals/"; done
+}
+stage "$T/plain"
+stage "$T/forced"
+mkdir -p "$T/forced/hooks"
+cp "$G/evals/skills-hard/forced-eval.sh" "$T/forced/hooks/"
+cat > "$T/forced/hooks/hooks.json" <<'J'
+{"hooks": {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/hooks/forced-eval.sh"}]}]}}
+J
+rc=0
+for arm in plain forced; do
+  mkdir -p "$out/$arm"
+  claude plugin eval "$T/$arm" --trust-plugin --ablation none --no-publish --runs "$runs" --concurrency 4 \
+    --max-cost-usd "$cap" --threshold 1 --output-dir "$out/$arm" --report "$out/$arm/report.html" "$@" || rc=$?
+done
+python3 - "$out" <<'PY'
+import json, sys, pathlib
+out = pathlib.Path(sys.argv[1])
+for arm in ("plain", "forced"):
+    f = out / arm / "aggregate-result.json"
+    if not f.exists():
+        print(f"{arm}: no result"); continue
+    d = json.loads(f.read_text())
+    print(f"== {arm}  cost ${d.get('costUsd', 0):.2f}")
+    for c in d.get("cases", []):
+        print(f"  {c['name']:28} {c['aggregates']['score']:.2f}")
+PY
+echo "results: $out (exit $rc)"
