@@ -197,3 +197,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "I have 100$ subscription, and I have too many tokens to spare … sharpen whatever repository we have … I can spare huge amount of tokens for overnight work"
 - **After:** "Overnight, ≤40% of the weekly limit, no commits. First measure the ceiling (always-on tokens, last cuts). If a scout pass shows under 10% savings, stop and propose where the rest of the budget pays more. Done when inbox/night-<date>/REPORT.md has a before/after table and every check pass/fail."
 - **Why:** "too many tokens" invited spending, not a result. The night found a 5% gain; a stop rule would have redirected the budget after the scout instead of running all six tracks.
+
+### 2026-10-19 · compaction goal with no finish line
+- **Before:** "start working on compacting our gigabrain, so it stays thin but sharp as still nevertheless, so it consumes less tokens and less time."
+- **After:** "Compact gigabrain. Done when always-on context is under 3.5k tokens (`bin/budget.py`), trigger evals stay 9/9 and the process evals don't drop; CORE wording is off-limits. Hand me one script for anything you can't apply."
+- **Why:** "thin but sharp" is a direction, not a target. A number and a no-regression bar let Claude stop at the right point, and the "one script" ask is what closed the round in a single command.

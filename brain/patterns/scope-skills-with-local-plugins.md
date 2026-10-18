@@ -41,6 +41,15 @@ exactly the 10 prefixed ones with it. Trigger evals 9/9.
   skill X and run it" instead. Listing size was ruled out. Harness:
   `evals/skills-live/run.sh` (arms s11, s42, s42ctx), ~$12 for the study.
 
+- **Enable per stack, not by hand (2026-10-19).** `kit apply` writes each stack's plugins
+  (`kit/stacks.json` `plugins`) into `enabledPlugins` in settings.local.json; the next session
+  installs them by itself (scratch React+Docker repo: `plugin list` empty after apply, frontend +
+  deploy loaded after one session). Still read in place: `installed_plugins.json` records a
+  cache `installPath`, but no cache folder exists and `plugin list` says "Read from library/".
+  A reviewer claimed edits need a version bump; that was wrong, so check the folder before
+  believing it. Moving skills out of global takes them away from every repo at once, so run
+  `kit apply --all` on each machine right after.
+
 **How to apply:** a newly absorbed skill outside the daily stacks goes into a
 `library/plugins.json` bundle. Rerun `bin/eval-skills` after editing a global
 skill's description.

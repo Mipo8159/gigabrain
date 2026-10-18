@@ -16,7 +16,9 @@ boundary, and it saves the failed attempts. 2026-10-17: the same block hit
 `brain/CORE.md` (loaded into every session), `global/hooks/coach.py` and the
 `permissions.deny` list. Make the script refuse unless every old line
 matches exactly once, make it idempotent, and dry-run it first with
-`HOME=$(mktemp -d)` on a copy of the settings.
+`HOME=$(mktemp -d)` on a copy of the settings. 2026-10-19: bundle every pending blocked
+step into one finalize script (pre-checks, apply, install, post-checks, optional `--commit`).
+Giga ran it with one `! bash …` and a 4-day round closed in a single step.
 
 **2. Where config is found (2026-10-02):**
 - A project agent with the same name **replaces** the global one.

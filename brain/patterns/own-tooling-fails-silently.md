@@ -23,7 +23,8 @@ caught any of them:
 - 2026-10-18: a generated `apply-blocked.py` ignored an unknown `--help` and
   applied every step for real, including `~/.claude/settings.json` (restored
   from backups). The same night a workflow agent reported a REPORT.md it had
-  never written to disk.
+  never written to disk. 2026-10-19: the finalize script's `git add -A` committed
+  the apply script's `*.bak-*` backups (now gitignored).
 
 **How to apply** (self-check before handover):
 - Check every subprocess's exit code, give it a timeout and `stdin`, and
@@ -35,6 +36,7 @@ caught any of them:
 - Counts are deduped by their real key (see [[reading-claude-transcripts]]).
 - A script that changes files refuses unknown flags (argparse) and treats
   `--help` as read-only; for Giga-run apply scripts, prefer dry-run by default.
+- A script that writes backups inside a repo gitignores them first.
 - Before reporting a file as written (yours or a subagent's), `ls` it.
 - Tests cover the failure paths, proven by a mutation run (break the code and
   watch the test fail).
