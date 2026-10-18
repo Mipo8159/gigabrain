@@ -20,6 +20,10 @@ caught any of them:
   and one malformed log row broke every page.
 - 2026-10-17: usage-report over-counted tokens 2–3x, and bin/proof had no
   subprocess timeout or stdin and crashed on binary output.
+- 2026-10-18: a generated `apply-blocked.py` ignored an unknown `--help` and
+  applied every step for real, including `~/.claude/settings.json` (restored
+  from backups). The same night a workflow agent reported a REPORT.md it had
+  never written to disk.
 
 **How to apply** (self-check before handover):
 - Check every subprocess's exit code, give it a timeout and `stdin`, and
@@ -29,6 +33,9 @@ caught any of them:
   are atomic (temp file + rename) and appends are locked.
 - One bad input row is skipped and counted. It doesn't break the whole run.
 - Counts are deduped by their real key (see [[reading-claude-transcripts]]).
+- A script that changes files refuses unknown flags (argparse) and treats
+  `--help` as read-only; for Giga-run apply scripts, prefer dry-run by default.
+- Before reporting a file as written (yours or a subagent's), `ls` it.
 - Tests cover the failure paths, proven by a mutation run (break the code and
   watch the test fail).
 
