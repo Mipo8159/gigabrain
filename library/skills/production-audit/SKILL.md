@@ -204,4 +204,4 @@ Next action: Want me to patch webhook idempotency first?
 
 ## See Also
 
-- Skills: `deployment-patterns`, `e2e-testing`, `secure-coding`, `verification-loop`
+- Skills: `deploy:deployment-patterns`, `frontend:e2e-testing`, `secure-coding`, `verification-loop`

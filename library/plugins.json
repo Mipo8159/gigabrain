@@ -33,7 +33,7 @@
       ]
     },
     "knowledge": {
-      "description": "Backend/infra stack knowledge (opt-in): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling, Go, FastAPI, Kubernetes. Retired from global 2026-10-14 (no eval lift over vanilla) and 2026-10-18 (off-stack).",
+      "description": "Backend stack knowledge with no measured lift over vanilla Claude (opt-in, no stack enables it): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14.",
       "skills": [
         "postgres-patterns",
         "redis-patterns",
@@ -41,11 +41,62 @@
         "backend-patterns",
         "database-migrations",
         "api-design",
-        "error-handling",
+        "error-handling"
+      ]
+    },
+    "frontend": {
+      "description": "React and UI work: React patterns, performance and testing, Playwright E2E, accessibility, interface polish. Enabled by kit for the react stack.",
+      "skills": [
+        "react-patterns",
+        "react-performance",
+        "react-testing",
+        "e2e-testing",
+        "accessibility",
+        "make-interfaces-feel-better"
+      ]
+    },
+    "python": {
+      "description": "Python work: idioms, pytest, FastAPI. Enabled by kit for the python and fastapi stacks.",
+      "skills": [
+        "python-patterns",
+        "python-testing",
+        "fastapi-patterns"
+      ]
+    },
+    "go": {
+      "description": "Go work: idiomatic patterns and testing. Enabled by kit for the go stack.",
+      "skills": [
         "golang-patterns",
-        "golang-testing",
-        "fastapi-patterns",
+        "golang-testing"
+      ]
+    },
+    "deploy": {
+      "description": "Containers and deployment: Docker/Compose, CI/CD and rollout patterns, Kubernetes. Enabled by kit for the docker, k8s, aws and terraform stacks.",
+      "skills": [
+        "docker-patterns",
+        "deployment-patterns",
         "kubernetes-patterns"
+      ]
+    },
+    "mcp": {
+      "description": "Building MCP servers. Enabled by kit for the mcp stack.",
+      "skills": [
+        "mcp-server-patterns"
+      ]
+    },
+    "video": {
+      "description": "Video: Remotion, editing workflows, VideoDB, Playwright UI demo recordings. Enabled by kit for the remotion stack.",
+      "skills": [
+        "remotion-video-creation",
+        "video-editing",
+        "videodb",
+        "ui-demo"
+      ]
+    },
+    "email": {
+      "description": "Transactional email via Mailtrap. Enabled by kit for the email stack.",
+      "skills": [
+        "mailtrap-email-integration"
       ]
     }
   }

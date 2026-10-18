@@ -9,3 +9,5 @@ evals/**/.out/
 evals/skills/results/
 evals/knowledge/results/
 evals/skills-live/results/
+# apply-script backups (2026-10-19: two were committed by accident)
+*.bak-20*

@@ -288,4 +288,4 @@ models()
 
 ## Related Skills
 
-- Skills: `content:content-engine`, `video-editing`
+- Skills: `content:content-engine`, `video:video-editing`

@@ -14,7 +14,9 @@ Per project it owns two files, both git-excluded via .git/info/exclude:
   .claude/gigabrain.json        the request: kind, memory, stack include/exclude, hook profile
                                  (edit it, then `kit apply <repo>` again)
   .claude/gigabrain.state.json  what apply wrote, with hashes (for doctor / remove)
-and writes: tagged permission entries + autoMemoryDirectory into .claude/settings.local.json
+and writes: tagged permission entries, the stacks' opt-in plugins (enabledPlugins; set one to
+false to opt out, since a deleted key comes back on the next apply) and
+autoMemoryDirectory into .claude/settings.local.json
 (personal, never the team's settings.json), and a CLAUDE.md scaffold only if none exists
 (the scaffold is yours afterwards; kit never rewrites it).
 Design adapted from ECC's install manifests / ownership guard / doctor (MIT).
@@ -212,20 +214,22 @@ def detect(repo):
 
 def selection(stack_names):
     man = stacks_manifest()
-    skills, checklists, ask, notes = [], [], [], []
+    skills, checklists, ask, notes, plugins = [], [], [], [], []
     for n in stack_names:
         st = man["stacks"].get(n)
         if not st:
             continue
         skills += st.get("skills", [])
+        plugins += st.get("plugins", [])
         checklists += st.get("checklists", [])
         ask += st.get("permissions", {}).get("ask", [])
         if st.get("notes"):
             notes.append(f"{n}: {st['notes']}")
     skills += man["always"]["skills"]
     checklists += man["always"]["checklists"]
+    plugins += man["always"].get("plugins", [])
     uniq = lambda xs: list(dict.fromkeys(xs))
-    return uniq(skills), uniq(checklists), uniq(ask), notes
+    return uniq(skills), uniq(checklists), uniq(ask), notes, [f"{p}@gigabrain" for p in uniq(plugins)]
 
 
 # ---------- registry ----------
@@ -268,7 +272,7 @@ def default_memory(repo, kind):
     return "newEra" if "newEra" in repo.parts else repo.name
 
 
-def scaffold(repo, det, stacks, skills, checklists, notes):
+def scaffold(repo, det, stacks, skills, checklists, notes, plugins=()):
     c = det["commands"]
     cmd_lines = "\n".join(f"- {k}: `{v}`" for k, v in c.items()) or "- TODO: no build/test commands detected"
     done = c.get("test") or "TODO"
@@ -285,7 +289,7 @@ TODO: two lines. What it does, who uses it, where it runs.
 
 ## Stack
 {", ".join(stacks) or "not detected"}.
-Library skills that apply here: {", ".join(f"`{s}`" for s in skills)}.
+Library skills that apply here: {", ".join(f"`{s}`" for s in skills)}{"; opt-in plugins enabled by kit: " + ", ".join(f"`{p}@gigabrain`" for p in plugins) if plugins else ""}.
 The `reviewer` agent loads: {", ".join(f"`{x}.md`" for x in checklists)}.
 {chr(10).join("- " + n for n in notes)}
 
@@ -331,7 +335,7 @@ def plan(repo, args):
     stacks = [s for s in list(det["stacks"]) + req["include_stacks"] if s not in req["exclude_stacks"]]
     stacks = list(dict.fromkeys(stacks))
     req["detected"] = sorted(det["stacks"])
-    skills, checklists, ask, notes = selection(stacks)
+    skills, checklists, ask, notes, plugins = selection(stacks)
     for pkg_dir, s in det["risky_scripts"]:
         pm = package_manager(repo if pkg_dir == "." else repo / pkg_dir) or "npm"
         ask.append(f"Bash(*run {s}*)")  # npm run x, pnpm run x, yarn run x, npm --prefix api run x, pnpm -F api run x
@@ -350,6 +354,13 @@ def plan(repo, args):
     add_ask = [a for a in ask if a not in have and a not in allow_deny]
     keep_ask = [a for a in ask if a in old_owned and a in have]
     drop_ask = sorted(old_owned - set(ask))  # stack no longer selected
+    # 2026-10-19: opt-in library plugins per stack (enabledPlugins). A key the user already set,
+    # true or false, is theirs; kit only adds, keeps and drops the ones it recorded.
+    have_pl = local.get("enabledPlugins") or {}
+    old_pl = set(next((o.get("plugins", []) for o in old_state.get("ops", []) if o["kind"] == "settings"), []))
+    add_pl = [p for p in plugins if p not in have_pl]
+    keep_pl = [p for p in plugins if p in old_pl and have_pl.get(p) is True]
+    drop_pl = sorted(p for p in old_pl - set(plugins) if have_pl.get(p) is True)
     mem = str(MEMORY_ROOT / req["memory"]) if req["memory"] else None
     cur_mem = local.get("autoMemoryDirectory")
     mem_op = None
@@ -368,13 +379,14 @@ def plan(repo, args):
         else:
             print(f"warn {LOCAL}: client repo memory points into gigabrain ({cur_mem}); fix by hand: client facts stay local")
     ops.append({"kind": "settings", "path": LOCAL, "ask": sorted(set(add_ask + keep_ask)), "add": add_ask,
-                "drop": drop_ask, "memory": mem_op, "unset_memory": unset_mem,
+                "drop": drop_ask, "plugins": sorted(set(add_pl + keep_pl)), "plugins_add": add_pl,
+                "plugins_drop": drop_pl, "memory": mem_op, "unset_memory": unset_mem,
                 "memory_owned": (bool(mem_op) or was_owned) and not unset_mem})
     # 2. CLAUDE.md scaffold, only when none exists (then it is the user's)
     prev_scaffold = next((o for o in old_state.get("ops", []) if o["kind"] == "scaffold"), None)
     if not det["has_claude_md"]:
         ops.append({"kind": "scaffold", "path": "CLAUDE.md",
-                    "content": scaffold(repo, det, stacks, skills, checklists, notes)})
+                    "content": scaffold(repo, det, stacks, skills, checklists, notes, plugins)})
     elif prev_scaffold:
         ops.append({"kind": "scaffold-kept", "path": "CLAUDE.md", "sha256": prev_scaffold.get("sha256")})
     # 3. git exclude for kit files (and the scaffold in client repos)
@@ -387,6 +399,7 @@ def plan(repo, args):
 
 def apply(repo, args, dry):
     repo, det, req, stacks, skills, checklists, ops = plan(repo, args)
+    plugins = next((o["plugins"] for o in ops if o["kind"] == "settings"), [])
     tag = "plan" if dry else "apply"
     print(f"{tag} {repo}  kind={req['kind']} memory={req['memory'] or 'local'} hooks={req['hooks']}")
     print(f"  stacks: {', '.join(stacks) or '-'}" + (f"  (excluded: {', '.join(req['exclude_stacks'])})" if req['exclude_stacks'] else ""))
@@ -407,16 +420,27 @@ def apply(repo, args, dry):
                 del perms["ask"]
             if not perms:
                 local.pop("permissions")
+            if op["plugins_add"] or op["plugins_drop"]:
+                pl = local.get("enabledPlugins") or {}
+                for x in op["plugins_drop"]:
+                    pl.pop(x, None)
+                for x in op["plugins_add"]:
+                    pl[x] = True
+                local["enabledPlugins"] = pl
+                if not pl:
+                    local.pop("enabledPlugins")
             if op.get("unset_memory"):
                 local.pop("autoMemoryDirectory", None)
             if op["memory"]:
                 local["autoMemoryDirectory"] = op["memory"]
                 if not dry:
                     pathlib.Path(op["memory"]).mkdir(parents=True, exist_ok=True)
-            print(f"  {op['path']}: +{len(op['add'])} ask rule(s), -{len(op['drop'])} stale"
+            print(f"  {op['path']}: +{len(op['add'])} ask rule(s), -{len(op['drop'])} stale, "
+                  f"plugins +{len(op['plugins_add'])} -{len(op['plugins_drop'])}"
                   + (f", memory -> {op['memory']}" if op["memory"] else ""))
             dump_json(p, local, dry)
-            state_ops.append({"kind": "settings", "path": op["path"], "ask": op["ask"], "memory_owned": op["memory_owned"]})
+            state_ops.append({"kind": "settings", "path": op["path"], "ask": op["ask"], "plugins": op["plugins"],
+                              "memory_owned": op["memory_owned"]})
         elif op["kind"] == "scaffold":
             print(f"  CLAUDE.md: scaffold written (no CLAUDE.md existed)")
             if not dry:
@@ -440,7 +464,7 @@ def apply(repo, args, dry):
             state_ops.append({"kind": "exclude", "path": str(ex), "patterns": added})
     if det["risky_scripts"]:
         print(f"  ask-first scripts: {', '.join(f'{p}/{s}' if p != '.' else s for p, s in det['risky_scripts'])}")
-    print(f"  library: {len(skills)} skills, checklists: {', '.join(checklists)}")
+    print(f"  library: {len(skills)} skills, plugins: {', '.join(plugins) or '-'}, checklists: {', '.join(checklists)}")
     dump_json(repo / REQ, req, dry)
     dump_json(repo / STATE, {"version": 1, "kit_commit": kit_commit(), "applied": TODAY, "stacks": stacks,
                              "skills": skills, "checklists": checklists, "ops": state_ops}, dry)
@@ -496,6 +520,10 @@ def doctor_global(r):
     opt_in = sorted({s for b in list(man["stacks"].values()) + [man["always"]] for s in b.get("skills", [])} & plug_s)
     if opt_in:  # stacks.json may only name global skills; a plugin skill would not load there
         r.err(f"kit/stacks.json names opt-in plugin skills (library/plugins.json): {', '.join(opt_in)}")
+    known_pl = set(load_json(G / "library/plugins.json", {}).get("plugins", {}))
+    bad_pl = sorted({p for b in list(man["stacks"].values()) + [man["always"]] for p in b.get("plugins", [])} - known_pl)
+    if bad_pl:
+        r.err(f"kit/stacks.json names plugins missing from library/plugins.json: {', '.join(bad_pl)}")
     mp = (load_json(home / "plugins/known_marketplaces.json", {}).get("gigabrain") or {}).get("source", {}).get("path")
     (r.ok("plugin marketplace 'gigabrain' -> library/") if mp == str(G / "library") else
      r.warn(f"plugin marketplace 'gigabrain' {'points at ' + mp if mp else 'not registered'} (run bin/install.sh)"))
@@ -535,6 +563,11 @@ def doctor_project(repo, r):
             missing = [a for a in op.get("ask", []) if a not in local.get("permissions", {}).get("ask", [])]
             (r.warn(f"{len(missing)} managed ask rule(s) removed by hand: {missing[:3]}") if missing
              else r.ok(f"{len(op.get('ask', []))} managed ask rules in place"))
+            off = [x for x in op.get("plugins", []) if (local.get("enabledPlugins") or {}).get(x) is not True]
+            if off:
+                r.warn(f"managed plugin(s) disabled or removed by hand: {', '.join(off)}")
+            elif op.get("plugins"):
+                r.ok(f"plugins: {', '.join(op['plugins'])}")
         if op["kind"] == "scaffold":
             p = repo / "CLAUDE.md"
             if not p.exists():
@@ -620,9 +653,15 @@ def remove(repo, dry):
                 perms.pop("ask")
             if not perms:
                 local.pop("permissions", None)
+            pl = local.get("enabledPlugins") or {}
+            gone_pl = [x for x in op.get("plugins", []) if pl.get(x) is True]
+            for x in gone_pl:
+                pl.pop(x)
+            if gone_pl and not pl:
+                local.pop("enabledPlugins")
             if op.get("memory_owned"):
                 local.pop("autoMemoryDirectory", None)
-            print(f"  {LOCAL}: -{len(op.get('ask', []))} ask rule(s)" + (", memory link removed" if op.get("memory_owned") else ""))
+            print(f"  {LOCAL}: -{len(op.get('ask', []))} ask rule(s), -{len(gone_pl)} plugin(s)" + (", memory link removed" if op.get("memory_owned") else ""))
             if not dry:
                 (dump_json(repo / LOCAL, local, False) if local else (repo / LOCAL).unlink(missing_ok=True))
         elif op["kind"] == "scaffold":
@@ -689,6 +728,11 @@ def main(argv):
         if not targets:
             sys.exit("kit apply <repo> | --all")
         for t in targets:
+            # 2026-10-19: the registry is shared by the Mac and the Linux box; --all stopped at the
+            # first repo from the other machine (plan() exits on a missing dir). Skip those, like doctor.
+            if pos[:1] == ["--all"] and not pathlib.Path(t).is_dir():
+                print(f"skip {t}: not on this machine")
+                continue
             apply(t, opts, dry)
         return 0
     if cmd == "doctor":

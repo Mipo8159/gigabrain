@@ -1,0 +1,5 @@
+{
+  "name": "email",
+  "description": "Transactional email via Mailtrap. Enabled by kit for the email stack.",
+  "version": "1.0.0"
+}

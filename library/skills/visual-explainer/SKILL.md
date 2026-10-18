@@ -114,7 +114,7 @@ recaps, decks      Editorial     Instrument Serif + Sans           the domain's 
 When the user asks for an animated explainer or a video:
 
 - **Default:** an HTML scene player. SVG scenes with play, pause, scrub, and captions, all in one file. See `references/diagrams.md`.
-- **Real video (3Blue1Brown style):** first check which tools are installed. Use Manim (skill `media:manim-video`), Remotion (skill `remotion-video-creation`), or Motion Canvas for visuals and ffmpeg to mux. For narration, use ElevenLabs if the user gives a key. If not, use local TTS (macOS `say`, Piper, Kokoro). Do not install tools or spend API credit without asking.
+- **Real video (3Blue1Brown style):** first check which tools are installed. Use Manim (skill `media:manim-video`), Remotion (skill `video:remotion-video-creation`), or Motion Canvas for visuals and ffmpeg to mux. For narration, use ElevenLabs if the user gives a key. If not, use local TTS (macOS `say`, Piper, Kokoro). Do not install tools or spend API credit without asking.
 - **Script first.** One claim per scene, a sentence or two of narration, and the picture changes with every sentence.
 
 ## Slides and PPTX

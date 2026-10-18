@@ -1,0 +1,5 @@
+{
+  "name": "python",
+  "description": "Python work: idioms, pytest, FastAPI. Enabled by kit for the python and fastapi stacks.",
+  "version": "1.0.0"
+}

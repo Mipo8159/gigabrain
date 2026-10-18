@@ -41,7 +41,8 @@ old one has to earn its place or leave.
   fixing, reproduce (expected vs actual, guess, smallest fix; skill
   `debug-protocol`). Finish by showing the proof. A fix is *plausible* until a
   rerun proves it; only then say "confirmed" (hence the `verifier` agent).
-- **Plan before changing several files.** Show the plan, then build.
+- **Plan before changing several files.** Enter plan mode (or show the plan)
+  before the first edit, then build. (As plain text the rule fired 0/8 headless.)
 - **Check versions against live docs** (context7 or the web), not memory.
 - **Second pass before handover.** If a diff is over ~100 lines, or touches
   auth, money, data or infrastructure, run the `reviewer` subagent **in the
@@ -76,7 +77,9 @@ them:
 
 - **Run `/retro` at the end of every meaningful session.** It updates the
   brain, coaching focus, scorecard and journal, then commits and pushes
-  gigabrain. If a session is ending with no retro, suggest it once.
+  gigabrain. When Giga signs off or asks what's left before ending, load
+  the `retro` skill and run it: its commit and push are pre-approved, and
+  it checks `sessions.jsonl` itself. Don't just suggest `/retro`.
 - `/curate` is the weekly deep-clean: prune, merge, re-check old entries.
 - New project: `/onboard-project` writes its CLAUDE.md and links its memory.
 

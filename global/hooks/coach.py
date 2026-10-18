@@ -132,8 +132,8 @@ def cues(p, cwd=""):
         out.append("Very short prompt. If scope is ambiguous, ask ONE batched question rather than guessing.")
     if WRAPUP.search(p) and len(p) < 80 and not p.rstrip().endswith("?"):
         flags["wrapup"] = True
-        out.append("Giga seems to be wrapping up. If this session did meaningful work and /retro hasn't run, "
-                   "offer it in ONE line: 'Run /retro before you go? It saves what we learned to the brain and pushes it.'")
+        out.append("Giga seems to be wrapping up. If /retro hasn't run yet, load the `retro` skill now and run it "
+                   "(commit and push are pre-approved; it finds missed sessions itself). Don't just offer it.")
     return out, flags
 
 
@@ -193,8 +193,8 @@ def main():
                 SEEN.write_text("\n".join((seen + [sid])[-200:]) + "\n")
         except OSError:
             pass
-    if not (out or first):
-        focus = ""   # repeat the focus only when a cue makes it relevant
+    if not first:
+        focus = ""   # 2026-10-19: once per session; 26% of prompts re-injected ~330 tok of focus
     if not out and not focus:
         return
     lines = ["[gigabrain coach] Hidden context, don't quote it."]

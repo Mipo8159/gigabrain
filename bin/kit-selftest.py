@@ -210,14 +210,43 @@ def kit_cases():
     s = json.loads(local.read_text())
     check("exclude_stacks removes exactly that stack's rules",
           not any("docker" in a for a in s["permissions"]["ask"]) and "Bash(mine)" in s["permissions"]["ask"])
+    # 2026-10-19: stack plugins land in enabledPlugins (docker -> deploy); a user's own key, true or false, wins
+    req["exclude_stacks"] = []
+    (repo / ".claude/gigabrain.json").write_text(json.dumps(req))
+    s = json.loads(local.read_text())
+    s["enabledPlugins"] = {"mine@x": True, "deploy@gigabrain": False}
+    local.write_text(json.dumps(s))
+    kit("apply", str(repo))
+    s = json.loads(local.read_text())
+    check("plugins: user's false for a stack plugin is kept", s["enabledPlugins"] == {"mine@x": True, "deploy@gigabrain": False})
+    s["enabledPlugins"].pop("deploy@gigabrain")
+    local.write_text(json.dumps(s))
+    kit("apply", str(repo))
+    s = json.loads(local.read_text())
+    check("plugins: docker stack enables deploy@gigabrain", s["enabledPlugins"].get("deploy@gigabrain") is True
+          and s["enabledPlugins"].get("mine@x") is True)
+    req["exclude_stacks"] = ["docker"]
+    (repo / ".claude/gigabrain.json").write_text(json.dumps(req))
+    kit("apply", str(repo))
+    s = json.loads(local.read_text())
+    check("plugins: excluded stack drops only kit's plugin", s["enabledPlugins"] == {"mine@x": True})
+    req["exclude_stacks"] = []
+    (repo / ".claude/gigabrain.json").write_text(json.dumps(req))
+    kit("apply", str(repo))
     doc = kit("doctor", str(repo))
     check("doctor: flags the untouched scaffold", "untouched scaffold" in doc.stdout)
+    check("doctor: lists managed plugins", "plugins: deploy@gigabrain" in doc.stdout)
     (repo / "CLAUDE.md").write_text((repo / "CLAUDE.md").read_text().replace("TODO", "done"))
+    s = json.loads(local.read_text())
+    s["enabledPlugins"]["deploy@gigabrain"] = False  # the user turned kit's plugin off by hand
+    local.write_text(json.dumps(s))
     kit("remove", str(repo))
     s = json.loads(local.read_text())
     check("remove: only kit rules removed; user rule, env and edited CLAUDE.md kept",
           s["permissions"]["ask"] == ["Bash(mine)"] and s["env"] == {"X": "1"} and (repo / "CLAUDE.md").exists()
           and "autoMemoryDirectory" not in s)
+    check("remove: kit's plugins removed, user's plugin and user's later false kept",
+          s.get("enabledPlugins") == {"mine@x": True, "deploy@gigabrain": False})
     check("remove: kit files and registry entry gone", not (repo / ".claude/gigabrain.json").exists()
           and str(repo) not in json.loads((TMP / "projects.json").read_text())["projects"])
     excl = (repo / ".git/info/exclude").read_text()
@@ -312,6 +341,34 @@ def kit_cases():
     r = subprocess.run([sys.executable, str(G / "bin/kit"), "detect", "--json"], capture_output=True, text=True,
                        env=ENV, cwd=str(prepo))
     check("detect --json without a path uses .", r.returncode == 0 and json.loads(r.stdout)["repo"] == str(prepo))
+    # 2026-10-19 (review): plugin ownership edge cases
+    lrepo = TMP / "legacy-react"
+    (lrepo / ".claude").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(lrepo)], check=True)
+    (lrepo / "package.json").write_text(json.dumps({"dependencies": {"react": "19"}}))
+    (lrepo / "Dockerfile").write_text("FROM node\n")
+    ll = lrepo / ".claude/settings.local.json"
+    ll.write_text(json.dumps({"enabledPlugins": None}))
+    r = kit("apply", str(lrepo), "--kind", "lab", "--memory", "selftest-mem")
+    check("plugins: enabledPlugins null is treated as empty", r.returncode == 0
+          and json.loads(ll.read_text())["enabledPlugins"] == {"frontend@gigabrain": True, "deploy@gigabrain": True})
+    stf = lrepo / ".claude/gigabrain.state.json"
+    st = json.loads(stf.read_text())
+    for o in st["ops"]:
+        o.pop("plugins", None)  # state written before 2026-10-19 had no plugins key
+    stf.write_text(json.dumps(st))
+    ll.write_text(json.dumps({"enabledPlugins": {"frontend@gigabrain": True}}))  # user's own, set before kit
+    kit("apply", str(lrepo))
+    check("plugins: legacy state upgrades (adds only the missing plugin)",
+          json.loads(ll.read_text())["enabledPlugins"] == {"frontend@gigabrain": True, "deploy@gigabrain": True})
+    kit("remove", str(lrepo))
+    check("plugins: user's own true for a stack plugin survives remove",
+          json.loads(ll.read_text()).get("enabledPlugins") == {"frontend@gigabrain": True})
+    reg = json.loads((TMP / "projects.json").read_text())
+    reg["projects"]["/nonexistent/other-machine/repo"] = {"kind": "lab", "memory": None, "applied": "2026-01-01"}
+    (TMP / "projects.json").write_text(json.dumps(reg))
+    r = kit("apply", "--all", "--dry-run")
+    check("apply --all skips repos from another machine", r.returncode == 0 and "not on this machine" in r.stdout)
     (G / "memory" / "selftest-mem").exists() and (G / "memory" / "selftest-mem").rmdir()
 
 

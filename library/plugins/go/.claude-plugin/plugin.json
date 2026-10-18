@@ -1,0 +1,5 @@
+{
+  "name": "go",
+  "description": "Go work: idiomatic patterns and testing. Enabled by kit for the go stack.",
+  "version": "1.0.0"
+}

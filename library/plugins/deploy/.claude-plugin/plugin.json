@@ -1,0 +1,5 @@
+{
+  "name": "deploy",
+  "description": "Containers and deployment: Docker/Compose, CI/CD and rollout patterns, Kubernetes. Enabled by kit for the docker, k8s, aws and terraform stacks.",
+  "version": "1.0.0"
+}

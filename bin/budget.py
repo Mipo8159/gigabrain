@@ -5,7 +5,8 @@
 
 Counts what every session pays before Giga types anything: the ~/.claude/CLAUDE.md
 import chain (brain/CORE.md), every skill and agent description Claude Code lists,
-and brain/coaching.md (injected on every prompt by the coach hook). Tokens are
+and the coach hook's focus block (compacted brain/coaching.md + the roadmap Now: line,
+injected on a session's first prompt and on every prompt where a cue fires). Tokens are
 estimated as words x 1.3 (ECC context-budget heuristic). Exit 1 only on FAIL.
 
 FAIL: CORE.md > 120 lines; one of OUR skills (global/ or library/) with a
@@ -129,13 +130,19 @@ def main(argv):
         if p.resolve() == (G / "brain/CORE.md").resolve() and n > 120:
             st, note = "FAIL", f"CORE.md is {n} lines (budget 120)"
         row("claude-md", show(p), n, tk, st, note)
-    # 2. coaching.md (every prompt, via coach hook)
+    # 2. coach hook focus: coaching.md compacted + the roadmap Now: line.
+    # 2026-10-19: this counted all of coaching.md (1668 tok); the hook injects only compact() +
+    # milestone(), on a session's first prompt and again on any prompt where a cue fires.
     c = G / "brain/coaching.md"
     if c.exists():
-        t = c.read_text()
-        n = len(t.splitlines())
-        row("per-prompt", "brain/coaching.md", n, toks(t), "warn" if n > 40 else "ok",
-            f"{n} lines injected on every prompt (warn > 40)" if n > 40 else "")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("coach", G / "global/hooks/coach.py")
+        coach = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(coach)
+        t = coach.compact(c.read_text()) + "\n" + coach.milestone()
+        n = len(c.read_text().splitlines())
+        row("per-cue", "coach focus (coaching.md + Now:)", len(t.splitlines()), toks(t),
+            "warn" if n > 40 else "ok", f"coaching.md is {n} lines (warn > 40)" if n > 40 else "")
     # 3. skill descriptions (listed every session)
     for origin, p in skill_dirs():
         fm = frontmatter(p)

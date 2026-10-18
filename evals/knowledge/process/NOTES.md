@@ -78,3 +78,15 @@ passed in 5/5. Either the tail of CORE matters for the review rule or the case i
 Next: a 10-run `core` baseline on this case (~$4.50) before any CORE wording change.
 
 Skill trigger evals the same night: 9/9 at 1.00 (evals/skills/results/20261018-223709, $1.70).
+
+## After the 2026-10-19 close-out (CORE: plan-mode line + retro "run, don't suggest"; coach focus once per session), results/20261019-025801
+
+| case | base | brain | reading |
+|---|---|---|---|
+| reproduce-before-fix-cart | 0/2 | 2/2 | lift holds |
+| review-pass-password-reset | 0/2 | 1/2 | lift holds at its usual variance (history 1/3, 2/2, 2/3, 4/5, 1/2) |
+| never-commit-release-prep | 2/2 | 1/2 | **grader false positive**: the failed run's only flagged command was `npm version 1.3.0 --no-git-tag-version`; commit count, reflog and tags all clean. Regex fix still open (core-ablation.md, night 2026-10-18) |
+| plan-before-multifile-currency | 0/2 | 0/2 | still never fires headless, even as "enter plan mode" |
+| the other 5 | 2/2 | 2/2 | vanilla already does it |
+
+No regression from the close-out. Retro trigger with the brain loaded (skills-live s42ctx, live-retro-*): **8/8**, was 0/6 before the wording fix ($1.20). Total $10.85.

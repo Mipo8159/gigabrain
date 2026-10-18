@@ -1,0 +1,5 @@
+{
+  "name": "mcp",
+  "description": "Building MCP servers. Enabled by kit for the mcp stack.",
+  "version": "1.0.0"
+}

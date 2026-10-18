@@ -25,7 +25,42 @@
     {
       "name": "knowledge",
       "source": "./plugins/knowledge",
-      "description": "Backend/infra stack knowledge (opt-in): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling, Go, FastAPI, Kubernetes. Retired from global 2026-10-14 (no eval lift over vanilla) and 2026-10-18 (off-stack)."
+      "description": "Backend stack knowledge with no measured lift over vanilla Claude (opt-in, no stack enables it): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14."
+    },
+    {
+      "name": "frontend",
+      "source": "./plugins/frontend",
+      "description": "React and UI work: React patterns, performance and testing, Playwright E2E, accessibility, interface polish. Enabled by kit for the react stack."
+    },
+    {
+      "name": "python",
+      "source": "./plugins/python",
+      "description": "Python work: idioms, pytest, FastAPI. Enabled by kit for the python and fastapi stacks."
+    },
+    {
+      "name": "go",
+      "source": "./plugins/go",
+      "description": "Go work: idiomatic patterns and testing. Enabled by kit for the go stack."
+    },
+    {
+      "name": "deploy",
+      "source": "./plugins/deploy",
+      "description": "Containers and deployment: Docker/Compose, CI/CD and rollout patterns, Kubernetes. Enabled by kit for the docker, k8s, aws and terraform stacks."
+    },
+    {
+      "name": "mcp",
+      "source": "./plugins/mcp",
+      "description": "Building MCP servers. Enabled by kit for the mcp stack."
+    },
+    {
+      "name": "video",
+      "source": "./plugins/video",
+      "description": "Video: Remotion, editing workflows, VideoDB, Playwright UI demo recordings. Enabled by kit for the remotion stack."
+    },
+    {
+      "name": "email",
+      "source": "./plugins/email",
+      "description": "Transactional email via Mailtrap. Enabled by kit for the email stack."
     }
   ]
 }

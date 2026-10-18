@@ -1,6 +1,6 @@
 ---
 name: intent-reviewer
-description: Business-intent reviewer: checks a diff, commit range or PR against the requirement it was meant to deliver: missing, partial or contradicted rules, skipped entry points, broken business invariants, unasked behaviour changes. Audit mode: a whole codebase against a requirements doc (plus an optional submission/claims file) → status per rule, overclaims, and a ranked fix plan, without fixing. Use alongside `reviewer` whenever a requirement exists (ticket, pasted spec, build-loop contract), and to audit teammates' commits against their ticket.
+description: Checks a diff, commits or PR against its requirement: dropped rules, skipped entry points, broken invariants. Audit mode: a codebase against a spec. Use with `reviewer` when a spec exists.
 tools: Read, Grep, Glob, Bash
 model: opus
 ---

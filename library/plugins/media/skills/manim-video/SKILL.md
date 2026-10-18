@@ -24,8 +24,8 @@ Use Manim for technical explainers where motion, structure, and clarity matter m
 
 - `manim` CLI for scene rendering
 - `ffmpeg` for post-processing if needed
-- `video-editing` for final assembly or polish
-- `remotion-video-creation` when the final package needs composited UI, captions, or additional motion layers
+- `video:video-editing` for final assembly or polish
+- `video:remotion-video-creation` when the final package needs composited UI, captions, or additional motion layers
 
 ## Default Output
 
@@ -89,4 +89,4 @@ Return:
 
 ## Related Skills
 
-- Skills: `content:content-engine`, `remotion-video-creation`, `video-editing`
+- Skills: `content:content-engine`, `video:remotion-video-creation`, `video:video-editing`

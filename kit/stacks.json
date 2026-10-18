@@ -64,16 +64,13 @@
         }
       ],
       "skills": [
-        "react-patterns",
-        "react-performance",
-        "react-testing",
-        "contract-first",
-        "e2e-testing",
-        "accessibility",
-        "make-interfaces-feel-better"
+        "contract-first"
       ],
       "checklists": [
         "react"
+      ],
+      "plugins": [
+        "frontend"
       ]
     },
     "python": {
@@ -91,10 +88,7 @@
           "file": "Pipfile"
         }
       ],
-      "skills": [
-        "python-patterns",
-        "python-testing"
-      ],
+      "skills": [],
       "checklists": [
         "python",
         "silent-failures"
@@ -103,7 +97,10 @@
         "ask": [
           "Bash(twine upload:*)"
         ]
-      }
+      },
+      "plugins": [
+        "python"
+      ]
     },
     "fastapi": {
       "indicators": [
@@ -122,7 +119,9 @@
       "checklists": [
         "python"
       ],
-      "notes": "FastAPI skills are in plugin knowledge: claude plugin install knowledge@gigabrain --scope local"
+      "plugins": [
+        "python"
+      ]
     },
     "go": {
       "indicators": [
@@ -135,7 +134,9 @@
         "go",
         "silent-failures"
       ],
-      "notes": "Go skills are in plugin knowledge: claude plugin install knowledge@gigabrain --scope local"
+      "plugins": [
+        "go"
+      ]
     },
     "postgres": {
       "indicators": [
@@ -297,7 +298,6 @@
         }
       ],
       "skills": [
-        "docker-patterns",
         "production-audit"
       ],
       "checklists": [
@@ -311,7 +311,10 @@
           "Bash(docker compose down -v*)",
           "Bash(docker compose down --volumes*)"
         ]
-      }
+      },
+      "plugins": [
+        "deploy"
+      ]
     },
     "k8s": {
       "indicators": [
@@ -333,7 +336,6 @@
         }
       ],
       "skills": [
-        "deployment-patterns",
         "production-audit"
       ],
       "checklists": [
@@ -350,7 +352,9 @@
           "Bash(helm uninstall:*)"
         ]
       },
-      "notes": "Kubernetes skills are in plugin knowledge: claude plugin install knowledge@gigabrain --scope local"
+      "plugins": [
+        "deploy"
+      ]
     },
     "aws": {
       "indicators": [
@@ -384,7 +388,6 @@
         }
       ],
       "skills": [
-        "deployment-patterns",
         "production-audit"
       ],
       "checklists": [
@@ -404,7 +407,10 @@
           "Bash(terraform destroy:*)"
         ]
       },
-      "notes": "AWS service guidance comes from the aws-core plugin skills (serverless, containers, messaging, iam)."
+      "notes": "AWS service guidance comes from the aws-core plugin skills (serverless, containers, messaging, iam).",
+      "plugins": [
+        "deploy"
+      ]
     },
     "terraform": {
       "indicators": [
@@ -416,7 +422,6 @@
         }
       ],
       "skills": [
-        "deployment-patterns",
         "production-audit"
       ],
       "checklists": [
@@ -428,7 +433,10 @@
           "Bash(terraform destroy:*)",
           "Bash(terraform state rm:*)"
         ]
-      }
+      },
+      "plugins": [
+        "deploy"
+      ]
     },
     "mcp": {
       "indicators": [
@@ -441,11 +449,12 @@
           "contains": "mcp"
         }
       ],
-      "skills": [
-        "mcp-server-patterns"
-      ],
+      "skills": [],
       "checklists": [
         "typescript"
+      ],
+      "plugins": [
+        "mcp"
       ]
     },
     "remotion": {
@@ -459,12 +468,12 @@
           "contains": "@remotion/"
         }
       ],
-      "skills": [
-        "remotion-video-creation",
-        "video-editing"
-      ],
+      "skills": [],
       "checklists": [
         "react"
+      ],
+      "plugins": [
+        "video"
       ]
     },
     "email": {
@@ -486,11 +495,12 @@
           "contains": "@sendgrid/"
         }
       ],
-      "skills": [
-        "mailtrap-email-integration"
-      ],
+      "skills": [],
       "checklists": [
         "security"
+      ],
+      "plugins": [
+        "email"
       ]
     }
   },

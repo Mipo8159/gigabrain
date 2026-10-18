@@ -1,0 +1,5 @@
+{
+  "name": "frontend",
+  "description": "React and UI work: React patterns, performance and testing, Playwright E2E, accessibility, interface polish. Enabled by kit for the react stack.",
+  "version": "1.0.0"
+}
