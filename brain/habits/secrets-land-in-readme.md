@@ -52,4 +52,10 @@ was luck, not process.
   it read only key names and lengths, and asked for rotation. The work got done
   without Claude ever seeing the value.
 
+- 2026-10-20 (client server access): a pasted credentials note with a root
+  password arrived twice (the new notes, then "what worked before"). Claude
+  never repeated the value, said it was now in the transcript, recommended
+  rotation, and moved access to key auth plus an SSH alias. The password was
+  never needed again.
+
 Related: [[giga-commits-are-mine-to-make]], [[test-guards-against-innocent-lookalikes]]

@@ -19,6 +19,15 @@ to few usefull steps" and "what are these folders, how do they work?".
 2026-10-02: "are you aware of our gigabrain repo? how have you onboarded?" and
 "are we using agents? in what way? or hooks and skills?". Both got an inventory
 table, a "not used, and why" list and an untested-caveat. Giga moved on.
+2026-10-20: networking ("how does the VPN put me inside, what is port
+forwarding") explained as one building analogy (street address = public IP,
+guard = firewall, tunnel = VPN, numbered windows = ports, a note on the guard's
+desk = port forward), closed with a who-reaches-what table. Giga: "wow, nice
+explanation", asked for more, then reasoned with it ("won't we need 22 for
+CI?"). For unfamiliar infrastructure, **one sustained analogy beats jargon**.
+Same session: a message drafted for the client's IT started at 8 questions;
+"are we not asking too much?" cut it to the 3 only they could answer. **A
+message for a third party carries only what they alone can answer.**
 
 **Why:** Giga checks their mental model before acting. A wall of prose gets
 sent back. A map without gaps hides the difference between "only instructed"

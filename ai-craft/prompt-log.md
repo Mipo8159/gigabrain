@@ -202,3 +202,7 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "start working on compacting our gigabrain, so it stays thin but sharp as still nevertheless, so it consumes less tokens and less time."
 - **After:** "Compact gigabrain. Done when always-on context is under 3.5k tokens (`bin/budget.py`), trigger evals stay 9/9 and the process evals don't drop; CORE wording is off-limits. Hand me one script for anything you can't apply."
 - **Why:** "thin but sharp" is a direction, not a target. A number and a no-regression bar let Claude stop at the right point, and the "one script" ask is what closed the round in a single command.
+### 2026-10-20: Infra goal stated late
+- **Before:** a pasted credentials note + "how to enter the server?", then the goal four prompts later.
+- **After:** "The client rebuilt their on-prem box for our sync service. Goal: anyone I give an API key downloads fresh data with the downloader exe, no VPN. Done when the exe on a non-VPN laptop pulls a bundle from https://<host>. Access: VPN up, login is in my secrets file (don't read it). First get me in, then tell me what blocks the goal."
+- **Why:** the goal decided everything that followed (no public SSH, self-hosted runner, one port). Stated first, it skips three explain-only rounds, and a secret named by location never lands in the transcript.

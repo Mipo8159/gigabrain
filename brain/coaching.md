@@ -2,6 +2,7 @@
   - Pattern (14 sessions, 2026-10-02 → 10-19): build and research prompts give goal, scope and often a time budget, but rarely a done-line, environment, access or stop rule. Claude supplies the proof and asks one batch; Giga answers it in one go every time (7 sessions running).
   - Costs it caused: env/token arrived 3 prompts late (10-02); expired SSO and a dropped VPN cost rounds (10-04/05); scope grew after the proof passed, so it ran twice (10-04/05); "…and more" left scope open (10-18); no stop rule let a 6-track night spend $54 for a 5% gain (10-18); "compact … thin but sharp" had no numeric target, so Claude picked the finish line (10-19).
   - Wins: "local only" named the environment up front (10-05); picking from a sized table worked as a done-line (10-17/18).
+  - 2026-10-20 (client deploy): opened with a paste and no goal; after the 💡 Giga adopted the suggested done-line verbatim and extended it with the end user's view, which then decided every design choice. Next: put it in the *first* prompt.
   - Full dated evidence: `git log -p brain/coaching.md` (condensed 2026-10-19).
   - Ask for: "Done when <what you'll see> on <environment>; covers: <every entry point>; access: <ready/expired>; allowed / ask first: …". Retire after 2 more sessions whose first prompt names environment and scope.
   - Next: start from the `Now:` line yourself ("Do the Now: step. Done when …").
