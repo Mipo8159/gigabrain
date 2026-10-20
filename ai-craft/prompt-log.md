@@ -211,3 +211,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "allright, now what is the most used repositories in last month?"
 - **After:** "Rank repos by PRs opened since 2026-09-20, for my team (3 named teammates) and org-wide, top 10 each. Done when I see one table per scope and the gaps (rate limits, search caps)."
 - **Why:** "used" could mean PRs, commits, deploys or traffic. Naming the metric, window and scope removes Claude's guess and makes the numbers comparable later.
+
+### 2026-10-20 · "run onboard everywhere we will be potentially working first."
+- **Before:** "run onboard everywhere we will be potentially working first."
+- **After:** "Run /onboard-project on the repos for my 3 tickets plus the team's 7 busiest. Client kind, one shared local memory, don't touch team CLAUDE.md files. Done when kit doctor is clean and git status is empty in each."
+- **Why:** "everywhere" meant 3, 12 or 48 repos; the three constraints were exactly the 4-question batch Claude had to ask. Naming them saves that round.

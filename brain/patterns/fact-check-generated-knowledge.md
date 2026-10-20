@@ -55,3 +55,10 @@ validates shape.
 the researcher checks them before handover.
 
 Related: [[shared-kit-and-checker-before-fan-out]], [[import-knowledge-on-demand]].
+
+**Also for docs Claude writes itself (2026-10-20):** a workspace CLAUDE.md drafted
+while exploration agents were still running carried two claims from memory, both
+wrong (an infra repo called "Terraform" was mostly CloudFormation; "every service
+has a compose -test target" held for 3 of 12). The agents' reports caught both.
+Write config/docs after the evidence lands, or mark each unverified line and
+re-check it when the reports arrive.
