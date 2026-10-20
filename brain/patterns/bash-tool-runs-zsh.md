@@ -21,5 +21,10 @@ splitting case, buried as a side note, so it didn't prevent these.
 - Globs passed to tools: always quote: `--include='*.ts'`, `find -name '*.md'`.
 - Optional matches: `ls dir/*.md(N)` or test with `[ -e ]` first.
 
-**Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument.
+**More evidence (2026-10-21):** `--include=*.js` aborted again, one day after
+this entry was written, so read the Signal line *before* typing a grep. New
+case: `echo ===` fails with `== not found`, because zsh expands a word
+starting with `=` into a command path (`=ls` → `/bin/ls`). Use `echo '---'`.
+
+**Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument, a word starting with `=`.
 **Next time:** quote the glob and inline the list before running, not after the error.

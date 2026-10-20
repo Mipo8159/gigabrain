@@ -44,5 +44,13 @@ failed first. Don't retry or work around the guard. Commit with
 run: `! git -C <gigabrain> push --set-upstream origin master` (plain `push`
 once the upstream exists).
 
+**When Giga does ask for commits in a team repo (2026-10-21):** leave the
+`Co-Authored-By: Claude` trailer out. GitHub turns it into a second (Claude)
+avatar on every commit, and Giga wants commits to look like the teammates'
+own. Keep the history small and final before review: 6 commits (3 of them
+fixes for a quality gate) had to be squashed to 3 and force-pushed. That cost a
+backup branch, a force-push and a CI rerun. Fold follow-up fixes into the
+commit they belong to *before* the first push, not after.
+
 Related: [[working-style-interview-then-autonomous-loop]],
 [[giga-wants-argued-recommendations]]
