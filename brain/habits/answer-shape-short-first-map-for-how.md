@@ -36,3 +36,8 @@ and "actually enforced or proven".
 **How to apply:** honest status words. "Tested by piping JSON, not yet fired
 live" beats "the hook protects you". Goes with
 [[giga-wants-argued-recommendations]].
+
+**Evidence (setup help):** 2026-10-19, an SSH-key fix: Giga asked for "simple steps"
+twice ("allright again, simple steps how to fix cleanly") after a long first answer.
+In a long first-day onboarding the same day, numbered blocks Giga could paste one at a
+time, each ending in one "reply done" checkpoint, kept ~40 prompts moving.
