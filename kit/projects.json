@@ -50,6 +50,71 @@
       "kind": "lab",
       "memory": "newEra",
       "applied": "2026-10-06"
+    },
+    "/Users/g.kvachakhia/projects/testlio/compose": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-19"
+    },
+    "/Users/g.kvachakhia/projects/testlio/serverless-services": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/infra": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/slack-integration-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/jira-plugin-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/integration-setup-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/integration-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/integration-setup-service-v2": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/build-service-v3": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/authorization-service-v2": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/storage-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/int-utils-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
+    },
+    "/Users/g.kvachakhia/projects/testlio/vsts-mapper-service": {
+      "kind": "client",
+      "memory": null,
+      "applied": "2026-10-20"
     }
   }
 }
