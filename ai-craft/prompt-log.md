@@ -206,3 +206,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** a pasted credentials note + "how to enter the server?", then the goal four prompts later.
 - **After:** "The client rebuilt their on-prem box for our sync service. Goal: anyone I give an API key downloads fresh data with the downloader exe, no VPN. Done when the exe on a non-VPN laptop pulls a bundle from https://<host>. Access: VPN up, login is in my secrets file (don't read it). First get me in, then tell me what blocks the goal."
 - **Why:** the goal decided everything that followed (no public SSH, self-hosted runner, one port). Stated first, it skips three explain-only rounds, and a secret named by location never lands in the transcript.
+
+### 2026-10-20 · "what is the most used repositories in last month?"
+- **Before:** "allright, now what is the most used repositories in last month?"
+- **After:** "Rank repos by PRs opened since 2026-09-20, for my team (3 named teammates) and org-wide, top 10 each. Done when I see one table per scope and the gaps (rate limits, search caps)."
+- **Why:** "used" could mean PRs, commits, deploys or traffic. Naming the metric, window and scope removes Claude's guess and makes the numbers comparable later.
