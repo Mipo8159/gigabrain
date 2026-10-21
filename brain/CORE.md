@@ -91,5 +91,7 @@ Add something only if **all four** are true:
 3. **Changes behaviour.** Knowing it would make the next session go differently.
 4. **New.** Not already here. If it overlaps, merge it in instead of adding a copy.
 
-Client-specific facts (clasico and others) never enter `brain/`. They stay in
-that project's own local memory.
+Client and employer facts (clasico and others) never enter any pushed file
+(`brain/`, `me/`, `labs.md`, evals). They stay in local project memory. Gigabrain
+gets only the generic lesson, written fresh with no names, so it never reads as
+"built from" any employer (Giga, 2026-10-21). Scorecard/journal rows: "work repo".
