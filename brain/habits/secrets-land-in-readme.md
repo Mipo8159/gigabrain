@@ -34,6 +34,14 @@ was luck, not process.
    the probe so it prints no secret, and hand Giga a one-line `! <command>`.
    Don't work around the hook.
 6. **If a value leaks anyway**, say so in the handover and recommend rotating it.
+6b. **A team script that echoes credentials** (assume-role helpers often do):
+   don't filter its output with `grep -v`. A blocklist only hides the formats
+   you know about. Wrap or replace it so the credential goes straight from the
+   producer into the file (`aws … | jq … > file`, `umask 077`), never through
+   echo or a shell variable, and print only a line you wrote yourself ("ok,
+   expires HH:MM"). To check a secret reached the clipboard or a file,
+   report its length. Mint test tokens *inside* the container that already
+   holds the signing key, straight into a `600` scratch file.
 7. Reviewer prompts at handover should include "scan READMEs / notes for secrets".
 
 **Evidence:**
@@ -58,4 +66,12 @@ was luck, not process.
   rotation, and moved access to key auth plus an SSH alias. The password was
   never needed again.
 
-Related: [[giga-commits-are-mine-to-make]], [[test-guards-against-innocent-lookalikes]]
+- 2026-10-22 (work local env): the team's AWS credentials helper echoed the
+  access key, secret and session token to stdout. Claude read the script
+  before Giga ran it and caught the leak. A `grep -v` filter got Giga through
+  that run. The lasting fix was a home-dir wrapper that pipes the credential
+  straight from aws through jq into the file. It prints only its own status
+  line and never edits the tracked script (that is step 6b). No value ever
+  reached the transcript.
+
+Related: [[giga-commits-are-mine-to-make]], [[local-only-edits-get-a-commit-guard]], [[bang-commands-are-copy-paste-ready]], [[test-guards-against-innocent-lookalikes]]

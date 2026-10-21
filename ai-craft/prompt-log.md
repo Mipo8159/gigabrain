@@ -221,3 +221,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "allright, up to the compose, I need it up and running, as best as In my abilities to utilize it as best as I possibly can"
 - **After:** "Bring the local compose stack up: my team's services + their deps + Kafka UI/Grafana. Done when up.sh status is green, every gateway route is non-502 and I can log in at :8080. Allowed: builds, single-container restarts, local DB fixes with a backup. Ask first: wipes, stopping the stack, AWS. Never commit."
 - **Why:** the done-line and the allowed/ask-first list were exactly what Claude had to ask, and later had to re-ask when "nothing remade" turned out to mean "no commits".
+
+### 2026-10-22 · "could you make sure it works end to end yourself?"
+- **Before:** "could you make sure it works end to end yourself?"
+- **After:** "Prove the local stack end to end: a smoke script (containers, gateway routes, UIs, kafka/dynamo/sqs/s3/redis) that exits 0, plus one real request traced to where it lands. Allowed: local test data, restarting a single service after asking. Never: restart the stack, print secrets, commit."
+- **Why:** Claude had to pick the proof and later stop to ask about restarting one service. Both were knowable up front, and the stop cost a round.
