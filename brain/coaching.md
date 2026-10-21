@@ -5,6 +5,7 @@
   - 2026-10-20 (client deploy): opened with a paste and no goal; after the 💡 Giga adopted the suggested done-line verbatim and extended it with the end user's view, which then decided every design choice. Next: put it in the *first* prompt.
   - 2026-10-19/20 (14 sessions, mostly first-day work setup): 0 of 13 missed-session first prompts named a done-line; mostly questions, which is fine. The one that cost: a pasted ticket asked "explain + how to enroll", with no "done when", so Claude had to supply the deliverable (a yes/no finding with file:line evidence).
   - 2026-10-21 (win, 1 of 2 toward retiring): the work-ticket first prompt named the proof (suite passes with disableNetConnect, `npm ls axios`), the environment (compose test target, baseline 170) and the stop rule ("PR draft ready, don't push"). It carried the whole session.
+  - 2026-10-21 (2, win on access): "break it down and tell me what additional access you require" asked for the access list unprompted and named the deliverable. The pasted ticket before it ("analyze it and help me plan") still had no done-line.
   - Full dated evidence: `git log -p brain/coaching.md` (condensed 2026-10-19).
   - Ask for: "Done when <what you'll see> on <environment>; covers: <every entry point>; access: <ready/expired>; allowed / ask first: …". Retire after 2 more sessions whose first prompt names environment and scope.
   - Next: start from the `Now:` line yourself ("Do the Now: step. Done when …").

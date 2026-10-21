@@ -17,7 +17,16 @@ Reviewing the dead copy would have produced findings for code no longer deployed
 A sibling ticket by a teammate (In Review) was also migrating the same API calls,
 so the review could overlap work about to land.
 
+2026-10-21, same root cause: a second report-style ticket ("Review: …", with a
+"Sunset date" field) listed 3 services. One had moved to the monorepo and a
+webhook receiver was missing. Its "sunset date" was there for a vendor *addition*
+that has no sunset, and it told us to "add to allowlists" that don't exist.
+Precise wording doesn't mean checked facts. Giga pushed for a claim-by-claim
+breakdown, and 4 of 7 claims turned out wrong, partly wrong or unsourced
+(see [[vendor-ip-lists-label-direction-from-their-side]]).
+
 **How to apply:**
+0. Split the description into claims and mark each one true, partial, wrong or unsourced against the primary source (vendor docs/JSON, code, git log).
 1. `git log -1 --format=%cs` on the named repo; months idle while the team is busy = suspect.
 2. Grep the likely new home (monorepo, `providers/`, `packages/`) for the ticket's key terms.
 3. Search the tracker for open tickets touching the same API or files; read their PRs first.
