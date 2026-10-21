@@ -1,6 +1,6 @@
 ---
 name: dev-secrets-live-in-the-password-manager
-description: "Onboarding a local dev env without leaks: tokens stay in 1Password and load per terminal via a shell function (not op read in .zshrc, which prompts in every agent shell); import downloaded key files via stdin, verify, then delete; gate `op` behind an ask rule; MFA/sudo steps go in a real terminal because Claude's `!` has no TTY."
+description: "Onboarding a local dev env without leaks (resolved compose config / build args / docker history print secrets: show keys only; prefer op run masking): tokens stay in 1Password and load per terminal via a shell function (not op read in .zshrc, which prompts in every agent shell); import downloaded key files via stdin, verify, then delete; gate `op` behind an ask rule; MFA/sudo steps go in a real terminal because Claude's `!` has no TTY."
 metadata:
   type: feedback
 ---
@@ -26,6 +26,13 @@ secured and without leaks, as much as possible". What worked, and what went wron
 - `! aws … --profile <mfa-role>` failed with an empty error: Claude's `!`
   runs without a TTY, so it can't read an MFA code.
 
+- 2026-10-21, same env, a real leak *by Claude*: debugging a build, Claude
+  printed the `build.args` of `docker-compose config --format json`. The resolved
+  config interpolates `${TOKEN}`, so the value went into the transcript. The
+  token had to be rotated (verified: new token `whoami` OK, old one 401).
+  Afterwards `op run --env-file <refs>` replaced the exported variables: the
+  secret exists only inside one command, and 1Password masks it in any output.
+
 **How to apply:**
 1. **Store first:** each token goes into the password manager (personal vault,
    not a shared team vault) before it touches the shell.
@@ -46,5 +53,13 @@ secured and without leaks, as much as possible". What worked, and what went wron
 8. **Plaintext is Giga's call:** argue the cost (long-lived key, readable by every
    npm postinstall script), name what would change your mind, then do what Giga picks, safely.
 
+9. **Resolved config is a secret dump.** `compose config`, `docker inspect`,
+   `docker history`, build args, `env`/`printenv` all show interpolated values.
+   Print key names or counts only (`jq 'keys'`, `grep -c npm_`), never values.
+10. **Prefer `op run` to exports:** a refs-only env file (`KEY="op://…"`, mode 600)
+    plus a wrapper (`dc() { op run --env-file ~/.config/<proj>/op.env -- docker-compose "$@"; }`).
+    Nothing lives in the shell, and output is masked even when a command echoes it.
+11. **After a leak:** say so at once, rotate, then prove it (new works, old 401, no-cache build).
+
 **Signal:** a new environment needs tokens, cloud keys or MFA.
-**Next time:** password manager → per-terminal loader → ask rules → verify by shape; MFA in a real terminal.
+**Next time:** password manager → `op run` wrapper → ask rules → verify by shape, never dump resolved config; MFA in a real terminal.

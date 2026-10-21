@@ -24,6 +24,25 @@ after that, any red is yours.
    event not), so the rerun failed differently.
 After fixing all three: 31 migrations, 170 passing, a clean baseline.
 
+**Whole-stack bring-up (2026-10-21, ~45 services from the same env):** more
+gaps of the same kind, each 10–30 min to find:
+- Building all services at once crashed npm (`Exit handler never called`,
+  ECONNRESET); two sequential lanes worked. Over VPN, a silent pull is slow, not hung:
+  check the container runtime's log before killing it.
+- Every source-mounted service needed deps installed through its container
+  (exit 127 = binary missing), with the same peer-deps flag its Dockerfile uses.
+- `-migrate` images that build identically can be `docker tag`ged from the
+  service image, avoiding rebuilds and an expired private base-image login.
+- No topic-creation script: consumers failed until every topic named in the env
+  files was pre-created.
+- A DB data dir bind-mounted on case-insensitive macOS APFS made MariaDB pick
+  `lower_case_table_names=2`; mixed-case tables became unreadable. Set `1` (what
+  Linux prod effectively runs for those schemas) and rebuild the affected DB.
+- Dump drift: a renamed migration left a stale row that blocked 131 migrations;
+  a NULL in a newly NOT NULL column blocked another. Back up the row, then fix.
+- Restarting the DB left one service's pool hung; restart its consumers too.
+- An old service shipped an amd64-only native binary: skip it on arm64 and say so.
+
 **How to apply:**
 1. Install deps *through the container* into the mounted clone
    (`run --rm --no-deps -e NPM_TOKEN --entrypoint npm <svc> install`), then revert
@@ -37,5 +56,5 @@ After fixing all three: 31 migrations, 170 passing, a clean baseline.
 5. Record the recipe in the project's CLAUDE.md, and tell the team: every new
    developer hits the same gaps.
 
-**Signal:** first `<svc>-test` run in a freshly set-up env, or a DB error that makes no sense for the user/privileges you have.
-**Next time:** install through the container → create `_test` → read the DB log → baseline before the change.
+**Signal:** first full-stack `up` or first `<svc>-test` run in a freshly set-up env, or a DB error that makes no sense for the user/privileges you have.
+**Next time:** two build lanes → install through the container → pre-create topics → check FS case setting → → create `_test` → read the DB log → baseline before the change.

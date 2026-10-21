@@ -26,6 +26,14 @@ builds with `npm error 404 … @org/pkg-x.y.z.tgz - Not found`.
   to be logged in", which looked like a dead token. Retesting with an array
   (`A=(--a --b="$T"); npm … "${A[@]}"`) proved the token fine.
 
+- 2026-10-21, two more variants of the same cause: (a) a Dockerfile copied
+  `.npmrc` *after* `npm/yarn install`, so the install ran without the registry
+  auth line and 404'd; (b) builds that still pass the token as a build `ARG`
+  bake it into `docker history` of every image, readable by anyone who pulls it.
+  A secret mount (`RUN --mount=type=secret,id=…,uid=<user>`) fixes both. A compose
+  override's `args: !reset {}` did not remove the inherited args (the resolved
+  config still listed the token), so check the image, not the YAML.
+
 **How to apply:**
 1. Test the token directly against the failing URL (`curl -H "Authorization: Bearer …" <tarball>`,
    printing only the status code). 200 means the token is fine and the problem is plumbing.
@@ -36,6 +44,10 @@ builds with `npm error 404 … @org/pkg-x.y.z.tgz - Not found`.
 4. When building a diagnostic command in zsh, put flags in an **array**, never a
    space-joined string. Treat a surprising "not logged in" from your own probe as
    a probe bug until the token fails a direct test.
+
+5. Check the Dockerfile copies `.npmrc` (or `.yarnrc`) **before** the install line.
+6. After any fix, count token-shaped strings in `docker history --no-trunc <img>`
+   (`grep -c`, never print). Non-zero means the token is baked in; rebuild with a secret mount.
 
 **Signal:** `E404` on an `@org/…` package during `docker build` / `npm install` in a container.
 **Next time:** curl the tarball with the token → grep `--mount=type=secret` vs compose `secrets:` → fix one, prove, then fan out.

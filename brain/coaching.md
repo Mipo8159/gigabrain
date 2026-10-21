@@ -6,6 +6,7 @@
   - 2026-10-19/20 (14 sessions, mostly first-day work setup): 0 of 13 missed-session first prompts named a done-line; mostly questions, which is fine. The one that cost: a pasted ticket asked "explain + how to enroll", with no "done when", so Claude had to supply the deliverable (a yes/no finding with file:line evidence).
   - 2026-10-21 (win, 1 of 2 toward retiring): the work-ticket first prompt named the proof (suite passes with disableNetConnect, `npm ls axios`), the environment (compose test target, baseline 170) and the stop rule ("PR draft ready, don't push"). It carried the whole session.
   - 2026-10-21 (2, win on access): "break it down and tell me what additional access you require" asked for the access list unprompted and named the deliverable. The pasted ticket before it ("analyze it and help me plan") still had no done-line.
+  - 2026-10-21 (3, miss): "I need it up and running, as best as I possibly can" had no done-line; Claude supplied it. Later "nothing remade or rewritten" meant *no commits*, not *read-only*, which cost a round. Name the boundary as allowed / ask-first.
   - Full dated evidence: `git log -p brain/coaching.md` (condensed 2026-10-19).
   - Ask for: "Done when <what you'll see> on <environment>; covers: <every entry point>; access: <ready/expired>; allowed / ask first: …". Retire after 2 more sessions whose first prompt names environment and scope.
   - Next: start from the `Now:` line yourself ("Do the Now: step. Done when …").

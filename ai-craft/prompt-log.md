@@ -216,3 +216,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "run onboard everywhere we will be potentially working first."
 - **After:** "Run /onboard-project on the repos for my 3 tickets plus the team's 7 busiest. Client kind, one shared local memory, don't touch team CLAUDE.md files. Done when kit doctor is clean and git status is empty in each."
 - **Why:** "everywhere" meant 3, 12 or 48 repos; the three constraints were exactly the 4-question batch Claude had to ask. Naming them saves that round.
+
+### 2026-10-21 · "up to the compose, I need it up and running"
+- **Before:** "allright, up to the compose, I need it up and running, as best as In my abilities to utilize it as best as I possibly can"
+- **After:** "Bring the local compose stack up: my team's services + their deps + Kafka UI/Grafana. Done when up.sh status is green, every gateway route is non-502 and I can log in at :8080. Allowed: builds, single-container restarts, local DB fixes with a backup. Ask first: wipes, stopping the stack, AWS. Never commit."
+- **Why:** the done-line and the allowed/ask-first list were exactly what Claude had to ask, and later had to re-ask when "nothing remade" turned out to mean "no commits".
