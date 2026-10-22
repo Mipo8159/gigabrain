@@ -47,6 +47,21 @@ who message each other. Pick the smallest one that fits.
 learned, so seed it with a 5-line brief). You also do the merge, and two
 sessions draw from one rate limit.
 
+**Gotchas (seen 2026-10-22, first `claude -w` session):**
+- The worktree sits *inside* the main checkout (`.claude/worktrees/<name>/`),
+  so any tool whose config cascades up the directory tree also reads the
+  parent's config. Example: a legacy `.eslintrc.js` with no `root: true` loads the
+  outer checkout's config, which has no `node_modules`. Lint fails on unchanged code
+  ("couldn't find the config airbnb-base"). Prove that with a baseline run, then use
+  `npx eslint --no-eslintrc -c .eslintrc.js …`. A fresh clone and CI don't hit it.
+- The session is isolated. It refuses git commands aimed at another repo
+  (`cd ~/other && git …`) and commands with a runtime-computed value it can't
+  verify (`VAR=${VAR:-x} npm …`). Split them into plain commands. Work that
+  touches another repo (such as a retro commit) may need its own session.
+**Signal:** a build or lint failure in a worktree that the same code doesn't
+show elsewhere. **Next time:** run the baseline first; if it fails before your
+change too, suspect config cascading up the directory tree.
+
 ## Agent teams: a meeting
 
 **Turn it on:** `bin/install.sh` sets `env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`

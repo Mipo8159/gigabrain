@@ -37,6 +37,16 @@ and "actually enforced or proven".
 live" beats "the hook protects you". Goes with
 [[giga-wants-argued-recommendations]].
 
+**Evidence (handover reports):** 2026-10-22, a 13-line library fix: the
+completion report opened with a jargon table (span kinds, header names, a
+lint-config cascade, version tags). Giga: "I don't understand what is going on
+here, simplify and help me understand." The rewrite worked: one plain sentence
+(what was missing, what was added), a 4-step "why it was broken", one line of
+proof (before 0, after 1), and one line on where it stands. **A "done" report is
+short-first too: say the result in plain words first, then evidence, then caveats.**
+**Signal:** a report about to open with a table or internal names.
+**Next time:** first line = what changed in everyday words; jargon only after.
+
 **Evidence (setup help):** 2026-10-19, an SSH-key fix: Giga asked for "simple steps"
 twice ("allright again, simple steps how to fix cleanly") after a long first answer.
 In a long first-day onboarding the same day, numbered blocks Giga could paste one at a

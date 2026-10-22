@@ -9,6 +9,7 @@
   - 2026-10-21 (3, miss): "I need it up and running, as best as I possibly can" had no done-line; Claude supplied it. Later "nothing remade or rewritten" meant *no commits*, not *read-only*, which cost a round. Name the boundary as allowed / ask-first.
   - 2026-10-22 (local env, mixed): "make sure it works end to end yourself" and "check integrity of everything" had no done-line, so Claude supplied both proofs. But Giga named the boundary unprompted and repeated it ("nothing should leak, nothing committed … god forgive to push"). That is the allowed/never half of the ask; the "done when" half is still missing.
   - 2026-10-22 (deprecation ticket, miss): "help me break down and analyze task <url>" named no deliverable. The scope gap (a second caller) surfaced only when Giga asked "are you absolutely sure?". That challenge is worth keeping; a done-line naming "every caller across repos" would have made it unnecessary.
+  - 2026-10-22 (win, worktree session): the first prompt named the source note, the target file, the proof ("1 CLIENT span, same repro as the note" + `npm run build` passes) and the stop rule ("don't push or open the PR until DevOps OKs it"). Claude needed no question batch and went straight to a red-then-green proof. The run isn't consecutive (10-21 and 10-22 misses came in between), so not retired yet.
   - Full dated evidence: `git log -p brain/coaching.md` (condensed 2026-10-19).
   - Ask for: "Done when <what you'll see> on <environment>; covers: <every entry point>; access: <ready/expired>; allowed / ask first: …". Retire after 2 more sessions whose first prompt names environment and scope.
   - Next: start from the `Now:` line yourself ("Do the Now: step. Done when …").
@@ -16,7 +17,8 @@
 - **Agents and parallel work.** Giga asks for agents ("use agentic workflow") and a standing habit of parallel work.
   - 2026-10-02: Claude ran the reviewer in the background while waiting on Giga; it caught a privilege-escalation path and secrets in a README. No worktree: the change was small and serial.
   - 2026-10-03: Claude's side is routine (a "Split" block, 4 analysis agents, 6 parallel forks, 4 background reviews).
-  - Open: Giga has never launched a worktree session. 2026-10-12: phase 1, whose practice step was that launch, shipped in the main session, so the count is still 0.
+  - 2026-10-22 (win): Giga launched the first worktree session (`claude -w undici-instrumentation`, a one-file fix in a library repo), seeded by a memory note. Worktree count: 1. It surfaced two gotchas, now in [[worktrees-and-agent-teams]]: lint config cascades up from the nested folder, and the isolation guard blocks git commands aimed at other repos.
+  - Still open: a worktree run *in parallel* with a main session (so far it was the only session).
   - Claude: open every multi-part task with a "Split" block (habit `steer-parallelism-and-agent-roles`). Giga: launch the worktree half yourself (`cd admin && claude -w <task>`).
   - Next: phase 2 starts with `claude -w routine`.
 - **One goal per session.**
