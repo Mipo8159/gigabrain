@@ -25,11 +25,18 @@ Precise wording doesn't mean checked facts. Giga pushed for a claim-by-claim
 breakdown, and 4 of 7 claims turned out wrong, partly wrong or unsourced
 (see [[vendor-ip-lists-label-direction-from-their-side]]).
 
+2026-10-22, related: two deprecation tickets had a title only and no description.
+The real scope came from elsewhere. An AI comment linked another team's ticket that
+already held a full phased plan, and a grep found a migration that had already
+revoked the service's tokens months earlier. Both changed which ticket to start
+first. An empty ticket is not unplanned work, so search before you size it.
+
 **How to apply:**
 0. Split the description into claims and mark each one true, partial, wrong or unsourced against the primary source (vendor docs/JSON, code, git log).
 1. `git log -1 --format=%cs` on the named repo; months idle while the team is busy = suspect.
 2. Grep the likely new home (monorepo, `providers/`, `packages/`) for the ticket's key terms.
-3. Search the tracker for open tickets touching the same API or files; read their PRs first.
+3. Search the tracker for open tickets touching the same API or files (other teams too); read their PRs first.
+   Grep migrations/commits for the service name: part of the work may have landed already.
 4. Tell the ticket reporter where the code now lives; let them confirm before work starts.
 
 **Signal:** a ticket from Slack/a bot/a report; the team mentions a monorepo or

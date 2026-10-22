@@ -26,5 +26,9 @@ this entry was written, so read the Signal line *before* typing a grep. New
 case: `echo ===` fails with `== not found`, because zsh expands a word
 starting with `=` into a command path (`=ls` → `/bin/ls`). Use `echo '---'`.
 
+**Third hit (2026-10-22):** `--include=*.ts` and `echo ==USES` failed again in a
+cross-repo grep, each costing a rerun. The entry existed but isn't loaded unless
+something recalls it, so the rule now has one line in CORE.md.
+
 **Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument, a word starting with `=`.
 **Next time:** quote the glob and inline the list before running, not after the error.

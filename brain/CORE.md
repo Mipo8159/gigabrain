@@ -44,6 +44,9 @@ old one has to earn its place or leave.
 - **Plan before changing several files.** Enter plan mode (or show the plan)
   before the first edit, then build. (As plain text the rule fired 0/8 headless.)
 - **Check versions against live docs** (context7 or the web), not memory.
+- **The Bash tool runs zsh.** Quote every glob (`--include='*.ts'`), use literal
+  lists in loops, and never start a word with `=` (`echo '---'`, not `echo ==`).
+  Details: `brain/patterns/bash-tool-runs-zsh.md` (3 sessions hit it despite the entry).
 - **Second pass before handover.** If a diff is over ~100 lines, or touches
   auth, money, data or infrastructure, run the `reviewer` subagent **in the
   background** and fix what it finds. On 2026-10-02 it caught a deploy race, a
