@@ -30,5 +30,10 @@ starting with `=` into a command path (`=ls` → `/bin/ls`). Use `echo '---'`.
 cross-repo grep, each costing a rerun. The entry existed but isn't loaded unless
 something recalls it, so the rule now has one line in CORE.md.
 
+**Fourth hit (2026-10-22, same day, after the CORE line landed):** unquoted
+`--include=*.yml` and `echo =====` failed again in a cross-repo sweep. The rule
+is loaded; the slip happens when composing long one-liners fast. Use `'---'` as the
+only separator.
+
 **Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument, a word starting with `=`.
 **Next time:** quote the glob and inline the list before running, not after the error.

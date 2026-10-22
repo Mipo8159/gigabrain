@@ -231,3 +231,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "help me break down and analyze task <ticket url>"
 - **After:** "Analyze <ticket>. Done when: a table of every caller of the endpoint (file:line) across all repos, where each query's text comes from, and whether it can hit the deprecated feature; plus a draft ticket comment I approve before posting. Read-only; ask before posting."
 - **Why:** the first answer covered only the main poller. Giga's later "are you absolutely sure?" (a good prompt) forced the recheck that found a second caller passing customer JQL and one unverified claim in the draft comment.
+
+### 2026-10-22 · "pleas explain this task … help me understand where the necessary changes need to be applied"
+- **Before:** "<ticket url> … explain this task in best and simplest way possible and help me understand where the necessary changes need to be applied"
+- **After:** "Explain <ticket> simply, then verify it. Done when: a verdict per layer (code in all repos, public request path, live AWS read-only, prod traffic in New Relic) with the gaps named. Access: AWS CLI read-only approved, New Relic via my browser. Post nothing until I approve."
+- **Why:** the verdict was rebuilt four times ("are you 100% sure?"), each time adding a layer (proxy WAF, live AWS, NACLs). Naming the layers and the access up front would have made it one pass.

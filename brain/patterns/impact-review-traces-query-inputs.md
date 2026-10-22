@@ -46,4 +46,6 @@ ticket that says "needs human review".
 config / customer) | uses the feature? | still running? (evidence), before
 drafting any comment.
 
+Second instance the same day: a vendor IP-range review whose first verdict missed the proxy WAF; see [[vendor-ip-lists-label-direction-from-their-side]]. Both times the first verdict came before every entry point was listed.
+
 Related: [[ticket-names-where-code-used-to-live]], [[prove-the-check-reached-the-change]], [[fact-check-generated-knowledge]].
