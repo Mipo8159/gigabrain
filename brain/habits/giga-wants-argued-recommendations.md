@@ -29,7 +29,11 @@ lockouts.
   be changed and its password hashes can't be exported).
 - Say concretely what would change your mind: "revisit when files exceed ~1 GB".
 - Correct your own earlier statements when you find them overstated. Giga
-  engages with the correction rather than losing trust.
+  engages with the correction rather than losing trust. Name the kind of
+  impact precisely: "breaks" (functionally wrong) is not the same as "goes
+  untraced" (observability only). On 2026-10-22 an earlier "the telemetry would
+  break" sent Giga to ask "is it my job?" about what was really a tracing gap.
+  The correction set the tone of the message to the owning team.
 - Mention the credible alternative you rejected (Aurora DSQL, Auth0/Clerk), so
   the recommendation reads as a choice.
 - **When Giga picks against your recommendation and you hold evidence they may

@@ -58,6 +58,13 @@ sessions draw from one rate limit.
   (`cd ~/other && git …`) and commands with a runtime-computed value it can't
   verify (`VAR=${VAR:-x} npm …`). Split them into plain commands. Work that
   touches another repo (such as a retro commit) may need its own session.
+- **Uncommitted worktree work isn't durable.** Under "never commit", the fix
+  exists only as working-tree edits, and removing the worktree deletes them.
+  On 2026-10-22 a proven 13-line fix (red→green repro) was gone hours later:
+  no worktree, no branch, no stash. The handoff note still listed it as "Worked".
+  **Next time:** before a worktree session ends with uncommitted work, run
+  `git diff > <project memory dir>/<name>.patch` and name the patch in the
+  handoff, or ask Giga to commit locally to the worktree branch (no push).
 **Signal:** a build or lint failure in a worktree that the same code doesn't
 show elsewhere. **Next time:** run the baseline first; if it fails before your
 change too, suspect config cascading up the directory tree.

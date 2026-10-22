@@ -236,3 +236,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "<ticket url> … explain this task in best and simplest way possible and help me understand where the necessary changes need to be applied"
 - **After:** "Explain <ticket> simply, then verify it. Done when: a verdict per layer (code in all repos, public request path, live AWS read-only, prod traffic in New Relic) with the gaps named. Access: AWS CLI read-only approved, New Relic via my browser. Post nothing until I approve."
 - **Why:** the verdict was rebuilt four times ("are you 100% sure?"), each time adding a layer (proxy WAF, live AWS, NACLs). Naming the layers and the access up front would have made it one pass.
+
+### 2026-10-22 · "I am writing a personal message to devops. could you make it simple and understandable?"
+- **Before:** "I am writing a personal message to devops. could you make it simple and understandable?"
+- **After:** "Rewrite the DevOps message as a Slack DM to the package owner: 5 lines max, no code, one clear question (you or me?)."
+- **Why:** the first draft was written for a channel, with code and a volume caveat. Naming the medium, length and the one question up front gets the DM in one pass. Giga's sent version (adding the version range and an honest "Claude's finding" note) worked: the owner answered in 2 minutes.
