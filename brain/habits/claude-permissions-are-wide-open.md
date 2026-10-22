@@ -21,3 +21,12 @@ choice as `mogulkhan/.claude/settings.json`.
 anything irreversible or outward-facing: pushing, deploying, deleting data,
 touching other projects here. Look at a target before overwriting it. Supports
 [[working-style-interview-then-autonomous-loop]].
+
+**Giga's yes isn't the last gate (2026-10-23).** After Giga approved the plan,
+the auto-mode classifier still denied the outward GitHub writes (a workflow
+re-run and DELETEs of deployment records). Don't retry it or split it to get
+past the block. Give each command as its own `! <cmd>` line so Giga runs it
+in-session, then verify the result yourself. It took one round, and Giga ran
+the commands one at a time.
+**Signal:** a denial on an action the user already approved.
+**Next time:** paste the `! ` lines at once, plus the check you'll run once they're done.
