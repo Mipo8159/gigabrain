@@ -241,3 +241,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "I am writing a personal message to devops. could you make it simple and understandable?"
 - **After:** "Rewrite the DevOps message as a Slack DM to the package owner: 5 lines max, no code, one clear question (you or me?)."
 - **Why:** the first draft was written for a channel, with code and a volume caveat. Naming the medium, length and the one question up front gets the DM in one pass. Giga's sent version (adding the version range and an honest "Claude's finding" note) worked: the owner answered in 2 minutes.
+
+### 2026-10-22 · <pasted DM> + "this is my interraction with devops about telementary, closely related to my slack update task"
+- **Before:** a pasted DM thread plus one line of context, with no ask.
+- **After:** "Context: the DevOps DM below. Goal: a PR to the telemetry lib that fixes fetch tracing for the Slack upgrade, plus only the security updates that are safe. Done when: a test fails before and passes after, and I know exactly which security fixes reach services. First: plan + a ticket draft I can file; ask me once."
+- **Why:** the session spent ~8 prompts discovering the deliverables (ticket, scope, security meaning, local E2E). Naming them up front, plus "every claim measured" (which Giga had to ask for later), would have produced the scoped plan in the first reply.

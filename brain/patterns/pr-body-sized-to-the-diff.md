@@ -17,7 +17,14 @@ words. Then an honest second look found two holes the trim had opened: an
 `engines` field and ~200 lines of test changes were no longer explained. Each
 took one line to close.
 
+**Same for tickets, 2026-10-23:** Claude wrote a new tracker ticket with
+Problem / Change / Out of scope / Notes / Done-when sections (~450 words). The
+user asked for "shorter, like the related ticket", then "remove out of scope,
+simplify the goals". The related ticket was 3 sentences; the final one was 2.
+Detail belongs in the PR, not the ticket.
+
 **How to apply:**
+- For a ticket, read the ticket it relates to and 2–3 by the same author first, and match their length. One paragraph is often right.
 - First list the team's last 10–15 merged PRs and read the bodies of 3–5 of
   similar size (`gh pr list --state merged`, `gh pr view N --json body`). Note
   the length, whether they use tables or screenshots, and how they record
