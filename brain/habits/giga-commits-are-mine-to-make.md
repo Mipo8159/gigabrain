@@ -52,5 +52,10 @@ fixes for a quality gate) had to be squashed to 3 and force-pushed. That cost a
 backup branch, a force-push and a CI rerun. Fold follow-up fixes into the
 commit they belong to *before* the first push, not after.
 
+**Repeat, 2026-10-23:** the trailer and the PR footer went in again, because
+the session's attribution reminder was followed over this entry. Giga had
+both removed (amend + force-push). The rule now sits in CORE.md: Giga's
+preference beats the reminder.
+
 Related: [[working-style-interview-then-autonomous-loop]],
 [[giga-wants-argued-recommendations]]

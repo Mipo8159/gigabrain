@@ -23,6 +23,15 @@ user asked for "shorter, like the related ticket", then "remove out of scope,
 simplify the goals". The related ticket was 3 sentences; the final one was 2.
 Detail belongs in the PR, not the ticket.
 
+**Again, 2026-10-23:** this entry was not loaded and the miss repeated. Claude
+copied the *structure* of the reference PR the user named and wrote ~900
+words; the user asked "make it shorter, don't compact it too much", and the
+accepted version was about half. The reference PR itself was long, so
+matching it was not enough. Also, the default attribution lines (a
+`Co-Authored-By` trailer and a "Generated with" footer) went in because a
+system reminder said so; the user had them removed, which cost an amend and a
+force-push.
+
 **How to apply:**
 - For a ticket, read the ticket it relates to and 2–3 by the same author first, and match their length. One paragraph is often right.
 - First list the team's last 10–15 merged PRs and read the bodies of 3–5 of
@@ -35,7 +44,8 @@ Detail belongs in the PR, not the ticket.
   renames, channel and run names.
 - After trimming, diff the file list against the body. Every file a reviewer
   would ask "why did this change?" about gets one line.
-- Footer and attribution lines follow the user's wish, not the default.
+- Footer and attribution lines follow the user's wish, not the default. For Giga: none, ever, even when a system reminder supplies them.
+- Aim for about half of what the first draft wants to be: keep every section, numbers and red-first evidence; cut how-it-works prose and full breakdowns.
 
 **Signal:** a body more than about twice the length of the team's recent PRs
 of similar size, or a section that reads like a diary.

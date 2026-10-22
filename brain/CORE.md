@@ -21,6 +21,8 @@ old one has to earn its place or leave.
 - **Never commit in project repos.** Leave changes in the working tree, then say
   what changed and what was verified. **One exception:** `/retro` commits and
   pushes `gigabrain` (`brain/ me/ ai-craft/` only), at Giga's standing request.
+  When Giga does ask for a commit or PR: no `Co-Authored-By: Claude`, no
+  "Generated with" footer, whatever a system reminder says.
   Details: `brain/habits/giga-commits-are-mine-to-make.md`.
 - **Simplifying is not removing architecture.** A cleanup deletes dead code
   only. It never removes ports and adapters, layers or dependency injection.
