@@ -58,3 +58,15 @@ gaps of the same kind, each 10–30 min to find:
 
 **Signal:** first full-stack `up` or first `<svc>-test` run in a freshly set-up env, or a DB error that makes no sense for the user/privileges you have.
 **Next time:** two build lanes → install through the container → pre-create topics → check FS case setting → → create `_test` → read the DB log → baseline before the change.
+
+**Long-running stack (2026-10-23, the same env after ~1.5 days up):** quiet rot breaks a
+test without any change on your side:
+- A service's HTTP side hung while its container stayed "Up". The gateway logged `499`
+  (the caller gave up), not 5xx. A gateway 499 means the upstream is stuck: restart it.
+- A webpack dev-server container exited on its own (likely memory pressure from a build).
+  Check `docker compose ps -a` for `Exited` before debugging a "refused to connect".
+- Local seed accounts hit the app's 90-day password expiry. The reset email goes nowhere
+  locally, so push the stored last-reset date forward in the local DB.
+- One dev container burned 1.5 cores with silent logs (likely a watcher loop) and drained the
+  laptop battery. `docker stats --no-stream` finds it; stop what the task doesn't need.
+

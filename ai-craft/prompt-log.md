@@ -246,3 +246,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** a pasted DM thread plus one line of context, with no ask.
 - **After:** "Context: the DevOps DM below. Goal: a PR to the telemetry lib that fixes fetch tracing for the Slack upgrade, plus only the security updates that are safe. Done when: a test fails before and passes after, and I know exactly which security fixes reach services. First: plan + a ticket draft I can file; ask me once."
 - **Why:** the session spent ~8 prompts discovering the deliverables (ticket, scope, security meaning, local E2E). Naming them up front, plus "every claim measured" (which Giga had to ask for later), would have produced the scoped plan in the first reply.
+
+### 2026-10-23 · "full end to end test of our telemetry and slack update … see the test run finished … and the telemetry showing it in trace … on local"
+- **Before:** named the observable result and the environment. No entry point, no stop rule, no allowed/ask-first.
+- **After:** "Local E2E for GREY-7006. Done when: one run-finished posts to my sandbox Slack and Grafana shows a `chat.postMessage` span after the swap, none before. Enter at the Kafka topic if the UI blocks twice. Allowed: local DB/containers; ask first: anything outside compose."
+- **Why:** the observable carried the session. The missing entry point cost ~8 rounds of login, password and permission fixes in the UI before switching to the topic, which worked first time.

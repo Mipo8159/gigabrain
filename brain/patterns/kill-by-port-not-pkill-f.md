@@ -28,5 +28,16 @@ To run jobs in order, put them in one sequential script (`a; b; c`), or wait on 
 service running the same command. The permission prompt was denied, rightly. It happened even though this entry
 existed: look up the port's PID with `ss -ltnp 'sport = :PORT'` *first*, every time.
 
+**Inside a container too (2026-10-23, third repeat despite this entry).** To clean up a hung
+`node -` one-off, Claude ran `docker compose exec <svc> sh -c 'pkill -f "node -"'`. The pattern
+matched the service's own `node --inspect … dist/index.js`, so the service went down mid-test
+(nodemon logged "clean exit"), and the sh wrapper died with it, so there was no output either.
+The real fix was upstream: the one-off hung because the service it called was stuck. Give
+one-off scripts a timeout (`timeout 60 node -`, `AbortSignal.timeout`) instead of killing them
+afterwards.
+
+**Next time:** never `pkill -f` anywhere, host or container. Use `timeout` on the command
+itself, or kill a saved PID.
+
 **Signal:** stopping a process Claude started earlier in the session, or chaining
 background jobs so that one waits for another.
