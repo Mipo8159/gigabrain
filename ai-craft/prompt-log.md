@@ -226,3 +226,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "could you make sure it works end to end yourself?"
 - **After:** "Prove the local stack end to end: a smoke script (containers, gateway routes, UIs, kafka/dynamo/sqs/s3/redis) that exits 0, plus one real request traced to where it lands. Allowed: local test data, restarting a single service after asking. Never: restart the stack, print secrets, commit."
 - **Why:** Claude had to pick the proof and later stop to ask about restarting one service. Both were knowable up front, and the stop cost a round.
+
+### 2026-10-22 · "help me break down and analyze task <ticket url>"
+- **Before:** "help me break down and analyze task <ticket url>"
+- **After:** "Analyze <ticket>. Done when: a table of every caller of the endpoint (file:line) across all repos, where each query's text comes from, and whether it can hit the deprecated feature; plus a draft ticket comment I approve before posting. Read-only; ask before posting."
+- **Why:** the first answer covered only the main poller. Giga's later "are you absolutely sure?" (a good prompt) forced the recheck that found a second caller passing customer JQL and one unverified claim in the draft comment.

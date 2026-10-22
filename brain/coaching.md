@@ -8,6 +8,7 @@
   - 2026-10-21 (2, win on access): "break it down and tell me what additional access you require" asked for the access list unprompted and named the deliverable. The pasted ticket before it ("analyze it and help me plan") still had no done-line.
   - 2026-10-21 (3, miss): "I need it up and running, as best as I possibly can" had no done-line; Claude supplied it. Later "nothing remade or rewritten" meant *no commits*, not *read-only*, which cost a round. Name the boundary as allowed / ask-first.
   - 2026-10-22 (local env, mixed): "make sure it works end to end yourself" and "check integrity of everything" had no done-line, so Claude supplied both proofs. But Giga named the boundary unprompted and repeated it ("nothing should leak, nothing committed … god forgive to push"). That is the allowed/never half of the ask; the "done when" half is still missing.
+  - 2026-10-22 (deprecation ticket, miss): "help me break down and analyze task <url>" named no deliverable. The scope gap (a second caller) surfaced only when Giga asked "are you absolutely sure?". That challenge is worth keeping; a done-line naming "every caller across repos" would have made it unnecessary.
   - Full dated evidence: `git log -p brain/coaching.md` (condensed 2026-10-19).
   - Ask for: "Done when <what you'll see> on <environment>; covers: <every entry point>; access: <ready/expired>; allowed / ask first: …". Retire after 2 more sessions whose first prompt names environment and scope.
   - Next: start from the `Now:` line yourself ("Do the Now: step. Done when …").
