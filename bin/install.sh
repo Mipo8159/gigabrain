@@ -40,7 +40,7 @@ for l in "$C"/skills/*; do  # a library skill retired by /curate leaves a dangli
   if [ -L "$l" ] && [ ! -e "$l" ] && [[ "$(readlink "$l")" == "$G"/library/* ]]; then rm "$l"; echo "  removed stale $l"; fi
 done
 for a in "$G"/global/agents/*.md; do link "$a" "$C/agents/$(basename "$a")"; done
-if command -v claude >/dev/null; then  # opt-in skill bundles from library/plugins/ (sessions install a cached copy: bump plugin.json version to ship edits)
+if command -v claude >/dev/null; then  # opt-in skill bundles, loaded in place from library/plugins/ (checked 2026-10-19: no cache copy)
   mp=$(python3 -c 'import json,sys; print(((json.load(open(sys.argv[1])).get("gigabrain") or {}).get("source") or {}).get("path", ""))' \
        "$C/plugins/known_marketplaces.json" 2>/dev/null || true)
   if [ "$mp" = "$G/library" ]; then echo "  marketplace gigabrain: registered"
