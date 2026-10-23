@@ -56,6 +56,13 @@ the researcher checks them before handover.
 
 Related: [[shared-kit-and-checker-before-fan-out]], [[import-knowledge-on-demand]].
 
+**Code-derived cards (2026-10-23):** for knowledge built from repos (one card per
+repo: purpose, callers, deploy, activity), a per-item pipeline of author → checker
+works. The checker picks the 10 claims most likely wrong (status, callers,
+counts, deploy target) and re-runs the command or grep behind each. In a 2-card
+smoke run it fixed 4 of 24 claims (17%), all counts or omissions taken from a
+single `gh` call. Measure the wrong rate on a smoke run before fanning out to ~100 items.
+
 **Also for docs Claude writes itself (2026-10-20):** a workspace CLAUDE.md drafted
 while exploration agents were still running carried two claims from memory, both
 wrong (an infra repo called "Terraform" was mostly CloudFormation; "every service

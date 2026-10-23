@@ -21,6 +21,16 @@ eval took 10 h of wall time. Nobody was there to restart anything.
 - After the run, look for agents that died with partial edits. Verify their
   unlogged changes before handover.
 
+**Daytime too (2026-10-23):** a 2-repo smoke run of a background workflow,
+launched mid-afternoon, died after 4.5 h when Giga stepped away ("Your computer
+went to sleep mid-response", 3 of 4 agents). A background reviewer launched
+at the same time still showed "running" 6 h later and never reported: a hung
+agent, not a slow one. The finished inventory agent replayed from cache on resume.
+- Any background workflow or agent expected to take over ~10 min gets
+  `caffeinate -dimsu -t <seconds>` as a background command in the same turn.
+- A background agent "running" for hours after a sleep is dead: check
+  `ListAgents`, stop it and relaunch; resume workflows by run id.
+
 **Signal:** "I'll be away / overnight / while I sleep" plus local agents or evals.
 **Next time:** put caffeinate in the plan before launching anything.
 
