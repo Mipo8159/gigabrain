@@ -19,6 +19,11 @@ worktree (coaching: Agents and parallel work, count 0 → 1).
 > per weekly run, split: eval-skills $3, `eval-forced --runs 2 --max-cost 2`
 > ($4 for both arms), eval-knowledge $8 (check its cost flag first). A section
 > that fails must not stop the others. Ask first before installing anything.
+>
+> Section 7 (added 2026-10-23): knowledge-base freshness. For each folder listed in
+> the gitignored `inbox/knowledge-bases.txt`, count the repo cards whose
+> `scanned_sha` differs from that repo's current `HEAD`, and list them. Names stay
+> in the inbox report (gitignored), never in a tracked file. No agent calls, $0.
 
 ## Why local launchd, not a cloud Routine (changed 2026-10-17)
 
@@ -40,3 +45,9 @@ interval, and the Claude GitHub App on the repo.
 
 Review `git diff master...worktree-routine`, then merge and commit it yourself.
 After that, `/retro` moves `Now:` to phase 3.
+
+## Lessons since the brief (2026-10-23)
+
+- Long background runs need `caffeinate`: a sleeping Mac killed 3 of 4 workflow agents.
+  launchd's catch-up after wake covers the weekly job, but not a run that is mid-flight.
+- A Workflow `scriptPath` must sit inside the session's working directory.

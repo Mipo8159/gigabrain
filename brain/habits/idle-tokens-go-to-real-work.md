@@ -26,7 +26,17 @@ asked "what percentage of Claude are we using" in two separate sessions.
   "under 10% savings → stop and propose where the rest goes".
 - Staleness sweeps still pay (26 stale facts fixed that night); run them in /curate, not as a night.
 
-**Signal:** "spare tokens", "idle", "overnight", "sharpen/improve gigabrain", "what percentage".
+**Standing grant (2026-10-23):** "you have free autonomy to self-learn gigabrain …
+prepare everything … if you deem something critical you can always ask me …
+productive token usage is the goal." So Claude may prepare gigabrain changes
+unasked (left uncommitted; only `/retro` commits), never touches the provider's
+team hub without Giga, and asks on anything critical or irreversible. "Productive"
+still means this entry's rule: brain polish has a measured ceiling, so the grant
+goes first to work that feeds the brain from real work (night knowledge jobs,
+lesson pipelines, roadmap phases), and practice steps that are Giga's (launching
+a worktree, coding the core) stay Giga's.
+
+ "spare tokens", "idle", "overnight", "sharpen/improve gigabrain", "what percentage".
 **Next time:** answer with the ceiling + one real-work alternative before proposing tracks.
 
 Related: [[giga-wants-argued-recommendations]], [[steer-parallelism-and-agent-roles]].
