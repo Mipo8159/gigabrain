@@ -45,4 +45,10 @@ mean to change, or Giga says "keep it local, never push it".
 proof, then save the rule to project memory so later sessions keep adding
 new local-only paths to the list.
 
+**Also instructions, not only hooks** (2026-10-26): Claude handed Giga a
+`git commit -am` for a repo that held a local-only bypass file. A `git status`
+before scripting the step caught it. Any commit command given to Giga in such a
+repo stages explicit paths (`git add package.json package-lock.json`), and a
+script checks that `git diff --name-only` is exactly the expected set.
+
 Related: [[giga-commits-are-mine-to-make]], [[team-claude-md-gets-a-local-sibling]], [[secrets-land-in-readme]]

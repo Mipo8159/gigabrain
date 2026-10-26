@@ -31,3 +31,9 @@ every time (a grep, an `npm audit` in a scratch copy, one `getJiraIssue`).
 **Next time:** run the claims pass before the first draft is shown, not after the challenge.
 
 Related: [[giga-wants-argued-recommendations]], [[fact-check-generated-knowledge]].
+
+**Re-used conclusions keep their caveat** (2026-10-26): Claude told Giga a
+notification would reach only one channel, re-using an earlier session's
+explanation whose stated assumption ("all rows share one integration") was
+never checked. A second channel got it too. When a past finding is quoted
+as fact, either re-check it or carry its "assuming …" along.

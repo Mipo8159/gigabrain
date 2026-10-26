@@ -262,3 +262,8 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Design overnight jobs that build a local knowledge base for <work> under <path>: repos, maintenance, current team work, Jira, cloud. Done when: each night is a resumable script with a checker stage, and a 2-repo smoke run shows the wrong-claim rate. Access: gh ready, Jira MCP ready, read-only AWS profile <name>. Budget: one 5-hour window per night. Nothing named goes to the brain repo."
 - **Why:** Claude supplied the proof (checker wrong-rate) and asked the access/runner batch; the smoke run then showed the real size (102 repos, ~150k tokens each), which split night 1 into two. A budget line up front would have sized it before the first run.
 
+
+## 2026-10-26 · ticket triage opener
+- **Before:** "help me with the review tickets which are sitting in In Review. what are next for them, on my standups team members mention things like deployments and also checking repos for interractnios with the changes which were been done in npm packages."
+- **After:** "For my In Review tickets (<KEY-1>, <KEY-2>, <KEY-3>): list what's left before prod for each, and which repos consume the npm package change. Done when each ticket has a next step and an owner; read-only, nothing posted."
+- **Why:** "the review tickets" made Claude sweep all 17 team tickets first; naming the keys and the done-line would have gone straight to the 3 that mattered.
