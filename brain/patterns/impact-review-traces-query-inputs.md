@@ -48,4 +48,20 @@ drafting any comment.
 
 Second instance the same day: a vendor IP-range review whose first verdict missed the proxy WAF; see [[vendor-ip-lists-label-direction-from-their-side]]. Both times the first verdict came before every entry point was listed.
 
+**Third instance (2026-10-26, a service removal in a work repo):** the first
+answer to "which repos must change to remove this service" was 9 repos: every
+repo where a grep hit. Giga pushed back, and a dependency check cut it to 5. He
+then asked "how can I be certain you won't give another answer in a few steps?".
+The fix wasn't more confidence; it was showing the method. Each hit was classified
+by one stated rule: *if left unchanged, does it break at runtime, in CI or in local
+dev, or does it still route to, discover or grant access to the removed thing?*
+An unanchored agent re-derived the list from the code alone and got the same 5.
+Then a sweep of the org's repos that were **not cloned locally** (shallow clones
+into scratch, then grep) closed the "what's online but not here" question. The code
+search API had matched whole tokens only and was rate-limited. Traffic in the APM
+tool confirmed it: the only live calls were side effects of two lifecycle actions.
+- For removal scope, show the necessity rule and a per-hit verdict (required /
+  kept, with the reason) in the **first** answer. Never present a grep-hit count as scope.
+- Coverage = every active repo, including the uncloned ones. Say how many, and how.
+
 Related: [[ticket-names-where-code-used-to-live]], [[prove-the-check-reached-the-change]], [[fact-check-generated-knowledge]].
