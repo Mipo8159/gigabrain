@@ -38,7 +38,7 @@ only separator.
 **Fifth hit (2026-10-27): history modifiers.** `B=origin/master; git show $B:path/file`
 silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
 `:a` (absolute path) modifier. Any `$VAR:` followed by a letter (`:a :h :t :r :e
-:s :u :l`) is a modifier. Write `"${B}:path"`. `echo ===` failed again the same day.
+:s :u :l`) is a modifier. Write `"${B}:path"`. `echo ===` failed again the same day, and `echo =====` again in a later session that day (a retro, while checking this very rule).
 
 **Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument, a word starting with `=`, `$VAR:` followed by a letter.
 **Next time:** quote the glob and inline the list before running, not after the error.

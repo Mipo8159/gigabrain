@@ -44,11 +44,20 @@ into the PR.
    query after.
 7. The swap to `^x.y.z` waits for the real publish. Before it, no lockfile can
    be generated and the consumer's CI goes red.
+8. After the real publish, diff the two tarballs before reusing the beta's
+   proof: `npm pack <pkg>@x.y.z <pkg>@x.y.z-beta.0 --pack-destination <dir>`,
+   then `diff -r`. Run it **from the consumer repo**: the scope's registry
+   lives in its `.npmrc`, and from anywhere else npm answers 404. On
+   2026-10-27 the release had picked up one more change after the beta (extra
+   redaction on every `http` span). That made a drafted PR line ("beta = same
+   code as the release") false, and put code staging had never run on the
+   path to prod. So the staging check runs again on the real version, even
+   when the deploy step isn't a required check.
 
 **Signal:** "the owner isn't answering", "can I test the library change on
 staging myself", or any library PR whose value only shows inside a consumer.
 **Next time:** precedent check → side-branch tag → dist-tag dry run → beta
 publish → exact pin in the consumer → before/after → swap after the real
-release.
+release → diff release vs beta → staging again if they differ.
 
 Related: [[outward-claims-carry-their-proof]], [[local-only-edits-get-a-commit-guard]], [[prove-integration-without-real-target]]
