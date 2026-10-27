@@ -69,3 +69,10 @@ wrong (an infra repo called "Terraform" was mostly CloudFormation; "every servic
 has a compose -test target" held for 3 of 12). The agents' reports caught both.
 Write config/docs after the evidence lands, or mark each unverified line and
 re-check it when the reports arrive.
+2026-10-28, same failure on a lesson brief for a fast-moving protocol: drafted from
+memory while the researcher ran, it taught a lifecycle (handshake + sessions) that the
+newest spec revision, released after the model's training, had removed. Half the brief
+was rewritten. For any spec or API with numbered revisions, ask "what is the newest
+revision, and what did it remove?" first, wait for that one answer, then draft. In the
+same session the exam author's 5 "beyond the brief" items were checked against the spec
+page before handover: 5/5 held (0 wrong), so the hand-back list cost one fetch.

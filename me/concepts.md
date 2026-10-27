@@ -30,7 +30,7 @@ Raise a level only on evidence, and record that evidence.
 | Context engineering (CLAUDE.md, memory, skills) | ai | explain | built gigabrain with Claude | build: own skill with evals |
 | Plugin scoping + skill-trigger evals | ai | seen | 2026-10-12: chose the opt-in bundles; Claude built `library/plugins` + `bin/eval-skills` (9/9) | explain: why the description decides whether a skill triggers; then write one trigger case yourself |
 | Agent orchestration (subagents, background review, worktrees, hooks as guards) | ai | seen | 2026-10-02: asked how agents/hooks/skills were used; saw a background reviewer catch a rollout risk | build: launch a worktree session yourself for a parallel half |
-| Agent loops / tool use / MCP | ai | seen | `mcp/` teaching server | build: finish the README syllabus |
+| Agent loops / tool use / MCP | ai | seen | `mcp/` teaching server; 2026-10-28: lesson `mcp-future` built (MCP vs static APIs, 2026-07-28 stateless core, security, context cost) after a lead demoed an MCP-backed page | explain: answer the lesson's quizzes + one exam; then build: finish the README syllabus |
 | Optimistic concurrency (version compare-and-set, lost update) | data | seen | 2026-10-06: tracker step 0 visual + e2e race test (Claude-built) | explain: answer the step-0 check-yourself questions |
 | Monolith-first service extraction (strangler) | distributed | seen | 2026-10-06: chose "monolith, then extract" for tracker | build: tracker step 1 (users/auth → gRPC) |
 | State machine as a pure domain function | design | seen | 2026-10-06: tracker workflow.ts spec handed over | **build**: implement workflow.ts (tutor) |

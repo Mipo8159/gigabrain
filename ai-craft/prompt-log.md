@@ -267,3 +267,9 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "help me with the review tickets which are sitting in In Review. what are next for them, on my standups team members mention things like deployments and also checking repos for interractnios with the changes which were been done in npm packages."
 - **After:** "For my In Review tickets (<KEY-1>, <KEY-2>, <KEY-3>): list what's left before prod for each, and which repos consume the npm package change. Done when each ticket has a next step and an owner; read-only, nothing posted."
 - **Why:** "the review tickets" made Claude sweep all 17 team tickets first; naming the keys and the done-line would have gone straight to the 3 that mattered.
+
+## 2026-10-28 · learning artifact on a new protocol
+- **Before:** "please elaborate further, what did he mean by mcp replacing APIs, and also explain is simple manner but in greater depth … use gigabrains learning tools to create a learning artifact, I think we already have one called mcp if I am not mistaken, elaborate it in this fashion or create a new /mcp-future"
+- **After:** "/teach mcp-future, to the core, backend view. Hook: my lead's demo <artifact link> on the staging connector (read its tool descriptions, don't call tools). Must answer: what MCP replaces vs what it doesn't, use cases, where engineering is going (argued, labelled opinion). Done when check-lesson + check-exam pass and /learn opens it; give me a 10-line answer in chat too."
+- **Why:** it named the tool and a fallback name, which was good. But "we already have one called mcp" was a lab, not a lesson, which cost a lookup; and no depth, done-line or staging boundary was given, so Claude had to supply all three.
+
