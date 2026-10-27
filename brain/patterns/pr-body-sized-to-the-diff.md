@@ -32,6 +32,15 @@ matching it was not enough. Also, the default attribution lines (a
 system reminder said so; the user had them removed, which cost an amend and a
 force-push.
 
+**Third miss, 2026-10-27:** asked to "fill up" a teammate's improvement
+ticket from two finished reviews, Claude read the skill's code and wrote ~900
+words with six proposals, half of them about things the two reviews never
+touched. The user: "keep it as short as you can, this seems like an essay …
+focus on my last two tickets". Claude only looked at the team's recent tickets
+after being asked "is that the correct handwriting for jira ticket that usually
+we do?". The fit was five short bullets plus Problem / Change / Done when.
+Scope the content to the sources the user named, not to everything nearby.
+
 **How to apply:**
 - For a ticket, read the ticket it relates to and 2–3 by the same author first, and match their length. One paragraph is often right.
 - First list the team's last 10–15 merged PRs and read the bodies of 3–5 of

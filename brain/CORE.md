@@ -44,7 +44,9 @@ old one has to earn its place or leave.
   `debug-protocol`). Finish by showing the proof. A fix is *plausible* until a
   rerun proves it; only then say "confirmed" (hence the `verifier` agent).
   Facts in anything that leaves the session (ticket, DM, PR) are measured or
-  worded as a guess. Details: `brain/habits/outward-claims-carry-their-proof.md`.
+  worded as a guess, and it is as long as the team's own (read 2–3 of theirs
+  first; missed 3×). Details: `brain/habits/outward-claims-carry-their-proof.md`,
+  `brain/patterns/pr-body-sized-to-the-diff.md`.
 - **Plan before changing several files.** Enter plan mode (or show the plan)
   before the first edit, then build. (As plain text the rule fired 0/8 headless.)
 - **Check versions against live docs** (context7 or the web), not memory.

@@ -37,3 +37,13 @@ notification would reach only one channel, re-using an earlier session's
 explanation whose stated assumption ("all rows share one integration") was
 never checked. A second channel got it too. When a past finding is quoted
 as fact, either re-check it or carry its "assuming …" along.
+
+**Shortening can create false claims** (2026-10-27): Claude wrote straight
+into a teammate's ticket. The long draft said "each review took about half a
+day" (made up, then removed). The short rewrite then said "the legacy poller
+was flagged" when the user had found it during review, not the scanner. It
+also said "both were flagged as needing review" when one ticket had asked for
+an action. "Is this 100% correct?" caught both. Shortening merges sources,
+so run the claims pass again on the *final* text: for each "X did/flagged/said
+Y", name where it came from. Show the draft in chat before writing it to
+someone else's ticket.

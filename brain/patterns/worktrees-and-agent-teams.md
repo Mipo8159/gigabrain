@@ -111,3 +111,16 @@ cause.
 - Give every parallel worker its own work dir and absolute paths
   ([[shared-kit-and-checker-before-fan-out]]).
 - Long unattended runs: `caffeinate -i` ([[unattended-runs-keep-mac-awake]]).
+
+**Leave the reason behind (2026-10-27):** a session made a worktree so a
+repo's 31 uncommitted local edits wouldn't leak into a feature branch. It
+recorded why only in the scorecard. The next morning the user saw the extra
+folder, asked why it existed, and asked for it to be deleted. A fresh session
+said "nothing records who made it" before grepping the scorecard. It then had
+to rediscover the reason (the main checkout is dirty) mid-move.
+- When creating a worktree, put one line in the project handoff: "worktree
+  <path>: <why>, remove after <event>". Also tell the user at the moment it's created.
+- Before calling an artifact's origin unknown, grep `me/scorecard.md`, the
+  journal and the project handoffs.
+- Before moving work out of a worktree, check `git status` in the main
+  checkout. A dirty main checkout is usually the reason the worktree exists.
