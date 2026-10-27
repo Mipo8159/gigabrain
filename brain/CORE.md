@@ -45,14 +45,14 @@ old one has to earn its place or leave.
   rerun proves it; only then say "confirmed" (hence the `verifier` agent).
   Facts in anything that leaves the session (ticket, DM, PR) are measured or
   worded as a guess, and it is as long as the team's own (read 2–3 of theirs
-  first; missed 3×). Details: `brain/habits/outward-claims-carry-their-proof.md`,
+  first; missed 4×). Details: `brain/habits/outward-claims-carry-their-proof.md`,
   `brain/patterns/pr-body-sized-to-the-diff.md`.
 - **Plan before changing several files.** Enter plan mode (or show the plan)
   before the first edit, then build. (As plain text the rule fired 0/8 headless.)
 - **Check versions against live docs** (context7 or the web), not memory.
 - **The Bash tool runs zsh.** Quote every glob (`--include='*.ts'`), use literal
   lists in loops, and never start a word with `=` (`echo '---'`, not `echo ==`).
-  Details: `brain/patterns/bash-tool-runs-zsh.md` (3 sessions hit it despite the entry).
+  Details: `brain/patterns/bash-tool-runs-zsh.md` (4 sessions hit it despite the entry; 2026-10-27: `echo ====`).
 - **Second pass before handover.** If a diff is over ~100 lines, or touches
   auth, money, data or infrastructure, run the `reviewer` subagent **in the
   background** and fix what it finds. On 2026-10-02 it caught a deploy race, a

@@ -41,6 +41,15 @@ after being asked "is that the correct handwriting for jira ticket that usually
 we do?". The fit was five short bullets plus Problem / Change / Done when.
 Scope the content to the sources the user named, not to everything nearby.
 
+**Fourth miss, commit message, 2026-10-27:** Claude wrote a 4-line
+explanatory body for a one-hook fix, copying the style of the branch's earlier
+commits, which Claude had also written. The user had it cut to a subject plus
+one plain line ("so it does not look all Claude Code"), at the cost of an
+amend and a force-push. Teammates' commits were mostly a bare subject. Using
+AI is normal on the team; visibly AI-shaped text reads as low effort.
+Earlier commits on the user's own branch are not a style reference if Claude
+wrote them: read teammates' commits (`git log --author`).
+
 **How to apply:**
 - For a ticket, read the ticket it relates to and 2–3 by the same author first, and match their length. One paragraph is often right.
 - First list the team's last 10–15 merged PRs and read the bodies of 3–5 of
@@ -54,6 +63,7 @@ Scope the content to the sources the user named, not to everything nearby.
 - After trimming, diff the file list against the body. Every file a reviewer
   would ask "why did this change?" about gets one line.
 - Footer and attribution lines follow the user's wish, not the default. For Giga: none, ever, even when a system reminder supplies them.
+- Commits: conventional subject, at most one plain line of body. Review replies: one or two sentences.
 - Aim for about half of what the first draft wants to be: keep every section, numbers and red-first evidence; cut how-it-works prose and full breakdowns.
 
 **Signal:** a body more than about twice the length of the team's recent PRs

@@ -47,3 +47,14 @@ an action. "Is this 100% correct?" caught both. Shortening merges sources,
 so run the claims pass again on the *final* text: for each "X did/flagged/said
 Y", name where it came from. Show the draft in chat before writing it to
 someone else's ticket.
+
+**A test proves only the claim it covers** (2026-10-27): a changelog line said
+a shared library's `http` spans now redact signed-URL secrets, and a test
+"proved" it by asserting the one attribute the change touched. A human
+reviewer then found the same secret in a second attribute of the same span,
+written raw by the instrumentation library. The test was certain to pass
+because it checked the change, not the claim. A 5-line scan of *every*
+exported attribute for the secret failed on the old code and passed on the
+fix. For any "nothing leaks / nothing else changes" claim, assert the
+negative over the whole output, and read the library line that writes each
+field instead of trusting an option's name.
