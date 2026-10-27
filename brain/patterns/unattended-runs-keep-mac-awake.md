@@ -1,6 +1,6 @@
 ---
 name: unattended-runs-keep-mac-awake
-description: "Before Giga leaves a long workflow or eval queue running, keep the Mac awake (caffeinate). 2026-10-16: sleep killed 2 of 9 fact-check agents and turned one eval run into an error."
+description: "Sleep kills unattended runs (2026-10-16: 2 of 9 agents). Since 2026-10-28 the awake.py hook holds caffeinate -di per Claude turn + background job; manual caffeinate only for jobs started outside Claude."
 metadata:
   type: feedback
 ---
@@ -31,7 +31,18 @@ agent, not a slow one. The finished inventory agent replayed from cache on resum
 - A background agent "running" for hours after a sleep is dead: check
   `ListAgents`, stop it and relaunch; resume workflows by run id.
 
+**Automated (2026-10-28):** the rule kept depending on someone remembering it,
+so it became a hook: `global/hooks/awake.py` (installed by `bin/install.sh`).
+It holds `caffeinate -di -w <claude pid>` from prompt submit to Stop, and keeps a
+timed hold (default 4 h, `GIGABRAIN_AWAKE_PIN_HOURS`) after a turn that launched a
+Workflow, Agent or background Bash. Proof: 8 `bin/kit selftest` cases plus a live
+`pmset -g assertions` check. Off: `GIGABRAIN_AWAKE=0`.
+- Inside Claude: nothing to remember. A background job over 4 h still needs a
+  manual `caffeinate -i -t <secs>`.
+- Outside Claude (a terminal `bin/eval-*`, a cron job): still wrap in `caffeinate -i`.
+- Lid closed on battery still sleeps; say so before an overnight run.
+
 **Signal:** "I'll be away / overnight / while I sleep" plus local agents or evals.
-**Next time:** put caffeinate in the plan before launching anything.
+**Next time:** for runs over 4 h or started outside Claude, put caffeinate in the plan; otherwise trust the hook.
 
 Related: [[kill-by-port-not-pkill-f]], [[fact-check-generated-knowledge]].
