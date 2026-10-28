@@ -36,6 +36,9 @@ is loaded; the slip happens when composing long one-liners fast. Use `'---'` as 
 only separator.
 
 **Fifth hit (2026-10-27): history modifiers.** `B=origin/master; git show $B:path/file`
+**Sixth hit (2026-10-28), twice in one session:** `"$b:tests/test.sh"` became the
+tail of `$b`, and `"t130-$repo-$a:test"` became `…-baseest`. Inside quotes too. In
+loops over refs or image tags, always brace: `"${b}:path"`, `"${a}:test"`.
 silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
 `:a` (absolute path) modifier. Any `$VAR:` followed by a letter (`:a :h :t :r :e
 :s :u :l`) is a modifier. Write `"${B}:path"`. `echo ===` failed again the same day, and `echo =====` again in a later session that day (a retro, while checking this very rule).

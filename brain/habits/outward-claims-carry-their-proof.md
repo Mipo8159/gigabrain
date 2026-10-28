@@ -15,6 +15,7 @@ match reality". The same day, three work sessions shipped first drafts with
 claims nobody had checked:
 - A deprecation-impact comment missed a second caller until "are you absolutely sure?".
 - An IP-allowlist verdict at "~90%" missed a proxy WAF; it was rebuilt 4 times as each "100% sure?" added a layer.
+- 2026-10-28: "you are 100% positive axios calls stay the same?" The honest answer was "inference: axios uses the same `http.request` I measured". Turning it into a probe (real axios × 3 versions × old/new library) took 3 minutes and settled it. When the question is certainty, measure the inference rather than defend it.
 - A ticket draft for a shared library said: "~30 consumers" (invented; 27 counted), "an unused dependency is a major source of the advisories" (39 → 31 when measured), "another team filed its own ticket for this" (their ticket turned out to be about something else; only the PR title matched), and "the lockfile refresh fixes every service that installs the new version" (false: consumers resolve from their own lockfiles; the reviewer caught it after the claim had already reached Giga).
 
 Each correction cost a round and some of Giga's trust. Measuring was cheap

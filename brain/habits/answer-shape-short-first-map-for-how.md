@@ -51,3 +51,14 @@ short-first too: say the result in plain words first, then evidence, then caveat
 twice ("allright again, simple steps how to fix cleanly") after a long first answer.
 In a long first-day onboarding the same day, numbered blocks Giga could paste one at a
 time, each ending in one "reply done" checkpoint, kept ~40 prompts moving.
+
+**Evidence (long verification runs):** 2026-10-28, a 26-repo upgrade test ran
+~6 hours in the background. Mid-run updates led with harness repairs ("fixed
+the JUnit capture", "patched network cleanup"); Giga asked "what is the
+verdict? where are we?" twice and then "I never asked to fix anything" (the
+fixes were to Claude's own test scripts, never the repos, but it read as scope
+creep).
+**Signal:** a background batch is reporting progress, or Giga asks "where are we".
+**Next time:** every update opens with the running verdict and its count
+("19/26 done: 0 regressions"); harness repairs collapse into one line
+("harness: 3 fixes to my scripts, no repo touched") unless they change confidence.
