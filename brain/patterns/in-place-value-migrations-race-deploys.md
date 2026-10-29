@@ -29,5 +29,14 @@ and let the old rows be wrong. If it must exist: limit it by a timestamp or
 marker, check the maximum after scaling, round (don't truncate) in down(), and
 run it in the same step as the cutover.
 
+**Second case, column drops (2026-10-29):** a removal PR deleted the code
+that read a column and dropped the column in the same deploy. The pipeline runs
+migrations as a separate task *before* the rolling update, so for a few minutes
+old tasks still issue explicit SELECTs/writes on a column that's gone. The
+textbook fix is two deploys (code first, drop later). Giga accepted one deploy
+per repo at a quiet hour instead. Either way, say the window out loud in the
+release order and check how the pipeline orders migrations vs tasks before
+promising "safe".
+
 **Tests won't show this** (it's a rollout property), hence a background
 `reviewer` pass on any data or money diff.

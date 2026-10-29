@@ -35,7 +35,13 @@ and each "are you absolutely sure?" turned up more:
 3. Present the whole table with a recommended now/later split. "Later" is a
    proposal for Giga to accept, never a quiet default. Write it nowhere outward
    (a ticket, a PR) until Giga has chosen.
-4. Done when a re-run of the same grep, after the PRs, shows only the hits Giga
+4. Not every hit gets removed. Before deleting an allow-list or routing entry
+   for the dead thing, read the order of the gates: 2026-10-29, the proxy
+   checked its ACL *before* the "decommissioned → 410 Gone" plan, so removing
+   the ACL entry would have turned 410 into 404. Claude first recommended
+   removing it, then reversed after reading the code; an earlier decommissioned
+   route kept its entry for the same reason. The tombstone is a keep.
+5. Done when a re-run of the same grep, after the PRs, shows only the hits Giga
    chose to keep (old migrations, for example).
 
 **Signal:** "deprecate", "remove", "clean up leftovers", "sunset"; a team lead
