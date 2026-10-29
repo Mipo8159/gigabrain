@@ -75,3 +75,5 @@ was luck, not process.
   reached the transcript.
 
 Related: [[giga-commits-are-mine-to-make]], [[local-only-edits-get-a-commit-guard]], [[bang-commands-are-copy-paste-ready]], [[test-guards-against-innocent-lookalikes]]
+
+- 2026-10-30 (work repo, 6th case): a local SSO helper script echoed the full temporary cloud session credentials into the chat when sourced. Warned, recommended masking the echo in the script; values never repeated. Scripts that `export` credentials belong in the scan too, not only READMEs.
