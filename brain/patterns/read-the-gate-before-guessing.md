@@ -29,6 +29,10 @@ nothing.
 - When a CI test step shows only an exit code (junit reporter), download the
   test-results artifact to get the failing test's name before calling it a
   flake.
+- Same for monitoring: 2026-10-29, the observability site was blocked by org
+  policy in the browser. After one navigate attempt, the exact queries
+  (time windows, how to read a match / gap / clean result) went to Giga in the
+  same turn. No guessed verdict.
 
 **Signal:** 403/blocked on a gate, "1 new issue" with no details, or a sentence
 starting "this will…" about a bot.
