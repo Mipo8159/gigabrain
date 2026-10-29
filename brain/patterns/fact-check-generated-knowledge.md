@@ -62,6 +62,16 @@ works. The checker picks the 10 claims most likely wrong (status, callers,
 counts, deploy target) and re-runs the command or grep behind each. In a 2-card
 smoke run it fixed 4 of 24 claims (17%), all counts or omissions taken from a
 single `gh` call. Measure the wrong rate on a smoke run before fanning out to ~100 items.
+At scale (2026-10-29, ~40 cards, 80 agents): the checker re-ran 419 claims and fixed
+69 (**16.5%**, the smoke run had predicted 17%). The error classes repeated exactly:
+exact counts written without the command behind them, line *ranges*, auth exemptions
+paraphrased ("skips both checks" when it skipped one), and facts read from the local
+working tree while clones sat on feature branches. "What calls what" was almost always
+right. The fix went into the author and checker prompts before the next batch: read only
+through `git show origin/<default>:<path>`, every count cites the command that produced
+it (or is written "~N (inferred)"), quote guard conditions verbatim, single-line refs.
+Sizing: tokens are not wall-clock. ~6M subagent tokens ran in 30 min because the
+pipeline fans out; the usage window, not time, is the limit to plan around.
 
 **Also for docs Claude writes itself (2026-10-20):** a workspace CLAUDE.md drafted
 while exploration agents were still running carried two claims from memory, both

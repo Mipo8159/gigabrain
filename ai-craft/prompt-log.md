@@ -273,3 +273,8 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "/teach mcp-future, to the core, backend view. Hook: my lead's demo <artifact link> on the staging connector (read its tool descriptions, don't call tools). Must answer: what MCP replaces vs what it doesn't, use cases, where engineering is going (argued, labelled opinion). Done when check-lesson + check-exam pass and /learn opens it; give me a 10-line answer in chat too."
 - **Why:** it named the tool and a fallback name, which was good. But "we already have one called mcp" was a lab, not a lesson, which cost a lookup; and no depth, done-line or staging boundary was given, so Claude had to supply all three.
 
+
+## 2026-10-29 · launching an unattended batch
+- **Before:** "run 1a, I will be gone for 1-2 hours" → (account flagged) → "assume caffenated mode and start running"
+- **After:** "Run night 1a from the runbook now, in this session (personal account is OK for code reading; no secret files, no live data). Mac stays awake. Done when the night report shows the wrong-claim rate; if it's over 15%, fix the prompts for the next night but don't launch it."
+- **Why:** the first two prompts settled the job and the caffeine question but not the account boundary, which cost a question round; the after-condition ("over 15% → fix, don't launch") was what Claude had to decide alone.
