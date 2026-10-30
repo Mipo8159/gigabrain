@@ -278,3 +278,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "run 1a, I will be gone for 1-2 hours" → (account flagged) → "assume caffenated mode and start running"
 - **After:** "Run night 1a from the runbook now, in this session (personal account is OK for code reading; no secret files, no live data). Mac stays awake. Done when the night report shows the wrong-claim rate; if it's over 15%, fix the prompts for the next night but don't launch it."
 - **Why:** the first two prompts settled the job and the caffeine question but not the account boundary, which cost a question round; the after-condition ("over 15% → fix, don't launch") was what Claude had to decide alone.
+
+## 2026-10-30 · scope rule for a multi-repo removal
+- **Before:** "make changes and build all of the PRs" → (later) "are you sure you are only removing sdk related pieces?" → "only remove pieces concerning to SDK deprecation. nothing else"
+- **After:** "Build the PRs. Every hunk must trace to the removal; list anything else you'd tidy as a separate suggestion, don't include it. Done when CI is green and the bot has no blocking comments."
+- **Why:** the purity rule arrived after the PRs were pushed, so each repo needed a revert commit and a re-review.

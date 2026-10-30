@@ -48,3 +48,19 @@ was not.
 Related: [[giga-wants-argued-recommendations]],
 [[auctionize-real-goal-is-transcoding-template]],
 [[auxiliary-is-the-app-auctionize-is-legacy]].
+
+**Second case, scope creep in a removal PR (2026-10-30):** a multi-repo
+removal PR set also deleted an unused form next to the removed feature,
+changed shared test fixtures, removed a public response field, and wrote
+~70-line rollbacks that rebuild dropped tables. All of it was arguably dead
+code, but none of it was what was asked. Giga: "only remove pieces concerning
+to [the removal]. nothing else. otherwise I will have to explain for each of
+them, which I can not do." Reverting cost a round per repo.
+
+**Signal:** a removal, deprecation or "cleanup" PR in a shared repo that other
+teams review.
+**Next time:** before pushing, walk every hunk and ask "does this trace to the
+thing being removed?" Anything else (adjacent dead code, fixture tidying,
+API-shape changes) goes in a list to Giga as "separate cleanup?", not in the
+diff. For migration `down()`, copy the repo's own precedent (here: an empty
+"No way back") instead of the most thorough option.

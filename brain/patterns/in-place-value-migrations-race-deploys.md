@@ -40,3 +40,11 @@ promising "safe".
 
 **Tests won't show this** (it's a rollout property), hence a background
 `reviewer` pass on any data or money diff.
+
+**Update (2026-10-30):** once Giga said a PR counts as done only after a
+staging check that can come a day later, the same-deploy drop was no longer
+acceptable, and the set was split: phase 1 stops reading and writing, phase 2
+is stacked draft PRs (base = the phase 1 branch) that only drop, merged after
+phase 1 is on prod. The same rule applies to GraphQL: removing a field makes
+older cached frontend bundles fail the whole query, so keep it as an
+`@deprecated` stub returning a constant until the drop PR.
