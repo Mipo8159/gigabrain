@@ -44,6 +44,14 @@ and each "are you absolutely sure?" turned up more:
 5. Done when a re-run of the same grep, after the PRs, shows only the hits Giga
    chose to keep (old migrations, for example).
 
+5. Name every copy of a table. When a feature once moved between services,
+   the old service often keeps its own copy of the same tables. 2026-11-02:
+   "which DB holds the session data?" was first answered with one database;
+   a second copy with the same table names sat in the service the feature had
+   left, and that copy was the one the drop PR removed. Before answering
+   "which database/table", grep every repo's migrations for
+   `createTable('<name>')` and list each database that has it.
+
 **Signal:** "deprecate", "remove", "clean up leftovers", "sunset"; a team lead
 asking "was X removed too?"; Giga asking for certainty about completeness.
 **Next time:** answer the first removal question with the identifier list and the

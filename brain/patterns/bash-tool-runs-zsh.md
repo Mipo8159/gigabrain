@@ -39,6 +39,7 @@ only separator.
 **Sixth hit (2026-10-28), twice in one session:** `"$b:tests/test.sh"` became the
 tail of `$b`, and `"t130-$repo-$a:test"` became `…-baseest`. Inside quotes too. In
 loops over refs or image tags, always brace: `"${b}:path"`, `"${a}:test"`.
+**Seventh hit (2026-11-02):** `echo ====` inside a retro's gather step, a third time for that exact form. Reading the rule doesn't stop it; a PreToolUse check for a word starting with `=` would.
 silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
 `:a` (absolute path) modifier. Any `$VAR:` followed by a letter (`:a :h :t :r :e
 :s :u :l`) is a modifier. Write `"${B}:path"`. `echo ===` failed again the same day, and `echo =====` again in a later session that day (a retro, while checking this very rule).
