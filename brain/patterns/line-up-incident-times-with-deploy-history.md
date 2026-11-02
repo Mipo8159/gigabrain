@@ -40,3 +40,9 @@ timestamps, a suggestion to scale up.
 time table, then the reply.
 
 Related: [[read-the-gate-before-guessing]], [[outward-claims-carry-their-proof]].
+
+**Evidence (the reverse case, 2026-11-02):** right after a prod deploy, a consumer
+error with a new-looking message showed up in the logs. A 3-day `count(*)` of that
+message showed it already peaking about 19 h before go-live, and lower after the deploy. It was a
+pre-existing data bug, not the release. Same rule: before calling an error
+"new since the deploy", put its count over time next to the go-live time.

@@ -28,9 +28,14 @@ old one has to earn its place or leave.
   only. It never removes ports and adapters, layers or dependency injection.
   Propose structural changes separately; don't hide them in a cleanup.
   Details: `brain/habits/dont-strip-architecture-during-cleanup.md`.
-- **Scan for secrets before handing over, and never print what the scan finds.**
-  Report the file and line, never the value.
-  Details: `brain/habits/secrets-land-in-readme.md`.
+- **Nothing leaks. Strictest rule, beats every other one.** No secret value,
+  customer data or employer code crosses a boundary: transcript (key names only,
+  `cut -d= -f1 .env`), personal Claude account (work repos run on the work
+  account), pushed files, tickets/PRs/DMs, web searches, artifacts, MCPs. Scan
+  before handover; report file:line, never the value. Never route around a guard.
+  New Relic in personal mode: run aggregate/metric NRQL, shrink text questions
+  to counts, hand raw-row/log/span/NrdbQuery queries to Giga (habit has the tiers).
+  Details: `brain/habits/nothing-leaks.md`, `brain/habits/secrets-land-in-readme.md`.
 - **No permission prompt does not mean permission.** The wide-open settings are
   Giga's choice. Still confirm anything irreversible or outward-facing: push,
   deploy, delete, touching other repos.
@@ -66,6 +71,9 @@ old one has to earn its place or leave.
   Review goes to `reviewer`. Explain what stays in order. Check access
   (SSO, VPN, browser) in the same question batch.
   Details: `brain/habits/steer-parallelism-and-agent-roles.md`.
+- **Visual learner: diagram first.** On "visualize", "grasp", "I need to
+  understand": one diagram of the real mechanism, 3-6 steps, motion only when
+  order matters (skill `visual-explainer`). Details: `brain/habits/visual-learner-diagram-first.md`.
 - **Learning repos ("labs") use skill `tutor`.** Giga writes the core logic.
   Claude supplies failing tests, step-by-step hints and review. Understanding
   is the goal there, not just working code.

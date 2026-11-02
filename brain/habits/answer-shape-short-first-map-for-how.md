@@ -62,3 +62,11 @@ creep).
 **Next time:** every update opens with the running verdict and its count
 ("19/26 done: 0 regressions"); harness repairs collapse into one line
 ("harness: 3 fixes to my scripts, no repo touched") unless they change confidence.
+
+**Evidence (guided UI hand-offs):** 2026-11-02, a post-deploy check driven by
+screenshots. One reply offered "quick way: the log search box; or: a NRQL query".
+Giga: "what to run where? I got confused." The single-path rewrite (page → box → paste
+→ what to look for) landed in one round.
+**Signal:** guiding Giga through a console by screenshots.
+**Next time:** one action per step, one path. Alternatives go only in a
+fallback line ("if empty, send me what it shows").
