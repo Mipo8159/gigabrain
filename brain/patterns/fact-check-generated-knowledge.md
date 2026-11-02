@@ -73,6 +73,12 @@ it (or is written "~N (inferred)"), quote guard conditions verbatim, single-line
 Sizing: tokens are not wall-clock. ~6M subagent tokens ran in 30 min because the
 pipeline fans out; the usage window, not time, is the limit to plan around.
 
+**Agent reports on an internal platform (2026-11-02):** two research agents mapping a
+company's AI features each carried one confident wrong claim: a tool count (44, a grep of the
+registry gave 39) and a ticket titled "PII masking" reported as prompt redaction, when its diff
+only stopped logging request bodies. Count with the command, and read the diff, not the ticket
+title, before a claim goes onto a teaching page.
+
 **Also for docs Claude writes itself (2026-10-20):** a workspace CLAUDE.md drafted
 while exploration agents were still running carried two claims from memory, both
 wrong (an infra repo called "Terraform" was mostly CloudFormation; "every service
