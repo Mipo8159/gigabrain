@@ -40,6 +40,7 @@ only separator.
 tail of `$b`, and `"t130-$repo-$a:test"` became `…-baseest`. Inside quotes too. In
 loops over refs or image tags, always brace: `"${b}:path"`, `"${a}:test"`.
 **Seventh hit (2026-11-02):** `echo ====` inside a retro's gather step, a third time for that exact form. Reading the rule doesn't stop it; a PreToolUse check for a word starting with `=` would.
+**Eighth hit (2026-11-02, later):** `echo ===FILES` as a section separator in a PR inspection, same day as the seventh. Eight hits, no hook yet: the `=`-word check belongs in `global/hooks/guard.py` (deny with "use echo '---'"), not in another reminder.
 silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
 `:a` (absolute path) modifier. Any `$VAR:` followed by a letter (`:a :h :t :r :e
 :s :u :l`) is a modifier. Write `"${B}:path"`. `echo ===` failed again the same day, and `echo =====` again in a later session that day (a retro, while checking this very rule).
