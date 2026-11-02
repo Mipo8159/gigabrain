@@ -21,12 +21,25 @@ Windows and `.command`/`.app` on macOS. Say so before building, and offer one cl
 - **Config:** a committed `.env.example`, a git-ignored `.env`, and env vars of the same name override the file
   (tests, CI). Errors say exactly which key to fill in.
 - **Unsigned warnings** (SmartScreen, Gatekeeper) come from the browser's download mark. `git clone` doesn't set
-  it, so prefer clone; otherwise document "More info → Run anyway" / Privacy & Security → "Open Anyway".
+  it, but a non-technical client has no git: ship a zip of the click-files named one by one (so `.env` and data
+  never ride along), shared to one email, the key sent separately. Document "More info → Run anyway" /
+  Privacy & Security → "Open Anyway", and "unzip first".
+- **Remembered state lives next to the program**, never in the user config dir. A list kept in `%AppData%`
+  made a fresh unzip say "up to date" over an empty folder, and the user called it a bug. The user's model is
+  "this folder is my copy". When a fresh folder re-downloads data that an append-only importer already has,
+  warn on screen before they import it twice.
+- **Data files a person double-clicks:** Excel opens a UTF-8 CSV without BOM as gibberish, splits on the
+  locale's separator, and turns long digit strings into `4.8E+12`. Keep the import CSV as the importer wants
+  it and add a separate `.xlsx` copy for viewing (IDs, barcodes, phones as text cells). Add a BOM to the import
+  file only after a test import proves the importer strips it.
 - Windows: keep the console open at the end ("Press Enter"), or a double-clicked error flashes and vanishes.
 
 **Why:** 2026-10-14: the packaging target moved from exe → zip kit per OS → "one exe for all" → git repo + .env
 within one session; each move was a rebuild. The answers above were what survived. Real runs on the Linux build
 and the macOS launcher (driven on Linux) passed; Windows and Mac binaries were format-checked only.
+2026-11-01/02: the client had no git (zip via a restricted link instead), saw garbled CSVs in Excel (fixed with
+an `.xlsx` copy, read back through LibreOffice: 0 differences on 83k rows), and hit "up to date" after re-unzipping
+because the download list lived in `%AppData%` (moved next to the program).
 **Signal:** "an exe the client double-clicks", "works on Windows, Mac and Linux", "upload the kit to GitHub".
-**Next time:** ask the distribution channel (zip, git repo, store) and who configures it in the first question
-batch, and state the one-file impossibility then.
+**Next time:** ask the distribution channel (zip, git repo, store), who configures it, and whether they will open
+the output files themselves, in the first question batch; state the one-file impossibility then.
