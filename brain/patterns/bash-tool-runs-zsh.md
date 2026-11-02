@@ -47,3 +47,7 @@ silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
 
 **Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument, a word starting with `=`, `$VAR:` followed by a letter.
 **Next time:** quote the glob and inline the list before running, not after the error.
+**Ninth hit (2026-11-02, evening):** `echo =====` between sections of a code sweep. Still no hook.
+**Giga's own terminal is zsh too (2026-11-02):** the `! <cmd>` prefix works only in the Claude
+prompt. Pasted into that terminal, a leading `!` is history expansion/negation and the command
+misfires. When Giga runs a command in their own terminal, give it without `!`.

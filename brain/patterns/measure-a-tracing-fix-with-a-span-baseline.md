@@ -43,3 +43,9 @@ whose only visible effect is in an observability tool.
 call happened; then the same query after the change.
 
 Related: [[prerelease-a-shared-npm-package-to-test-it-in-one-consumer]], [[outward-claims-carry-their-proof]]
+
+**Check the instrumentation before writing the NRQL (2026-11-02).** An OTel-reported
+service (UI breadcrumb "Services - OpenTelemetry") has no `Transaction` events or `appName`;
+query `Span` / `Metric` with `entity.name = '<service>-<env>'` and the `http.server.*` metric
+(name differs by semconv version, so give the fallback). A low steady rpm on an idle service
+is usually the load-balancer health check: facet by route before calling it "in use".

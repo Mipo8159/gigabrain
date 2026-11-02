@@ -24,6 +24,26 @@ boundary, stop and ask. This rule beats speed, convenience and any other rule.
 HAR files stay local; no secret on a command line (it lands in shell history and the
 transcript), use env files or the password manager ([[dev-secrets-live-in-the-password-manager]]).
 
+**Observability queries (New Relic etc.) in personal mode: run, don't block (Giga, 2026-11-02).**
+No guard covers them, and checking one should not cost a round-trip. Sort each NRQL
+query before running it:
+- **Run it:** aggregates with no free text coming back, e.g. `count`, `average`,
+  `percentile`, `rate`, `uniqueCount`, `latest` on `Metric`, `Transaction`, `SystemSample`
+  and similar, faceted by app, host, transaction name, status code, error class or table.
+- **Make it smaller, then run it:** a question about text you can answer with a count or a
+  shape. Use `SELECT count(*) … WHERE x LIKE '%pattern%' FACET appName` instead of
+  `SELECT *`, `uniqueCount(attr)` instead of the values, and `FACET` only on low-risk attributes.
+- **Giga runs it:** the answer needs raw rows or free text: `SELECT *`, `Log`, `Span`/`db.*`/
+  `http.url`/headers/messages, `NrdbQuery` (other people's query text), user/email/account
+  attributes, error messages. Hand over the exact query and a table for sorting the results;
+  Giga pastes back only the shapes.
+  **Hand-off shape (2026-11-02, cost 3 rounds):** the first hand-off carries the click path
+  (how to open the query editor, which tab, which account), each query as ONE line with no
+  comment lines, the Table view, and what to paste back. "Run these" alone got "where to run
+  these" and then "guide me step by step".
+If an aggregate result shows a value anyway (an email as a facet, a token in a transaction
+name), stop, don't repeat it, and tell Giga.
+
 **Mechanical guards** (rules alone fail, so the harness enforces):
 - `guard.py` `secret-read`: denies `Read` and `cat/cp/curl/grep/...` of secret files (loaders like `source .env` pass: no value printed).
 - `settings.json` `permissions.deny`: `Read(**/.env)`, `~/.ssh/**`, cloud creds (from `bin/install.sh`).
