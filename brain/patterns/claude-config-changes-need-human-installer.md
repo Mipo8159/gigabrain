@@ -52,3 +52,8 @@ So for an unattended run, queue config changes as proposals; in an attended run,
 apply them on Giga's explicit request.
 
 Related: [[steer-parallelism-and-agent-roles]]
+
+- 2026-11-02: Giga said "assume all the permissions you need" for one repo, but the
+  secrets guard still denied editing that repo's `.env`. A verbal OK does not lift a
+  hook, and the exception lives in config Claude may not edit. Try once, then hand
+  over the exact `! <command>` and its expected output in the same reply.
