@@ -49,3 +49,8 @@ service (UI breadcrumb "Services - OpenTelemetry") has no `Transaction` events o
 query `Span` / `Metric` with `entity.name = '<service>-<env>'` and the `http.server.*` metric
 (name differs by semconv version, so give the fallback). A low steady rpm on an idle service
 is usually the load-balancer health check: facet by route before calling it "in use".
+
+**Hand over a query ladder, not one faceted query (2026-11-02).** A faceted NRQL came back
+empty twice; Claude blamed the chart, then the account, and only a bare `SELECT count(*)` showed
+the data was there and the query was wrong (3 rounds). Give it in order: bare count on the
+event type → add the WHERE → add the FACET. The first empty step names the broken part.

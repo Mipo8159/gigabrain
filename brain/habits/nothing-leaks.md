@@ -41,6 +41,8 @@ query before running it:
   (how to open the query editor, which tab, which account), each query as ONE line with no
   comment lines, the Table view, and what to paste back. "Run these" alone got "where to run
   these" and then "guide me step by step".
+  Same day, second session: "am I running this correctly?" → "still same" → fixed by a count-first
+  ladder (see [[measure-a-tracing-fix-with-a-span-baseline]]).
 If an aggregate result shows a value anyway (an email as a facet, a token in a transaction
 name), stop, don't repeat it, and tell Giga.
 
