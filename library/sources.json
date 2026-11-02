@@ -325,5 +325,87 @@
       "commands/*.md": "adapter imports skills only; SKILL.md page-shape table covers diff/plan/recap. fact-check is the one worth a command later",
       "configs/* and extension.ts": "other agent hosts (Pi, Cursor, Codex, ...)"
     }
+  },
+  "openai-skills": {
+    "repo": "https://github.com/openai/skills",
+    "local": "/Users/g.kvachakhia/projects/openai-skills",
+    "branch": "main",
+    "license": "Apache-2.0 (per-skill LICENSE.txt), Copyright OpenAI",
+    "pinned_sha": "49f948faa9258a0c61caceaf225e179651397431",
+    "absorbed": "2026-11-02",
+    "skills": {
+      "gh-address-comments": "skills/.curated/gh-address-comments",
+      "gh-fix-ci": "skills/.curated/gh-fix-ci"
+    },
+    "edits": {
+      "gh-address-comments": {
+        "description": "Address review and conversation comments on the open GitHub PR for the current branch: fetch every thread with gh, number and summarise them, let the user pick, fix the picked ones, run tests and draft replies, then stop before any commit, push or posted reply. Use when the user says \"address the PR comments\", \"go through the review\", \"fix what the reviewer asked\", or pastes a PR with review feedback.",
+        "extras": [
+          "scripts/fetch_comments.py"
+        ],
+        "exclude_extras": [
+          "agents/**",
+          "assets/**",
+          "LICENSE.txt"
+        ],
+        "replace": [
+          [
+            " Run all `gh` commands with elevated network access.",
+            ""
+          ],
+          [
+            "Prereq: ensure `gh` is authenticated (for example, run `gh auth login` once), then run `gh auth status` with escalated permissions (include workflow/repo scopes) so `gh` commands succeed. If sandboxing blocks `gh auth status`, rerun it with `sandbox_permissions=require_escalated`.",
+            "Prereq: `gh auth status` must succeed (repo scope). If it fails, ask the user to run `! gh auth login`; never work around it."
+          ],
+          [
+            "- Run scripts/fetch_comments.py which will print out all the comments and review threads on the PR",
+            "- Run `python3 <this skill's directory>/scripts/fetch_comments.py > <scratchpad>/pr_comments.json`. It is read-only: it prints every conversation comment, review and inline review thread (with resolved/outdated state) on the PR as JSON.\n- Skip resolved and outdated threads unless the user asks for them."
+          ],
+          [
+            "- Apply fixes for the selected comments",
+            "- Apply fixes for the selected comments only. A comment you disagree with gets a reasoned reply draft instead of a change.\n\n## 4) Draft replies, then stop\n- Run the repo's tests for what changed and say what was verified.\n- Draft one short reply per addressed thread (what changed, or why not), in the team's tone.\n- Leave the changes in the working tree. Never commit, push, post a reply or resolve a thread without the user's explicit OK for that action; each is outward-facing.\n- List the threads you did not address and why."
+          ]
+        ]
+      },
+      "gh-fix-ci": {
+        "description": "Debug failing GitHub Actions checks on a PR: use gh and the bundled read-only script to pull failing checks and log snippets, summarise the root cause, propose a fix plan, implement only after approval, and leave the fix uncommitted. Use when the user says \"CI is red\", \"why is the build failing on my PR\", \"fix the failing checks\", or pastes a failing Actions run. External CI (CircleCI, Buildkite) is out of scope: report its URL only.",
+        "extras": [
+          "scripts/inspect_pr_checks.py"
+        ],
+        "exclude_extras": [
+          "agents/**",
+          "assets/**",
+          "LICENSE.txt"
+        ],
+        "replace": [
+          [
+            "- If a plan-oriented skill (for example `create-plan`) is available, use it; otherwise draft a concise plan inline and request approval before implementing.",
+            "- Draft the plan inline (or in plan mode for a multi-file fix) and request approval before implementing."
+          ],
+          [
+            "python \"<path-to-skill>",
+            "python3 \"<path-to-skill>"
+          ],
+          [
+            "   - Use the `create-plan` skill to draft a concise plan and request approval.",
+            "   - Draft a concise plan (root cause, smallest fix, how it will be proven) and request approval. Reproduce the failure locally first when the repo has a local copy of the CI steps (for example `tests/test.sh`)."
+          ],
+          [
+            "   - Apply the approved plan, summarize diffs/tests, and ask about opening a PR.",
+            "   - Apply the approved plan, run the failing step locally, and summarize diffs and test results. Leave the changes in the working tree: never commit, push or re-run CI without the user's explicit OK (a push can trigger deploys)."
+          ],
+          [
+            "   - After changes, suggest re-running the relevant tests and `gh pr checks` to confirm.",
+            "   - Once the user has pushed, re-run the script or `gh pr checks` to confirm green. Report \"plausible\" until that rerun passes."
+          ]
+        ]
+      }
+    },
+    "checklists": {},
+    "skipped": {
+      "davila7/claude-code-templates gh-address-comments": "verbatim fork of this source's skill without its script, plus a PostToolUse hook logging to ~/.claude; absorbed from the original instead",
+      "openai/codex babysit-pr": "not in codex HEAD (2026-11-02); its auto-push/auto-reply loop conflicts with the never-push rule anyway. gh-fix-ci + gh-address-comments cover the parts that stop for approval",
+      "agents/openai.yaml + assets/": "Codex app UI metadata and icons"
+    }
   }
 }

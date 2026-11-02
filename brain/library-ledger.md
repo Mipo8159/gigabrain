@@ -77,3 +77,5 @@ Evidence is one dated, general line: no client names, URLs or schemas.
 | skill `mailtrap-email-integration` | ecc | 2026-10-03 | 0.4 | — |
 | skill `brand-voice` | ecc | 2026-10-03 | 0.4 | — |
 | skill `visual-explainer` | visual-explainer | 2026-10-06 | 0.6 | 2026-10-13 · teach lessons, 9 pages · figure/token rules held up: all pass the render check, light/dark, phone ; 2026-10-14 · lesson rebuild, 9 pages by 9 agents · Paper register, figure and token rules held; kit added interaction on top, no rule needed changing |
+| skill `gh-address-comments` | openai-skills | 2026-11-02 | 0.4 | — |
+| skill `gh-fix-ci` | openai-skills | 2026-11-02 | 0.4 | — |
