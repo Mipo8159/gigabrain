@@ -1,6 +1,6 @@
 ---
 name: db-client-to-a-sibling-instance
-description: "Adding a DB GUI connection to another cloud DB instance: build the hostname from the IaC instance id + a known endpoint's account suffix; check the engine the server reports, not the icon; edit the GUI's config only after the app quits. 2026-11-02."
+description: "Adding a DB GUI connection to another cloud DB instance: build the hostname from the IaC instance id + a known endpoint's account suffix; check the engine the server reports, not the icon; edit the GUI's config only after the app quits; a failing copy = diff its config vs the source first (a clone kept the prod host). 2026-11-02/03."
 metadata:
   type: feedback
 ---
@@ -26,7 +26,25 @@ one.
 - Claude told Giga to use a "Change driver type" button it had never seen. It
   wasn't there, which cost a round.
 
+2026-11-03, the staging pair, copied from the prod connections:
+- The IaC named staging `test`, not `staging` (`-test` instances, `_test`
+  DBs). Public DNS resolved all four private DB names, which proved they
+  existed without touching any data.
+- The copy kept the **prod host** on the Main tab; only the SSH host was
+  changed. The staging bastion couldn't reach prod, so the client said
+  `Expected to read 4 bytes, read 0 bytes`. Claude spent two rounds on an
+  `ssh -v -L` tunnel test before reading the client's config file
+  (non-secret fields only), which showed the wrong host in one command.
+- A second copy was cloned from the wrong source (MySQL instead of MariaDB),
+  so it had both the wrong driver and the wrong host behind a "MariaDB" name.
+  The fix was a config edit with the app closed.
+- The working login lived in a shared password-manager item, found by
+  searching the tunnel hostname, not "test".
+
 **How to apply:**
+0. A copied connection fails: first dump the client's connection config
+   (name, driver, host, db, SSH host; never credentials) for source and copy
+   side by side. Debug the network only if those match.
 1. Endpoint: grep IaC for the instance definitions (`DBInstanceIdentifier`,
    `Engine:`) and the monitoring config's per-env list, then put the id in
    front of a known endpoint's suffix. Present it as derived and let Test
@@ -43,4 +61,5 @@ one.
 screenshot of a connection dialog, an icon that "looks wrong".
 
 **Next time:** grep IaC for the instance list before saying anything about
-which host holds what.
+which host holds what; when a copy fails, diff its config against the source
+before any tunnel test.

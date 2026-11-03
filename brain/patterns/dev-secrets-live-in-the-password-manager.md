@@ -61,5 +61,13 @@ secured and without leaks, as much as possible". What worked, and what went wron
     Nothing lives in the shell, and output is masked even when a command echoes it.
 11. **After a leak:** say so at once, rotate, then prove it (new works, old 401, no-cache build).
 
+12. **"Just get the value from 1Password without showing it":** refuse; output
+    from a session command reaches the model even when it isn't displayed (and
+    in personal mode it crosses accounts). Hand Giga
+    `op item get "<item>" --fields password --reveal | pbcopy` for *their own*
+    terminal (not `!`), then Cmd+V into the app. If `op` is denied too, the
+    vault permission is real; ask the owner. 2026-11-03: worked first time
+    after the app's copy button did nothing.
+
 **Signal:** a new environment needs tokens, cloud keys or MFA.
 **Next time:** password manager → `op run` wrapper → ask rules → verify by shape, never dump resolved config; MFA in a real terminal.

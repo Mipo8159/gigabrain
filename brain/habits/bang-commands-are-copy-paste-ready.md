@@ -31,7 +31,14 @@ because each failure happened before the command ran.
 - Lines copied from a web page's code box brought `$ `, `Copied!` and run-on
   `# comments`; Giga asked before pasting, and a clean block was given.
 
+2026-11-03, Claude broke it itself: an SSH tunnel test went out with
+`<your-ssh-user>@host`, and zsh answered `no such file or directory:
+your-ssh-user`. The value was findable (the repo's key-deploy script names
+the bastion user), so the line should have been filled in from the start.
+
 **How to apply:**
+0. Before writing a placeholder, look for the value (repo scripts, the
+   client's config, an earlier screenshot). Usually it's findable.
 1. In any `!` line Claude writes, no `<…>`, no `{…}` placeholders, no
    trailing prose. One command per code block.
 2. A value Giga must supply → prefer a wrapper that checks the input format
