@@ -51,3 +51,5 @@ silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
 **Giga's own terminal is zsh too (2026-11-02):** the `! <cmd>` prefix works only in the Claude
 prompt. Pasted into that terminal, a leading `!` is history expansion/negation and the command
 misfires. When Giga runs a command in their own terminal, give it without `!`.
+
+2026-11-03: hit again, `git show "$b:tests/test.sh"` read `$b` with the `:t` modifier and every repo looked like it had no CI script. Write `"${b}:path"` in every `git show`/`git cat-file` ref.
