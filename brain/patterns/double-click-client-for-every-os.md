@@ -30,8 +30,13 @@ Windows and `.command`/`.app` on macOS. Say so before building, and offer one cl
   warn on screen before they import it twice.
 - **Data files a person double-clicks:** Excel opens a UTF-8 CSV without BOM as gibberish, splits on the
   locale's separator, and turns long digit strings into `4.8E+12`. Keep the import CSV as the importer wants
-  it and add a separate `.xlsx` copy for viewing (IDs, barcodes, phones as text cells). Add a BOM to the import
-  file only after a test import proves the importer strips it.
+  it and add a separate `.xlsx` copy for viewing (IDs, barcodes, phones as text cells). For a non-Latin script,
+  write the import CSV as UTF-8 **with** BOM: 2026-11-03 the BOM had been held back "until a test import proves it",
+  and the Windows client then hit all three failures (garbled script in Excel, one column, and garbled text after
+  the CRM import, from the wizard's encoding guess or an Excel re-save). Enforce the BOM in the last program before
+  the person (the downloader), whatever the server sent, and make the test reader fail on a file without it. A
+  separator or number-format fix can't live in the CSV (a `sep=` line breaks importers): put "never open/save in
+  Excel; choose UTF-8 + comma in the import" in the program's closing message, where a non-technical user reads.
 - Windows: keep the console open at the end ("Press Enter"), or a double-clicked error flashes and vanishes.
 
 **Why:** 2026-10-14: the packaging target moved from exe → zip kit per OS → "one exe for all" → git repo + .env

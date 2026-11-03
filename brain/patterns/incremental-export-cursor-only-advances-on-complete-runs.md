@@ -19,6 +19,11 @@ real bug or review finding the first time:
    succeeded, ask the ledger rather than listing the directory, and have the client record the ids it fetched in its
    own state file, not infer them from which folders exist. Otherwise deleting an imported folder brings it back.
 8. **Make output deterministic** (`STRING_AGG ... WITHIN GROUP (ORDER BY …)`), or hashes flap. Use language-neutral date literals (`'YYYYMMDD'` on SQL Server).
+   Every "pick one of several rows" (newest card, latest address) needs a total order: break ties on stable ids,
+   never on the order SQL returns rows in. 2026-11-03: a person's name came from "the newest card", ties fell to row
+   order, so the name flipped between runs. Upserted records got the new name, append-only records referencing it by
+   name kept the old one: 229 references stopped linking. 168 unit tests passed; a structural check of the real
+   downloaded files (every reference resolves to its record) found it. Run that check on real output before an import.
 
 **Why:** 2026-10-05: a background reviewer found a cursor-advancing partial run (silent permanent data
 loss), a reversible phone hash, a non-atomic ledger/artifact pair, and nondeterministic aggregates in a

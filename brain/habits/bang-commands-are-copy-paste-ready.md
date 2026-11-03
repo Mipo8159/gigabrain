@@ -46,6 +46,14 @@ because each failure happened before the command ran.
    block, with "wait for the prompt `user@host:~$`". Then verify the result
    yourself (read-only) before the next block.
 
+6. **Anything that prompts for hidden input goes in Giga's own terminal, never `!`.** 2026-11-03:
+   Claude suggested `! gh secret set NAME`. With no TTY, gh read an empty stdin and stored an
+   EMPTY secret without a word; `gh secret list` looked fine, and only the deploy's own
+   "secret is empty" guard caught it. Then Giga pasted the set command together with the next two
+   commands at once; the hidden prompt could have swallowed the next line as the value (it
+   didn't, by luck). Give one command per block, and say "paste only the value at the prompt".
+   Verify by effect (the consumer accepts it), since secret stores never show the value.
+
 **Signal:** Claude is about to write a command for Giga to paste (`!`, an SSH terminal, a server).
 **Next time:** write it as Giga will paste it. If Giga will run it more than
 twice, ship a validating wrapper instead.
