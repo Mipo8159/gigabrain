@@ -26,3 +26,14 @@ push re-runs detection.
 **Signal:** a screenshot of two or more "Deploy / <app> (staging) … Waiting" checks
 plus "which one?".
 **Next time:** run steps 1 and 2 before answering. Approving stays the human's click.
+
+**Related gotcha (2026-11-04): no "Re-run" button.** A run with any job still
+waiting on an environment approval counts as *in progress*, so GitHub shows
+only "Cancel workflow". To redeploy one job: Cancel workflow → open the job →
+Re-run jobs ▾ → Re-run this job (or re-run the whole run and leave the
+unwanted environments unapproved). A reusable deploy job can also come back
+*skipped* with every upstream job green; don't burn rounds on it, trigger it
+via `workflow_dispatch` on the branch instead.
+**Signal:** a screenshot of a job page with only "Cancel workflow" and the
+question "where is rerun?". **Next time:** give the cancel-then-rerun path in
+the first answer.

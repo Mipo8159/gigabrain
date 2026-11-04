@@ -59,3 +59,9 @@ exported attribute for the secret failed on the old code and passed on the
 fix. For any "nothing leaks / nothing else changes" claim, assert the
 negative over the whole output, and read the library line that writes each
 field instead of trusting an option's name.
+
+2026-11-04 (recall is a claim too): asked to recall earlier staging tests for a
+ticket comment, Claude first stated a suite run that had never happened (that
+session only did setup). Before restating what "we did" in another session,
+grep that transcript or its memory note for the run's output; no output, no
+claim. Rows with no real check ("N/A", "we did nothing here") get cut, not padded.
