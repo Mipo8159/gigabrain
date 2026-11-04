@@ -130,3 +130,10 @@ pre .line.is-lit { background: var(--accent-dim); opacity: 1; }
   .frame:has(> svg:not(.fit)) { overflow-x: auto; overscroll-behavior-x: contain; }
   .frame > svg:not(.fit) { min-width: 40rem; }
 }
+
+/* moving token (.kit-tok): a small circle with style="offset-path: path('M…'); --dur: 1200ms; --d: 0ms" and data-only steps.
+   Technique adapted from nicobailon/visual-explainer references/motion.md (MIT). Without JS it rests at the path's end. */
+.kit-tok { offset-distance: 100%; offset-rotate: 0deg; fill: var(--accent); stroke: var(--surface); stroke-width: 2.5; }
+.kit-tok.run { animation: kit-tok var(--dur, 900ms) var(--d, 0ms) cubic-bezier(.45, 0, .25, 1) both; }
+@keyframes kit-tok { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@media (prefers-reduced-motion: reduce) { .kit-tok.run { animation: none; } }

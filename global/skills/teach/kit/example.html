@@ -185,18 +185,20 @@
   </figure>
   <figure data-stepper>
     <div class="frame">
-      <svg viewBox="0 0 720 150" role="img" aria-label="Calls multiply as each of three layers retries three times: 1, 3, 9, 27">
+      <svg data-zoom viewBox="0 0 720 150" role="img" aria-label="Calls multiply as each of three layers retries three times: 1, 3, 9, 27">
         <g data-s="1"><rect class="sh" x="20" y="45" width="140" height="60" rx="6"/><text x="90" y="75">client · 1</text></g>
         <g data-s="2"><path class="edge" d="M160 75H200"/><rect class="sh" x="200" y="45" width="140" height="60" rx="6"/><text x="270" y="75">gateway · 3</text></g>
         <g data-s="3"><path class="edge" d="M340 75H380"/><rect class="sh" x="380" y="45" width="140" height="60" rx="6"/><text x="450" y="75">service · 9</text></g>
         <g data-s="4" class="key"><path class="edge fail" d="M520 75H560"/><rect class="sh" x="560" y="45" width="140" height="60" rx="6"/><text x="630" y="75">database · 27</text></g>
+        <circle class="kit-tok" r="7" data-only="2" style="offset-path: path('M160 75H200'); --dur: 700ms"/>
+        <circle class="kit-tok" r="7" data-only="4" style="offset-path: path('M160 75H560'); --dur: 1400ms"/>
       </svg>
     </div>
     <div class="kit-player">
       <button data-step="prev">← Back</button><span data-step-count></span><button data-step="next">Next →</button>
       <ol class="ve-cap">
         <li>The client makes one call.</li>
-        <li>The gateway retries it up to 3 times.</li>
+        <li data-view="0 20 360 110">The gateway retries it up to 3 times.</li>
         <li>For each of those, the service retries 3 times: 9 calls.</li>
         <li>The database gets up to 27 calls for one user action.</li>
       </ol>

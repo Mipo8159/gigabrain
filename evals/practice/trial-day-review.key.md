@@ -1,6 +1,6 @@
 # Key: practice-trial-day-review (author "Peter Griffin", 5 commits on `solution/peter-griffin`)
 
-A replica of a real Testlio senior-engineer interview (seen on video, 2026-09-14). Format:
+A replica of a real senior-engineer interview at a work company (seen on video, 2026-09-14). Format:
 60 min, screen shared, AI encouraged. "Peter is a teammate; review his submission against
 README (requirements) and SUBMISSION.md (his claims). Find the maximum, discuss fixes for a
 few, implement one or two." Proof the bugs are live: `trial-day-review.verify.sh` (25 rows).
@@ -39,7 +39,7 @@ README tasks to status. The candidate followed that and was steered back twice.
 | S3 | `payload.exp < Date.now()` is seconds vs ms, so it's **always true**: every token with `exp` gets 401, tokens without `exp` never expire | auth.js | blocker | Claude 1.3, **with the wrong reasoning** ("expired tokens pass"). Nobody verified it. |
 | S4 | `sort`, `limit`, `offset` interpolated into raw SQL; `sort=id LIMIT 1 #` rewrites the query, `limit=-1` gives 500 | lib/api/issues.js list | blocker | Claude 1.4, candidate |
 | S5 | `console.log(... ' with token ' + token)` | auth.js | should-fix | Claude 1.5 |
-| S6 | `JWT_SECRET \|\| 'testlio-trial-day-secret'` | config.js | should-fix (interviewer: OK for non-prod) | Claude 1.6 |
+| S6 | `JWT_SECRET \|\| '<company>-trial-day-secret'` | config.js | should-fix (interviewer: OK for non-prod) | Claude 1.6 |
 | S7 | whole body to `Issue.create`/`issue.update`: client sets `id`, `updated_by`, timestamps | issues.js create/update, issue-service.js | should-fix | Claude 1.7 |
 | F1 | `const before = issue` aliases the instance, so `changes` is always `{}` on update | lib/services/issue-service.js update | **blocker (Task 4 core)** | Claude 2.1 |
 | F2 | compare filters `id BETWEEN from AND to` with no `issue_id` | lib/api/revisions.js compare | **blocker (Task 6 + leak)** | Claude 2.2 |

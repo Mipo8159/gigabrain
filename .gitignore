@@ -11,3 +11,5 @@ evals/knowledge/results/
 evals/skills-live/results/
 # apply-script backups (2026-10-19: two were committed by accident)
 *.bak-20*
+# employer terms the client-term scan reads; naming them in a tracked file would leak them
+.githooks/*.local

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """gigabrain guard: one hook process per event, profiles, no dependencies.
 
-Registered by bin/install.sh for PreToolUse (Bash|Edit|Write|MultiEdit),
+Registered by bin/install.sh for PreToolUse (Bash|Edit|Write|MultiEdit|Read|Grep),
 PostToolUse (Edit|Write|MultiEdit), Stop and SessionStart. Routes on
 hook_event_name. Ideas (not code) from ECC's hook set (MIT): block-no-verify,
 GateGuard's deny-once, config-protection, suggest-compact, session-start
@@ -10,6 +10,9 @@ replay guard, stop-time batch typecheck.
   check            event         profiles                what it does
   no-verify        PreToolUse    minimal standard strict hard deny: git --no-verify, -c core.hooksPath, HUSKY=0
   destructive      PreToolUse    minimal standard strict ask the human: rm -r, reset --hard, DROP/TRUNCATE, kubectl delete, ...
+  secret-read      PreToolUse    minimal standard strict hard deny: Read/Grep or cat/grep/git show/curl/... of .env, keys, credential files
+  live-data        PreToolUse    minimal standard strict hard deny, personal account in a work repo only: DB clients,
+                                                         AWS data reads, kubectl logs/exec/cp, ssh/scp (account-gate.py)
   config-protect   PreToolUse    standard strict         deny once: editing existing lint/format/hook config
   compact-hint     PostToolUse   standard strict         context >= 160k: suggest /compact at the next phase boundary
   handoff          SessionStart  standard strict         inject this repo's handoff.md (historical, capped)
@@ -24,11 +27,12 @@ model can't approve itself. Config edits → "deny once": the first attempt is
 denied with a reason, the identical retry passes (state per session in
 $XDG_RUNTIME_DIR or /tmp). Never prints its input back.
 """
-import fnmatch, hashlib, json, os, pathlib, re, shlex, subprocess, sys, time
+import fnmatch, hashlib, importlib.util, json, os, pathlib, re, shlex, subprocess, sys, time
 
-PROFILES = {"minimal": {"no-verify", "destructive"},
-            "standard": {"no-verify", "destructive", "config-protect", "compact-hint", "handoff"},
-            "strict": {"no-verify", "destructive", "config-protect", "compact-hint", "handoff", "stop-typecheck"}}
+PROFILES = {"minimal": {"no-verify", "destructive", "secret-read", "live-data"},
+            "standard": {"no-verify", "destructive", "secret-read", "live-data", "config-protect", "compact-hint", "handoff"},
+            "strict": {"no-verify", "destructive", "secret-read", "live-data", "config-protect", "compact-hint", "handoff",
+                       "stop-typecheck"}}
 STATE_DIR = pathlib.Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"gigabrain-guard-{os.getuid()}"
 HANDOFF_MAX, HANDOFF_DAYS = 4000, 14
 COMPACT_AT, COMPACT_STEP = 160_000, 60_000
@@ -199,6 +203,13 @@ def strip_prefix(toks):
             envs[k] = v
             toks = toks[1:]
         elif os.path.basename(t) in WRAPPER_PREFIX:
+            if t == "aws-vault" and toks[1:2] == ["exec"] and "--" not in toks:  # aws-vault exec [opts] prof cmd
+                toks = toks[2:]
+                while toks and toks[0].startswith("-"):
+                    toks = toks[2:] if toks[0] in ("--duration", "-d", "--mfa-token", "-t", "--region", "--prompt") \
+                        else toks[1:]
+                toks = toks[1:]
+                continue
             if t in ("aws-vault", "dotenv", "doppler", "op", "with-env") and "--" in toks:
                 toks = toks[toks.index("--") + 1:]  # aws-vault exec prod -- cmd, dotenv -e f -- cmd
                 continue
@@ -376,8 +387,73 @@ def destructive(tool, toks, pos, flags, raw):
     return None
 
 
+# 2026-10-29 (Giga): a personal account may work in a work repo (token limits), but live data stays on
+# the work account. These commands pull customer or production data into the transcript.
+DB_DUMPERS = {"pg_dump", "pg_dumpall", "mysqldump", "mongodump", "mongoexport", "redis-cli", "valkey-cli"}
+REMOTE = {"ssh", "scp", "sftp", "mosh", "autossh", "sshpass", "stern"}  # stern tails k8s logs
+LIVE_TOOLS = (DB_CLIENTS | DB_DUMPERS | REMOTE) - {"sqlite3", "sqlite"}  # sqlite: a local file, not a server
+RUNNERS = WRAPPER_PREFIX | {"docker", "podman", "nerdctl", "kubectl", "caffeinate", "script", "parallel", "flock",
+                            "unbuffer", "chronic", "sshpass", "autossh"}
+LIVE_WORD = re.compile(r"(^|[\s;&|(`'\"/])(" + "|".join(sorted(map(re.escape, LIVE_TOOLS | {"aws", "kubectl"}))) + r")\b")
+AWS_DATA = {"logs": {"get-log-events", "filter-log-events", "tail", "start-query", "get-query-results",
+                     "start-live-tail", "get-log-record"},
+            "dynamodb": {"scan", "query", "get-item", "batch-get-item", "execute-statement", "batch-execute-statement",
+                         "transact-get-items", "export-table-to-point-in-time"},
+            "rds-data": {"execute-statement", "batch-execute-statement"},
+            "s3api": {"get-object", "select-object-content"}, "s3": {"presign"},
+            "sqs": {"receive-message"}, "kinesis": {"get-records"}, "athena": {"get-query-results"},
+            "secretsmanager": {"get-secret-value", "batch-get-secret-value"}, "kms": {"decrypt"},
+            "ssm": {"get-parameter", "get-parameters", "get-parameters-by-path", "get-parameter-history",
+                    "start-session", "send-command", "get-command-invocation"},
+            "cognito-idp": {"list-users", "admin-get-user", "list-users-in-group"},
+            "ec2": {"get-console-output"}, "lambda": {"invoke"}, "ecs": {"execute-command"}}
+GIT_HOSTS = re.compile(r"^git@(github\.com|gitlab\.com|bitbucket\.org)$")
+
+
+def aws_live(pos):
+    """(service, op) anywhere in the positionals: global options' values (--query X) shift them."""
+    for i, x in enumerate(pos[:-1]):
+        if pos[i + 1] in AWS_DATA.get(x, ()):
+            return f"aws {x} {pos[i + 1]}"
+        if x == "s3" and pos[i + 1] in ("cp", "sync", "mv") and any(y.startswith("s3://") for y in pos[i + 2:-1]):
+            return f"aws s3 {pos[i + 1]} download"  # an s3:// source; s3:// only as the last arg is an upload
+    return None
+
+
+def live_data(tool, toks, pos, flags):
+    p0, p1 = (pos + ["", ""])[:2]
+    if {"--help", "--version"} & flags or p0 == "help" or toks[1:] == ["-V"]:  # not -h: --host for psql/mysql
+        return None
+    if tool in LIVE_TOOLS - REMOTE:
+        return f"{tool} reads a database"
+    if tool == "aws" and aws_live(pos):
+        return f"{aws_live(pos)} reads cloud data"
+    if tool in ("sls", "serverless", "sam", "awslogs", "saw", "cw") and (
+            "logs" in pos[:2] + [tool] or "invoke" in pos[:1] and p1 != "local"):
+        return f"{tool} {p0} reads deployed data"
+    if tool == "kubectl" and (p0 in ("logs", "exec", "cp", "attach", "debug") or p0 == "get" and p1.startswith("secret")):
+        return f"kubectl {p0} reads from the cluster"
+    if tool == "ssh" and "-T" in flags and any(GIT_HOSTS.match(x) for x in pos):
+        return None  # ssh -T git@github.com: an auth check, no shell
+    if tool in REMOTE or tool == "rsync" and any(":" in x and not x.startswith("/") for x in pos):
+        return f"{tool} opens a remote server"
+    return None
+
+
+def via_runner(toks):
+    """docker run … psql, xargs -I{} psql, caffeinate psql: a live tool handed to a runner as an argument."""
+    i = 0
+    while i < len(toks) and re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[i]):
+        i += 1
+    if i < len(toks) and os.path.basename(toks[i]) in RUNNERS:
+        hit = next((os.path.basename(t) for t in toks[i + 1:] if os.path.basename(t) in LIVE_TOOLS), None)
+        if hit:
+            return f"{os.path.basename(toks[i])} runs {hit}"
+    return None
+
+
 def analyse(cmd, depth=0, carry=None):
-    """[(kind, what)] for a Bash command: kind 'no-verify' (hard deny) or 'destructive' (ask).
+    """[(kind, what)] for a Bash command: kind 'no-verify' (hard deny), 'destructive' (ask) or 'live-data'.
     Fails closed: anything it can't parse is 'destructive' (a human looks), never silently allowed."""
     if len(cmd) > MAX_CMD:
         return [("destructive", "command too long to analyse safely")]
@@ -388,8 +464,14 @@ def analyse(cmd, depth=0, carry=None):
     for s in subs:
         if depth < 3:
             found += analyse(s, depth + 1, carry)
+        st = tokens(s)  # $(which psql) -c …: the substitution names the tool
+        if st[:1] and st[0] in ("which", "command", "whence", "type") and LIVE_TOOLS & set(map(os.path.basename, st)):
+            found.append(("live-data", f"$({' '.join(st[:3])}) runs a live-data tool"))
     for seg in segs:
         toks = tokens(seg)
+        vr = via_runner(toks)
+        if vr:
+            found.append(("live-data", vr))
         if toks and toks[0] == "export":  # export HUSKY=0; git commit …
             carry.update(dict(x.split("=", 1) for x in toks[1:] if "=" in x))
             continue
@@ -407,6 +489,9 @@ def analyse(cmd, depth=0, carry=None):
         d = destructive(tool, toks, pos, flags, seg)
         if d:
             found.append(("destructive", d))
+        ld = live_data(tool, toks, pos, flags)
+        if ld:
+            found.append(("live-data", ld))
     return found
 
 
@@ -487,14 +572,147 @@ def deny_once(inp, key, reason):
     return True
 
 
+# 2026-10-29 (Giga: "nothing leaks"): a secret's value must never enter the transcript. Key names are
+# fine (`cut -d= -f1 .env`, `grep -c KEY .env`), and so are loaders and local copies (`source .env`,
+# `cp .env.example .env`); printing, searching, diffing or uploading the file is not.
+SECRET_FILE = re.compile(r"(^|/)(\.env(\.[\w.*-]+|\*)?|\.envrc|\.npmrc|\.pypirc|\.netrc|\.pgpass|id_(rsa|dsa|ecdsa|ed25519)|"
+                         r"[^/]*credentials(\.json)?|secrets?\.(ya?ml|json)|[^/]*\.tfvars|"
+                         r"[^/]*\.(pem|p12|pfx|key|keystore|jks)|\.kube/config|\.docker/config\.json)$")
+SECRET_SAFE = re.compile(r"\.(example|sample|template|dist|defaults?)$|(^|/)\.env\.(example|sample|template)|"
+                         r"(^|/)(fullchain|chain|ca|cacert|cert)[^/]*\.pem$")
+SECRET_READERS = {"cat", "bat", "head", "tail", "less", "more", "nl", "tac", "strings", "xxd", "od", "hexdump",
+                  "base64", "scp", "rsync", "curl", "wget", "awk", "sed", "grep", "rg", "cut", "sort", "uniq",
+                  "column", "jq", "yq", "python", "python3", "node", "ruby", "perl", "open", "pbcopy", "diff",
+                  "gpg", "zip", "tar", "nc", "vim", "vi", "nano", "code", "echo", "printf"}
+GIT_READS = {"show", "diff", "log", "cat-file", "grep", "blame"}
+SHELLS = {"bash", "sh", "zsh"}
+
+
+def secret_path(t):
+    t = t or ""
+    t = t.split("=", 1)[1] if t.startswith("-") and "=" in t else t
+    t = t.lstrip("@<")  # curl -d @.env, input redirection
+    if ":" in t and "://" not in t:
+        t = t.rsplit(":", 1)[1]  # git show HEAD:.env
+    return bool(SECRET_FILE.search(t)) and not SECRET_SAFE.search(t)
+
+
+def secret_reads(cmd, depth=0):
+    """'<reader> <secret file>' pairs in a Bash command, per ;/&&/|/newline segment, looking inside
+    $(...), backticks, subshells, braces and `bash -c '...'`. An accident guard, not a sandbox."""
+    if len(cmd) > 20_000:  # shlex is slow on huge input; fail closed on any secret-looking name instead
+        return ["(long command) secret file"] if re.search(r"\.env\b(?!\.(example|sample|template))|id_(rsa|ed25519)|\.pem\b", cmd) else []
+    flat = re.sub(r"\$\(|[`(){}\n]", " ; ", cmd)
+    try:
+        lex = shlex.shlex(flat, posix=True, punctuation_chars=";&|")
+        lex.whitespace_split = True
+        toks = list(lex)
+    except ValueError:
+        return []
+    segs, cur = [], []
+    for t in toks:
+        if t and set(t) <= set(";&|"):
+            segs.append(cur); cur = []
+        else:
+            cur.append(t)
+    segs.append(cur)
+    hits = []
+    for seg in segs:
+        hits += [f"< {pathlib.Path(b).name}" for a, b in zip(seg, seg[1:]) if a == "<" and secret_path(b)]
+        seg = [t for t in seg if not re.match(r"^[A-Za-z_]\w*=", t)]
+        while seg and seg[0] in ("sudo", "env", "command", "nice", "time", "xargs", "nohup", "timeout"):
+            seg = seg[2:] if seg[0] == "timeout" and len(seg) > 1 and re.match(r"^[\d.]+[smhd]?$", seg[1]) else seg[1:]
+        if not seg:
+            continue
+        prog = os.path.basename(seg[0])
+        if prog in SHELLS and "-c" in seg and depth < 2:
+            i = seg.index("-c")
+            hits += secret_reads(seg[i + 1], depth + 1) if i + 1 < len(seg) else []
+            continue
+        if prog == "git":
+            sub = next((t for t in seg[1:] if not t.startswith("-")), "")
+            if sub not in GIT_READS:
+                continue
+        elif prog not in SECRET_READERS:
+            continue
+        if prog == "grep" and any(re.match(r"^-[A-Za-z]*[clqL]", t) for t in seg[1:]):
+            continue  # count / list / quiet: no values printed
+        if prog == "rg" and any(re.match(r"^-[A-Za-z]*[clq]", t) or t == "--files-with-matches" for t in seg[1:]):
+            continue
+        if prog == "cut" and any(re.match(r"^(-f|--fields=?)1$", t) or t == "-f1" for t in seg[1:]):
+            continue  # cut -d= -f1: key names only
+        hits += [f"{prog} {pathlib.Path(t.lstrip('@<')).name}" for t in seg[1:] if secret_path(t)]
+    return hits
+
+
+def cd_targets(cwd, cmd):
+    """Directories a Bash command moves into (cd/pushd), resolved against cwd."""
+    out = []
+    for seg in scan(cmd)[0] if cmd and len(cmd) <= MAX_CMD else []:
+        t = tokens(seg)
+        if len(t) > 1 and t[0] in ("cd", "pushd"):
+            out.append(os.path.join(cwd, os.path.expanduser(t[-1])))
+    return out
+
+
+def personal_mode(cwd, cmd=""):
+    """account-gate.py's mode is 'personal' here or in any directory the command cd's into.
+    Fails closed: if the gate can't answer, assume personal."""
+    cwd = cwd or os.getcwd()
+    try:
+        spec = importlib.util.spec_from_file_location("account_gate", pathlib.Path(__file__).resolve().parent / "account-gate.py")
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        return any(gate.mode(d) == "personal" for d in [cwd, *cd_targets(cwd, cmd)])
+    except Exception:
+        return True
+
+
+# 2026-10-29 (reviewer): in personal mode the model must not switch the guard off. `--mark-work` would record the
+# personal org as work, deleting a registry turns the mode off, ~/.claude.json holds the org (and the email),
+# settings files hold the hooks. Giga's own `! cmd` doesn't pass PreToolUse, so his path stays open.
+TAMPER = re.compile(r"account-gate\.py|accounts\.local\.json|projects\.local\.json|gigabrain/global/hooks|"
+                    r"\.claude\.json|\.claude/settings[\w.-]*\.json|claude_desktop_config")
+
+
 def pre_tool(inp, checks):
     tool, ti = inp.get("tool_name"), inp.get("tool_input") or {}
+    if "live-data" in checks:
+        text = ti.get("command") if tool == "Bash" else " ".join(
+            str(ti.get(k) or "") for k in ("file_path", "path", "glob", "notebook_path"))
+        if text and TAMPER.search(text) and personal_mode(inp.get("cwd"), text if tool == "Bash" else ""):
+            deny("gigabrain guard: personal mode (a personal Claude account in a work repo) can't touch the account "
+                 "gate, its registries, ~/.claude.json or Claude settings. Giga changes these with `! cmd` or "
+                 "on the work account. Never work around this.")
+            return
+    if "secret-read" in checks:
+        if tool == "Bash":
+            hits = secret_reads(ti.get("command") or "")
+        elif tool in ("Read", "Grep"):  # Grep in content mode prints values just like Read
+            paths = [ti.get("file_path"), ti.get("path"), ti.get("glob")]
+            hits = [pathlib.Path(x).name for x in paths if x and secret_path(x)]
+        else:
+            hits = []
+        if hits:
+            deny(f"gigabrain guard: {hits[0]} would put a secret's value into the transcript (rule: nothing leaks). "
+                 "Read key names only (`cut -d= -f1 <file>`, `grep -c KEY <file>`), or ask the user to check the "
+                 "value themselves. Never work around this.")
+            return
     if tool == "Bash":
         found = analyse(ti.get("command", ""))
         nv = [w for k, w in found if k == "no-verify"]
         if "no-verify" in checks and nv:
             deny(f"gigabrain guard: skipping git hooks ({nv[0]}) is not allowed. The hook is the secret scan or "
                  "the test gate: fix what it reports. If it is a false positive, tell the user and let them decide.")
+            return
+        ld = [w for k, w in found if k == "live-data"]
+        cmd = ti.get("command") or ""
+        if not ld and any(w.startswith(("unbalanced", "command too long")) for _, w in found) and LIVE_WORD.search(cmd):
+            ld = ["an unparsable command naming a live-data tool"]  # else a human could approve it as "destructive"
+        if "live-data" in checks and ld and personal_mode(inp.get("cwd"), cmd):
+            deny(f"gigabrain guard: {ld[0]}, and this work repo is on a personal Claude account (personal mode). "
+                 "Live data stays on the work account (rule: nothing leaks). Ask Giga to run it there or switch "
+                 "with /login. Never work around this (wrapper scripts, npm scripts, curl to the same data).")
             return
         ds = [w for k, w in found if k == "destructive"]
         if "destructive" in checks and ds:

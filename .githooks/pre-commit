@@ -95,15 +95,19 @@ def main():
     # Terms are case-insensitive; one per line in .githooks/client-terms.
     # Was brain/ only until 2026-10-14: a client name slipped into labs.md,
     # ai-craft/ and me/ unflagged.
-    try:
-        with open(".githooks/client-terms") as tf:
-            terms = [t.split("#", 1)[0].strip().lower() for t in tf]
-        terms = [t for t in terms if t]
-    except FileNotFoundError:
-        terms = []
+    # .githooks/client-terms.local (gitignored, 2026-10-23) holds terms that must not
+    # appear even in the tracked list, e.g. the current employer's name.
+    terms = []
+    for tpath in (".githooks/client-terms", ".githooks/client-terms.local"):
+        try:
+            with open(tpath) as tf:
+                terms += [t.split("#", 1)[0].strip().lower() for t in tf]
+        except FileNotFoundError:
+            pass
+    terms = [t for t in terms if t]
     for f in files:
         rel = f[2:] if f.startswith("./") else f
-        if rel == ".githooks/client-terms" or not os.path.isfile(f):
+        if rel.startswith(".githooks/client-terms") or not os.path.isfile(f):
             continue
         lines = read_lines(f) or []
         for t in terms:

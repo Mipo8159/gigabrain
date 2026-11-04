@@ -26,6 +26,13 @@ has the full context, and Giga is present when it pushes.
   corrections and failures only (prompts, plus the `is_error` tool results;
   never the full file). Count them in the reply ("caught up on N missed
   sessions"). Skip any whose transcript is gone.
+- Lesson files from client knowledge bases: each path listed in
+  `G/inbox/lesson-sources.txt` (gitignored, so client paths stay local). Read
+  only the lines below its last `<!-- retro consumed YYYY-MM-DD -->` marker,
+  then append a new marker to that file (it's local; never commit it). Every
+  lesson from there goes through the bar in step 2 and is rewritten fresh with
+  no client, team, service, ticket or person names; the client-term hook is the
+  backstop, not the method.
 
 ## 2. Apply the bar, then write
 

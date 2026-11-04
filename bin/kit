@@ -26,6 +26,8 @@ import datetime, fnmatch, hashlib, json, os, pathlib, re, subprocess, sys
 G = pathlib.Path(__file__).resolve().parent.parent
 KIT = G / "kit"
 REGISTRY = pathlib.Path(os.environ.get("GIGABRAIN_KIT_REGISTRY", KIT / "projects.json"))  # tests point this elsewhere
+# 2026-10-23: client repo paths name the employer, so they live in a gitignored sibling, never the pushed registry
+LOCAL_REGISTRY = REGISTRY.with_name("projects.local.json")
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", ".next", "venv", ".venv", "__pycache__", "coverage",
              "cdk.out", ".serverless", ".turbo", ".nx", "vendor", "target", ".terraform", ".claude"}
 MEMORY_ROOT = pathlib.Path(os.environ.get("GIGABRAIN_MEMORY_ROOT", G / "memory"))  # selftest redirects
@@ -234,14 +236,23 @@ def selection(stack_names):
 
 # ---------- registry ----------
 def registry():
-    return load_json(REGISTRY, {"version": 1, "projects": {}})
+    reg = load_json(REGISTRY, {"version": 1, "projects": {}})
+    reg["projects"].update(load_json(LOCAL_REGISTRY, {"projects": {}})["projects"])
+    return reg
+
+
+def save_registry(reg):
+    split = lambda client: {k: v for k, v in reg["projects"].items() if (v.get("kind") == "client") == client}
+    # local first: a crash between the writes then leaves a duplicate the pushed file can't leak
+    dump_json(LOCAL_REGISTRY, {"version": reg.get("version", 1), "projects": split(True)}, False)
+    dump_json(REGISTRY, {**reg, "projects": split(False)}, False)
 
 
 def register(repo, req, dry):
     reg = registry()
     reg["projects"][str(repo)] = {"kind": req["kind"], "memory": req.get("memory"), "applied": TODAY}
     if not dry:
-        dump_json(REGISTRY, reg, False)
+        save_registry(reg)
 
 
 # ---------- apply ----------
@@ -638,7 +649,7 @@ def remove(repo, dry):
             sys.exit(f"kit: {repo} does not exist and is not in kit/projects.json")
         reg["projects"].pop(key)
         if not dry:
-            dump_json(REGISTRY, reg, False)
+            save_registry(reg)
         print(f"removed {key} from kit/projects.json (path gone)" + (" (dry run)" if dry else ""))
         return
     st = load_json(repo / STATE, None)
@@ -685,7 +696,7 @@ def remove(repo, dry):
             (repo / f).unlink(missing_ok=True)
         reg = registry()
         reg["projects"].pop(str(repo), None)
-        dump_json(REGISTRY, reg, False)
+        save_registry(reg)
     print(f"removed {repo}" + (" (dry run)" if dry else ""))
 
 

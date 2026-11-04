@@ -30,6 +30,23 @@
     const code = root.dataset.code ? document.getElementById(root.dataset.code) : null;
     const lines = code ? $$('.line', code) : [];
     let i = 0, timer = null;
+    const toks = $$('.kit-tok', root);
+    // zoom: a caption li with data-view="x y w h" moves the svg[data-zoom] camera there; no data-view = home view
+    const cam = $('svg[data-zoom]', root), home = cam?.getAttribute('viewBox');
+    let anim = 0;
+    const zoom = (view) => {
+      if (!cam) return;
+      const to = (view || home).split(/[\s,]+/).map(Number), from = cam.getAttribute('viewBox').split(/[\s,]+/).map(Number);
+      cancelAnimationFrame(anim);
+      if (still || to.join() === from.join()) { cam.setAttribute('viewBox', to.join(' ')); return; }
+      const t0 = performance.now(), ms = 650, ease = (x) => 1 - Math.pow(1 - x, 3);
+      const tick = (now) => {
+        const x = ease(Math.min(1, (now - t0) / ms));
+        cam.setAttribute('viewBox', from.map((f, j) => (f + (to[j] - f) * x).toFixed(1)).join(' '));
+        if (x < 1) anim = requestAnimationFrame(tick);
+      };
+      anim = requestAnimationFrame(tick);
+    };
     root.classList.add('ve-steps', 'js-stepper');
     if (!root.hasAttribute('tabindex')) root.tabIndex = 0;
     if (range) { range.min = 0; range.max = n - 1; range.setAttribute('aria-label', 'Step'); }
@@ -41,6 +58,10 @@
         const on = el._only ? el._only.has(i + 1) : +el.dataset.s <= i + 1;
         el.classList.toggle('on', on); el.classList.toggle('now', el._only ? on : +el.dataset.s === i + 1);
       }
+      // tokens (.kit-tok, technique from nicobailon/visual-explainer motion.md, MIT): run once along their
+      // offset-path on every step that shows them; under reduced motion they just sit at the end of the path
+      for (const t of toks) { t.classList.remove('run'); if (t.classList.contains('on')) { void t.getBoundingClientRect(); t.classList.add('run'); } }
+      zoom(caps[i]?.dataset.view);
       caps.forEach((c, j) => { c.hidden = j !== i; c.dataset.n ||= `${j + 1} / ${caps.length}`; });
       const span = caps[i]?.dataset.lines;
       if (lines.length) {

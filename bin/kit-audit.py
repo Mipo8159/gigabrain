@@ -397,8 +397,11 @@ def main(argv):
     targets = []
     if argv[:1] == ["--all"]:
         regf = pathlib.Path(os.environ.get("GIGABRAIN_KIT_REGISTRY", G / "kit/projects.json"))  # same knob as bin/kit
-        reg = json.loads(regf.read_text()) if regf.exists() else {"projects": {}}
-        targets = sorted(reg["projects"])
+        # 2026-10-23: client repos live in the gitignored sibling bin/kit writes; --all must cover both
+        targets = []
+        for f in (regf, regf.with_name("projects.local.json")):
+            targets += list(json.loads(f.read_text())["projects"]) if f.exists() else []
+        targets = sorted(set(targets))
         if not targets:
             print("note: kit/projects.json has no projects yet (kit apply <repo>)", file=sys.stderr)
     elif argv:

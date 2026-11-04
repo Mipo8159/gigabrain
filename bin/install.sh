@@ -12,7 +12,8 @@
 #   4. ~/.claude/settings.json      += cleanupPeriodDays 365, SessionStart inbox
 #                                      notice, ask-before git commit/push, guard hooks
 #                                      (PreToolUse/PostToolUse/Stop/SessionStart),
-#                                      session-log (PreCompact/SessionEnd), statusline
+#                                      session-log (PreCompact/SessionEnd), awake (caffeinate
+#                                      while Claude works), statusline
 #                                      (only if none is set), agent teams env flag
 #   4b. ~/.local/bin/kit            -> bin/kit (per-project apply/doctor)
 #   6. newEra repos: autoMemoryDirectory -> gigabrain/memory/newEra
@@ -66,6 +67,12 @@ for rule in ["Bash(git commit:*)", "Bash(git push:*)"]:
 allow = s["permissions"].setdefault("allow", [])
 lib_read = f"Read(/{G}/library/**)"
 if lib_read not in allow: allow.append(lib_read)
+# 2026-10-29 (nothing leaks): secret files never enter the transcript; guard.py covers Bash readers too.
+deny = s["permissions"].setdefault("deny", [])
+for rule in ["Read(**/.env)", "Read(**/.env.local)", "Read(**/.env.*.local)", "Read(**/.env.production)",
+             "Read(**/.env.staging)", "Read(~/.ssh/**)", "Read(~/.aws/credentials)", "Read(~/.netrc)",
+             "Read(~/.npmrc)", "Read(**/*.pem)"]:
+    if rule not in deny: deny.append(rule)
 hooks = s.setdefault("hooks", {})
 def ensure(event, cmd, matcher=None, timeout=None):
     groups = hooks.setdefault(event, [])
@@ -78,9 +85,18 @@ def ensure(event, cmd, matcher=None, timeout=None):
         hook["timeout"] = timeout
     groups.append(({"matcher": matcher} if matcher else {}) | {"hooks": [hook]})
 ensure("SessionStart", f"{G}/global/hooks/inbox-status.sh")
+# 2026-10-29: account gate, first, before coach: personal account in a work repo = personal mode (notice; guard denies live data).
+gate = f"python3 {G}/global/hooks/account-gate.py"
+ups = hooks.setdefault("UserPromptSubmit", [])
+if not any(h.get("command") == gate for g in ups for h in g.get("hooks", [])):
+    ups.insert(0, {"hooks": [{"type": "command", "command": gate, "timeout": 10}]})
 ensure("UserPromptSubmit", f"python3 {G}/global/hooks/coach.py")
 guard = f"python3 {G}/global/hooks/guard.py"  # one dispatcher; profile via .claude/gigabrain.json "hooks"
-ensure("PreToolUse", guard, "Bash|Edit|Write|MultiEdit", 10)
+for g in hooks.get("PreToolUse", []):  # 2026-10-29: Read and Grep joined the matcher (secret-read check)
+    if g.get("matcher") in ("Bash|Edit|Write|MultiEdit", "Bash|Edit|Write|MultiEdit|Read") \
+            and any(h.get("command") == guard for h in g.get("hooks", [])):
+        g["matcher"] = "Bash|Edit|Write|MultiEdit|Read|Grep"
+ensure("PreToolUse", guard, "Bash|Edit|Write|MultiEdit|Read|Grep", 10)
 ensure("PostToolUse", guard, "Edit|Write|MultiEdit", 10)
 ensure("SessionStart", guard, None, 10)
 ensure("Stop", guard, None, 150)
@@ -88,13 +104,19 @@ ensure("Stop", guard, None, 150)
 log = f"python3 {G}/global/hooks/session-log.py"
 ensure("PreCompact", log)
 ensure("SessionEnd", log)
+# 2026-10-28: keep the Mac awake (caffeinate -di) while Claude works or a background job runs.
+awake = f"python3 {G}/global/hooks/awake.py"
+for ev in ("UserPromptSubmit", "Stop", "StopFailure", "SessionEnd"):
+    ensure(ev, awake, None, 10)
+ensure("PostToolUse", awake, "Workflow|Agent|Task|Bash", 10)
 s.setdefault("statusLine", {"type": "command", "command": f"python3 {G}/global/statusline.py", "padding": 0})
 # Agent teams (experimental, opted in 2026-10-17). Side effect from the docs: named
 # subagents (reviewer, verifier) may launch as teammates; set "0" here to undo.
 s.setdefault("env", {}).setdefault("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
 json.dump(s, open(path, "w"), indent=2); open(path, "a").write("\n")
-print("  cleanupPeriodDays=365, ask: git commit/push, allow: Read library/**, SessionStart: inbox-status+guard, UserPromptSubmit: coach,"
-      " PreToolUse/PostToolUse/Stop: guard, PreCompact/SessionEnd: session-log, statusLine (if unset), env: agent teams")
+print("  cleanupPeriodDays=365, ask: git commit/push, allow: Read library/**, deny: Read secret files, SessionStart: inbox-status+guard,"
+      " UserPromptSubmit: account-gate+coach,"
+      " PreToolUse/PostToolUse/Stop: guard, PreCompact/SessionEnd: session-log, awake (caffeinate), statusLine (if unset), env: agent teams")
 EOF
 
 echo "4b. kit on PATH"

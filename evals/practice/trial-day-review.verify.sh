@@ -36,7 +36,7 @@ n=$(curl -s "${H[@]}" "$API/issues?sort=id%20LIMIT%201%20%23" | jq '.issues | le
 [ "$n" = 1 ]; check S4 "SQL injection via sort: 'id LIMIT 1 #' rewrites the query" $?
 [ "$(code "${H[@]}" "$API/issues?limit=-1")" = 500 ]; check S4b "limit=-1 reaches SQL unvalidated -> 500" $?
 logs=$(cd "$REPO" && docker compose logs api 2>/dev/null); [[ "$logs" == *"with token ey"* ]]; check S5 "bearer token written to stdout" $?
-grep -q "JWT_SECRET || 'testlio-trial-day-secret'" "$REPO/config.js"; check S6 "hard-coded JWT secret fallback in config.js" $?
+grep -Eq "JWT_SECRET \|\| '[a-z]+-trial-day-secret'" "$REPO/config.js"; check S6 "hard-coded JWT secret fallback in config.js" $?
 FID=$((700000 + RANDOM * 10 + RANDOM % 10))
 forced=$(curl -s "${H[@]}" -X POST "$API/issues" -d "{\"title\":\"mass\",\"id\":$FID,\"updated_by\":\"forged@example.com\"}" | jq -r .issue.id)
 [ "$forced" = "$FID" ]; check S7 "mass assignment: client chooses id / updated_by" $?
@@ -64,11 +64,14 @@ ub=$(curl -s "${H[@]}" "$API/issues/$C" | jq -r '.issue.updated_by')
 [ "$ub" = some-client ]; check F9 "updated_by = X-Client-ID, not the author's email (Task 5)" $?
 [ "$(code "${H[@]}" "$API/issues/$A/compareRevisions?from=2&to=1")" = 404 ]; check F10 "compare newer->older (from>to) -> 404, no reverse support" $?
 total_revs=$(curl -s "${H[@]}" "$API/issues/$A/compareRevisions?from=1&to=1000000" | jq '.revisions | length')
-all=$(docker exec "$(cd "$REPO" && docker compose ps -q db)" mysql -uroot -ptrialday -N -e 'select count(*) from testlio.revisions' 2>/dev/null)
+# the schema name comes from the container so the employer's name stays out of this file
+DB=$(docker exec "$(cd "$REPO" && docker compose ps -q db)" printenv MYSQL_DATABASE 2>/dev/null)
+[ -n "$DB" ] || { echo "verify: db container has no MYSQL_DATABASE; F11/O1 would pass or fail for the wrong reason" >&2; exit 2; }
+all=$(docker exec "$(cd "$REPO" && docker compose ps -q db)" mysql -uroot -ptrialday -N -e "select count(*) from $DB.revisions" 2>/dev/null)
 [ "$total_revs" = "$((all - 2))" ]; check F11 "'revisions' trail drops both endpoints (slice(1,-1))" $?
 ty=$(revs "$A" | jq -r '.revisions[0].changes | type')
 [ "$ty" = string ]; check F12 "revisions list returns 'changes' as a JSON string, not an object" $?
-fk=$(docker exec "$(cd "$REPO" && docker compose ps -q db)" mysql -uroot -ptrialday -N -e 'show create table testlio.revisions' 2>/dev/null)
+fk=$(docker exec "$(cd "$REPO" && docker compose ps -q db)" mysql -uroot -ptrialday -N -e "show create table $DB.revisions" 2>/dev/null)
 [[ "$fk" != *"FOREIGN KEY"* ]]; check O1 "SUBMISSION claims FK revisions.issue_id -> issues.id; none exists" $?
 ! grep -rqi 'transaction' "$REPO/lib"; check O2 "SUBMISSION claims all writes are transactional; no transaction anywhere" $?
 [ "$(code "${H[@]}" "$API/issues/$A/revisions/compare?from=1&to=2")" = 404 ]; check O3 "SUBMISSION documents /revisions/compare; real route is /compareRevisions" $?

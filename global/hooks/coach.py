@@ -39,6 +39,8 @@ WRAPUP = re.compile(r"(that'?s (it|all)|done for (today|now|the day)|wrap(ping)?
 ASKING = re.compile(r"^\s*(show me|explain|teach me|tell me|what|where|why|how|which|is|are|was|were|will|would|so)\b", re.I)
 REQUEST = re.compile(r"\b(help me|can you|could you|could we|please|i need|i want|let'?s)\b", re.I)
 TERMINAL_PASTE = re.compile(r"drwx|^\S*otal \d+|\$ \w+", re.M)
+VISUAL = re.compile(r"\bvisuali[sz]e|\bdiagram|\bdraw (it|this|me)|\bgrasp\b|help me (understand|see)|"
+                    r"(need|want) to understand|understand (it |this |that )?better|explain (it )?visually|picture (it|this)", re.I)
 TRIVIAL = re.compile(r"^(y|yes|no|ok|okay|exit|continue|go|thanks|thank you|nice|perfect|allright|alright)\W*$", re.I)
 
 
@@ -120,6 +122,13 @@ def cues(p, cwd=""):
         flags["research"] = True
         out.append("Research/comparison question. Delegate to the `researcher` agent (live, cited sources) "
                    "instead of answering from training memory.")
+    if VISUAL.search(p):
+        # 2026-10-29: Giga is a visual learner and asked for diagrams on these words. "Load", not "offer"
+        # (an "offer /X" cue turned a skill into a reminder: scope-skills-with-local-plugins).
+        flags["visual"] = True
+        out.append("Giga wants to grasp this visually. Load the `visual-explainer` skill (or `teach` for a whole "
+                   "subject) and answer diagram-first: one simple diagram of the mechanism, then 3-6 numbered steps; "
+                   "a small stepper/animation when order or flow matters. Habit: visual-learner-diagram-first.")
     if building and len(p) > 600:
         flags["big_spec"] = True
         out.append("Large spec. Propose a short plan (or suggest plan mode) and get one OK before writing code.")
