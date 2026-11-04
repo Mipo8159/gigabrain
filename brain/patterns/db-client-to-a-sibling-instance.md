@@ -63,3 +63,16 @@ screenshot of a connection dialog, an icon that "looks wrong".
 **Next time:** grep IaC for the instance list before saying anything about
 which host holds what; when a copy fails, diff its config against the source
 before any tunnel test.
+
+2026-11-04, a third server, read-only check of one service's tables:
+- **The same DB name existed on two servers** (`<svc>_test` on MySQL belonged to the
+  old v1 service; v2's lived on MariaDB). Claude trusted a memory note ("svc is on
+  MySQL"), and Giga hit `Table … doesn't exist`. The service's own config named the
+  server (`/Discovery/Mariadb/...`). Read that, not a note.
+- **`Access denied … @'<bastion IP>' (using password: YES)` means the tunnel and host
+  are fine and the account is missing.** DB users are per server, and replicas copy
+  the primary's users, so swapping host aliases can't fix it. Three logins from the
+  shared vault were tried and denied. In this org, people get personal `first.last` DB
+  users from ops. Say so after the first denial, not the third.
+- A guessed log-group name with a leading `/` failed. One `describe-log-groups
+  --log-group-name-pattern` call gave the real name.

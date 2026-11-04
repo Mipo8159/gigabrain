@@ -48,6 +48,7 @@
   - Full dated evidence: `git log -p brain/coaching.md` (condensed 2026-10-19).
   - Ask for: "Done when <what you'll see> on <environment>; covers: <every entry point>; access: <ready/expired>; allowed / ask first: …". Retire after 2 more sessions whose first prompt names environment and scope.
   - Next: start from the `Now:` line yourself ("Do the Now: step. Done when …").
+  - 2026-11-04 (staging incident, partly): opened with "help me with this. I got tagged" + a pasted thread, so no ask or deliverable; Claude chose diagnosis + a reply draft. Later "I really need strong guidance … no more surprises" named the real bar (a pre-flight list), and it came last. Win: pasting raw CLI output (logs, `op` listings) settled two questions in one round each. Signals: 1 of 41 logged prompts flagged no_done.
 - **Agents and parallel work.** Giga asks for agents ("use agentic workflow") and a standing habit of parallel work.
   - 2026-10-02: Claude ran the reviewer in the background while waiting on Giga; it caught a privilege-escalation path and secrets in a README. No worktree: the change was small and serial.
   - 2026-10-03: Claude's side is routine (a "Split" block, 4 analysis agents, 6 parallel forks, 4 background reviews).

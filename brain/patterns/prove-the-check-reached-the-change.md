@@ -36,3 +36,10 @@ in a service that consumes events and fans out notifications.
 then ask for the one fact that tells them apart (did it finish? which rule?).
 
 Related: [[read-the-gate-before-guessing]], [[prove-integration-without-real-target]].
+
+**Second case, e2e on a shared staging (2026-11-04):** an e2e regression was about to
+be run "on our branches", but a check of each repo's last successful staging
+deployment (`gh api repos/<o>/<r>/deployments` + statuses) showed other teams had
+redeployed 5 of the 6 services since. A green run would have tested their branches.
+Before any e2e or manual check on a shared env, list *service → deployed ref* and
+compare it to the PR heads.
