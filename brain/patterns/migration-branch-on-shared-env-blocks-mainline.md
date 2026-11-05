@@ -42,10 +42,26 @@ which was "also a migration" in the same note. The staging check passed on
   whether a row was removed: the next successful batch reuses the same number.
   A "rolled back" line shows `down()` ran. Its absence means a hand fix.
 
+**Twin failure: two branches, one version number (2026-11-05, same rollout).**
+Runners differ in what they log. knex logs the file *name*, so two files with
+one timestamp both run (that repo's mainline already held such a pair). phinx
+logs only the 14-digit *version*, so a clash fails twice: on shared staging,
+where another team's branch had already logged that number, our migration is
+silently skipped and the deploy goes green; on mainline, once both files exist,
+phinx throws "Duplicate migration" before running anything, so every deploy
+fails. Found before merge by reading the runner source, then scanning master
+plus all open PRs for "same version, different file". Fixed by renumbering our
+draft (theirs was already logged).
+- For a version-keyed runner, check the number against mainline **and every open
+  PR** before merging, not just against mainline. CI on stacked drafts often
+  skips, so nothing else catches it.
+- Pick the side that renumbers: the one not yet applied anywhere.
+
 **Signal:** a staging plan says "deploy branch X, merge later", and X touches a
 migrations folder. Or "mainline deploy failed at the migrate step" after
 someone tested a branch.
 **Next time:** in the plan, mark each migration PR "staging = merge day only",
-and add "mainline deploys green" to its staging checklist.
+and add "mainline deploys green" to its staging checklist. For a version-keyed
+runner (phinx, Flyway-style), add "version unique across mainline + open PRs".
 
 Related: [[in-place-value-migrations-race-deploys]], [[removal-inventory-is-one-sweep-not-a-drip]], [[outward-claims-carry-their-proof]].
