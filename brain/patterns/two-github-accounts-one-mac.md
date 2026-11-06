@@ -34,3 +34,12 @@ result taken with the normal config loaded.
 
 **Signal:** "Permission to <owner>/<repo> denied to <other-account>" on push.
 **Next time:** probe the key with `-F /dev/null` → dedicated key → per-repo `core.sshCommand`.
+
+**A new repo asks for a username** (2026-10-15, merged from
+new-repo-remote-matches-the-others). `Username for 'https://github.com'` means the
+remote was pasted from GitHub's quick-setup page as HTTPS, while all of Giga's repos
+push over SSH (`git@github.com:…`, or `git@github-<alias>:org/repo.git` per account).
+HTTPS ignores SSH keys. Fix the remote, don't make a token: Giga runs
+`git remote set-url origin git@github.com:<user>/<repo>.git` (auto mode blocks
+Claude from repointing a remote). When giving push steps for a new repo, give the SSH
+URL or the right alias, and check the branch name (`git branch`); don't assume `main`.

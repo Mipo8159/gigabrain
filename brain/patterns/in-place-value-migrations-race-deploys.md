@@ -48,3 +48,11 @@ is stacked draft PRs (base = the phase 1 branch) that only drop, merged after
 phase 1 is on prod. The same rule applies to GraphQL: removing a field makes
 older cached frontend bundles fail the whole query, so keep it as an
 `@deprecated` stub returning a constant until the drop PR.
+
+**Third case: the pipeline never migrates** (2026-10-30, merged from
+schema-first-when-pipeline-never-migrates). Even an additive column with a default
+breaks the *new* code, because the ORM model selects every mapped column, so every
+SELECT on that table fails until the migration runs. For any migration in the diff,
+check whether CI/CD runs it. If not, ship in two steps (migrate the env, then push),
+and make the deploy order the first line of the handover: the migration, the env,
+who runs it (an env write is ask-first), and any post-deploy data step.

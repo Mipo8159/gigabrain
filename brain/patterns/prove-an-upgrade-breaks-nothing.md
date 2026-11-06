@@ -76,3 +76,18 @@ because the harness was written before the entry was read. Read this entry first
 **Next time:** inventory → pilot one repo end to end → serial batch with a
 monitor on non-zero exits → rerun only the arms that failed in setup → one
 table: repo, from-version, tests base → bump, lock delta, token scan, verdict.
+
+**Updating dependencies *inside* a shared library** (2026-10-22/23, merged from
+shared-library-dependency-updates). Three separate questions: who receives it, does
+the output change, can consumers still run it.
+- The library's own lockfile never reaches consumers; they get transitive fixes only
+  by refreshing their own lockfiles. Say so in the PR. (Claude once told the user the
+  opposite; the reviewer caught it.)
+- A 0.x minor bump can rename emitted data (OTel 0.208 → 0.223: `http.method` →
+  `http.request.method`, `http.url` → `url.full`), which silently empties dashboards.
+  Decode the output before/after; don't trust the changelog alone.
+- A new major can raise the Node floor: `npm view <pkg>@<v> engines` vs the consumers'
+  Dockerfiles / `.nvmrc`.
+- Run `npm audit --omit=dev` on the current lock and on each option (in a scratch
+  copy). A middle path (`npm update <pkgs>` within ranges) often clears the
+  criticals with no output change.

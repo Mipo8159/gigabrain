@@ -70,3 +70,26 @@ test without any change on your side:
 - One dev container burned 1.5 cores with silent logs (likely a watcher loop) and drained the
   laptop battery. `docker stats --no-stream` finds it; stop what the task doesn't need.
 
+**AWS emulator + no credentials = a ~5 s "hang"** (2026-10-22, merged from
+local-emulators-need-dummy-cloud-creds). An endpoint override only changes where
+requests go; the SDK still walks the credential chain to the EC2 metadata endpoint,
+~5 s, then `CredentialsError`. Under a short handler timeout (serverless-offline 6 s)
+it looks like a timeout with no emulator error. Check `env | cut -d= -f1 | grep -i aws`;
+prove with the same SDK call with and without `-e AWS_ACCESS_KEY_ID=local -e
+AWS_SECRET_ACCESS_KEY=local` (5,012 ms error vs 21 ms OK). Fix in the personal compose
+override with those dummy values (real AWS rejects them). Never load real cloud creds
+into an emulator-only service.
+
+**VPN blips hang long network jobs** (2026-10-19/20, merged from
+vpn-blips-hang-long-network-jobs). `Can't assign requested address` is the tell; a
+`git clone` or `docker pull` then hangs with no error, and the container runtime's
+network stays dead until restarted.
+1. Stuck vs slow: the log grows *and* bytes flow (`netstat -ibn` delta).
+2. Tiny fresh request per layer: host `curl`, git `ssh -T git@github.com`, runtime
+   `docker pull alpine`. The first that hangs is the layer to restart (e.g.
+   `orb restart docker`), never the machine or the whole script.
+3. Resume from the first unfinished step; rerunning from the top can repeat
+   destructive steps (`rm -rf data/…`).
+4. After a plain-list script (no `set -e`) "finishes", grep its log for
+   `fatal|ERROR|failed` and check every expected artifact exists.
+5. If it repeats, ask IT for split tunnelling (GitHub, Docker Hub).

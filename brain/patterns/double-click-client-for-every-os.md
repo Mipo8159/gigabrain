@@ -48,3 +48,9 @@ because the download list lived in `%AppData%` (moved next to the program).
 **Signal:** "an exe the client double-clicks", "works on Windows, Mac and Linux", "upload the kit to GitHub".
 **Next time:** ask the distribution channel (zip, git repo, store), who configures it, and whether they will open
 the output files themselves, in the first question batch; state the one-file impossibility then.
+
+**Invisible characters in source** (2026-10-14, merged from
+invisible-chars-get-written-literally): an escape like `\ufeff` written with the file
+tool can land as the raw BOM; `go vet` fails with "illegal byte order mark" (JS/Python
+silently compare the wrong string). After writing such code, `grep -c $'\xEF\xBB\xBF' file`
+must be 0; fix with `sed -i 's/\xEF\xBB\xBF/\\ufeff/g' file`.

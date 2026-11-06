@@ -6,72 +6,54 @@ metadata:
 ---
 
 **In short:** before handing Giga anything another person will read, list its
-factual claims and give each a source: a command you ran, a file:line, a
-fetched page, or the word "guess". Unsourced claims get measured or cut.
+factual claims and give each a source: a command you ran, a file:line, a fetched
+page, or the word "guess". Unsourced claims get measured or cut.
 
-**Why:** Giga said it outright on 2026-10-22: "please be precise with your
-reasoning, I do not want to look like a fool creating a ticket which does not
-match reality". The same day, three work sessions shipped first drafts with
-claims nobody had checked:
-- A deprecation-impact comment missed a second caller until "are you absolutely sure?".
-- An IP-allowlist verdict at "~90%" missed a proxy WAF; it was rebuilt 4 times as each "100% sure?" added a layer.
-- 2026-10-28: "you are 100% positive axios calls stay the same?" The honest answer was "inference: axios uses the same `http.request` I measured". Turning it into a probe (real axios × 3 versions × old/new library) took 3 minutes and settled it. When the question is certainty, measure the inference rather than defend it.
-- A ticket draft for a shared library said: "~30 consumers" (invented; 27 counted), "an unused dependency is a major source of the advisories" (39 → 31 when measured), "another team filed its own ticket for this" (their ticket turned out to be about something else; only the PR title matched), and "the lockfile refresh fixes every service that installs the new version" (false: consumers resolve from their own lockfiles; the reviewer caught it after the claim had already reached Giga).
-
-Each correction cost a round and some of Giga's trust. Measuring was cheap
-every time (a grep, an `npm audit` in a scratch copy, one `getJiraIssue`).
+**Why:** "please be precise with your reasoning, I do not want to look like a fool
+creating a ticket which does not match reality" (Giga, 2026-10-22). Hits since:
+- 2026-10-22/23, three work sessions: a deprecation comment missed a second caller;
+  an IP-allowlist verdict at "~90%" was rebuilt 4 times; a ticket draft said "~30
+  consumers" (27 counted), "a major source of advisories" (39 → 31 measured), cited
+  another team's ticket by its title (it was about something else), and claimed a
+  lockfile refresh reaches consumers (false).
+- 2026-10-28: "100% positive axios calls stay the same?" was an inference; a 3-minute
+  probe settled it. When the question is certainty, measure the inference rather than
+  defend it.
+- 2026-10-26 (re-used conclusion): an earlier session's "assuming all rows share one
+  integration" was quoted as fact; a second channel got the message too.
+- 2026-10-27 (shortening): the short rewrite of a teammate's ticket merged sources
+  and invented who flagged what.
+- 2026-10-27 (a test proves only its claim): a "secrets are redacted" test asserted
+  the one attribute the change touched; a reviewer found the secret in a second one.
+- 2026-11-04 (recall): a suite run "we did" in another session had never happened.
+- 2026-11-05/06 (state words): "completed and rolled back" when only the tracker row
+  was gone (a teammate's project creation broke next day); "merged" for a PR whose
+  `gh` state was `CLOSED`.
+Each correction cost a round and some trust; measuring was cheap every time.
 
 **How to apply:**
 - Draft, then make a claims table: claim → how it's known (ran / read / cited / inferred).
-- "Inferred" claims either get a quick check or are worded as a guess ("probably", "I haven't checked").
+- "Inferred" claims either get a quick check or are worded as a guess ("probably",
+  "I haven't checked").
 - A precedent is only a precedent after opening the ticket or PR itself, not its title.
 - Counts come from a command, never from memory ("~30").
-- When the reviewer or a later check overturns something Giga already has, say so plainly at the top, before the fix.
+- A past finding quoted as fact is re-checked or carries its "assuming …" along.
+- Shortening merges sources: run the claims pass again on the *final* text (for each
+  "X did/flagged/said Y", name where it came from), and show the draft in chat before
+  writing into someone else's ticket.
+- Any "nothing leaks / nothing else changes" claim: assert the negative over the
+  whole output (scan *every* exported field; red on old code, green on the fix), and
+  read the library line that writes each field instead of trusting an option's name.
+- Before restating what "we did" in another session, grep that transcript or its
+  memory note for the run's output; no output, no claim. Rows with no real check get
+  cut, not padded.
+- End-state words (*rolled back*, *merged*, *deployed*, *reverted*) need the state
+  itself checked: the rows, `state == MERGED`, a successful deploy run.
+- When a reviewer or later check overturns something Giga already has, say so plainly
+  at the top, before the fix.
 
-**Signal:** the text is going to a ticket, a DM, a PR, a channel, or a manager; or Giga asks "are you sure?" or "be precise".
+**Signal:** the text is going to a ticket, a DM, a PR, a channel, or a manager; or
+Giga asks "are you sure?" or "be precise".
 **Next time:** run the claims pass before the first draft is shown, not after the challenge.
 
-Related: [[giga-wants-argued-recommendations]], [[fact-check-generated-knowledge]].
-
-**Re-used conclusions keep their caveat** (2026-10-26): Claude told Giga a
-notification would reach only one channel, re-using an earlier session's
-explanation whose stated assumption ("all rows share one integration") was
-never checked. A second channel got it too. When a past finding is quoted
-as fact, either re-check it or carry its "assuming …" along.
-
-**Shortening can create false claims** (2026-10-27): Claude wrote straight
-into a teammate's ticket. The long draft said "each review took about half a
-day" (made up, then removed). The short rewrite then said "the legacy poller
-was flagged" when the user had found it during review, not the scanner. It
-also said "both were flagged as needing review" when one ticket had asked for
-an action. "Is this 100% correct?" caught both. Shortening merges sources,
-so run the claims pass again on the *final* text: for each "X did/flagged/said
-Y", name where it came from. Show the draft in chat before writing it to
-someone else's ticket.
-
-**A test proves only the claim it covers** (2026-10-27): a changelog line said
-a shared library's `http` spans now redact signed-URL secrets, and a test
-"proved" it by asserting the one attribute the change touched. A human
-reviewer then found the same secret in a second attribute of the same span,
-written raw by the instrumentation library. The test was certain to pass
-because it checked the change, not the claim. A 5-line scan of *every*
-exported attribute for the secret failed on the old code and passed on the
-fix. For any "nothing leaks / nothing else changes" claim, assert the
-negative over the whole output, and read the library line that writes each
-field instead of trusting an option's name.
-
-2026-11-04 (recall is a claim too): asked to recall earlier staging tests for a
-ticket comment, Claude first stated a suite run that had never happened (that
-session only did setup). Before restating what "we did" in another session,
-grep that transcript or its memory note for the run's output; no output, no
-claim. Rows with no real check ("N/A", "we did nothing here") get cut, not padded.
-
-2026-11-05/06 (state words need the state checked): an earlier session told
-Giga the staging migration was "completed and rolled back". Only the tracker
-row had been removed; the permission rows stayed revoked, and a teammate's
-project creation broke the next day. Giga: "why are you making such mistakes?".
-The same week, Claude called a PR "merged" because a search showed it closed
-(`gh` state `CLOSED` means closed without merging; merged shows `MERGED`).
-Words like *rolled back*, *merged*, *deployed* and *reverted* name an end state:
-check that state itself (the rows, `state == MERGED`, a successful deploy run),
-not a step on the way to it.
+Related: [[giga-wants-argued-recommendations]], [[fact-check-generated-knowledge]], [[a-test-must-be-able-to-fail]].

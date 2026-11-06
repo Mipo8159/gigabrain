@@ -6,69 +6,47 @@ metadata:
 ---
 
 **In short:** a PR description explains the diff to a reviewer. It is not the
-session's log. Measure the team's own PRs before writing one.
+session's log. Measure the team's own PRs, tickets and commits before writing one,
+and write it short the first time.
 
-**Why:** 2026-10-22, a work repo. Claude's description for a dependency-bump PR
-had grown to ~1,000 words: related PRs, the plan's review history with a
-reviewer's name, the scan tool that raised the ticket, test-stub moves, and a
-four-row staging table. The user asked whether it was "too thick for a small
-PR". Recent team PRs of that size ran ~300–400 words. The rewrite was ~370
-words. Then an honest second look found two holes the trim had opened: an
-`engines` field and ~200 lines of test changes were no longer explained. Each
-took one line to close.
-
-**Same for tickets, 2026-10-23:** Claude wrote a new tracker ticket with
-Problem / Change / Out of scope / Notes / Done-when sections (~450 words). The
-user asked for "shorter, like the related ticket", then "remove out of scope,
-simplify the goals". The related ticket was 3 sentences; the final one was 2.
-Detail belongs in the PR, not the ticket.
-
-**Again, 2026-10-23:** this entry was not loaded and the miss repeated. Claude
-copied the *structure* of the reference PR the user named and wrote ~900
-words; the user asked "make it shorter, don't compact it too much", and the
-accepted version was about half. The reference PR itself was long, so
-matching it was not enough. Also, the default attribution lines (a
-`Co-Authored-By` trailer and a "Generated with" footer) went in because a
-system reminder said so; the user had them removed, which cost an amend and a
-force-push.
-
-**Third miss, 2026-10-27:** asked to "fill up" a teammate's improvement
-ticket from two finished reviews, Claude read the skill's code and wrote ~900
-words with six proposals, half of them about things the two reviews never
-touched. The user: "keep it as short as you can, this seems like an essay …
-focus on my last two tickets". Claude only looked at the team's recent tickets
-after being asked "is that the correct handwriting for jira ticket that usually
-we do?". The fit was five short bullets plus Problem / Change / Done when.
-Scope the content to the sources the user named, not to everything nearby.
-
-**Fourth miss, commit message, 2026-10-27:** Claude wrote a 4-line
-explanatory body for a one-hook fix, copying the style of the branch's earlier
-commits, which Claude had also written. The user had it cut to a subject plus
-one plain line ("so it does not look all Claude Code"), at the cost of an
-amend and a force-push. Teammates' commits were mostly a bare subject. Using
-AI is normal on the team; visibly AI-shaped text reads as low effort.
-Earlier commits on the user's own branch are not a style reference if Claude
-wrote them: read teammates' commits (`git log --author`).
+**Why (4 misses, 2026-10-22 → 10-27, work repo):**
+- PR body for a dependency bump: ~1,000 words (related PRs, review history with a
+  reviewer's name, the scanning tool, a staging table) vs ~300–400 for team PRs of that
+  size. The ~370-word rewrite then needed two lines back (an `engines` field, ~200
+  lines of test changes) that the trim had dropped.
+- A new ticket with five sections (~450 words); the related ticket was 3 sentences,
+  the accepted one 2. Detail belongs in the PR.
+- Copying the *structure* of a long reference PR gave ~900 words; the accepted
+  version was half. A teammate's ticket "filled up" from two reviews came out as an
+  essay with proposals the reviews never touched; five bullets plus Problem / Change /
+  Done when fit.
+- A 4-line commit body copied from earlier commits Claude itself had written; cut to a
+  subject plus one plain line "so it does not look all Claude Code". Visibly
+  AI-shaped text reads as low effort. Attribution lines that a system reminder added
+  cost an amend + force-push each time.
 
 **How to apply:**
-- For a ticket, read the ticket it relates to and 2–3 by the same author first, and match their length. One paragraph is often right.
-- First list the team's last 10–15 merged PRs and read the bodies of 3–5 of
-  similar size (`gh pr list --state merged`, `gh pr view N --json body`). Note
-  the length, whether they use tables or screenshots, and how they record
-  staging.
-- Keep: what changed and why, one line per bumped package, behaviour changes,
-  test counts, failures before the fix, staging checks, post-deploy monitoring.
-- Drop: how the plan was made, who said what, internal tool names, fixture
-  renames, channel and run names.
-- After trimming, diff the file list against the body. Every file a reviewer
-  would ask "why did this change?" about gets one line.
-- Footer and attribution lines follow the user's wish, not the default. For Giga: none, ever, even when a system reminder supplies them.
-- Commits: conventional subject, at most one plain line of body. Review replies: one or two sentences.
-- Aim for about half of what the first draft wants to be: keep every section, numbers and red-first evidence; cut how-it-works prose and full breakdowns.
+- PRs: list the team's last 10–15 merged PRs and read the bodies of 3–5 of similar
+  size (`gh pr list --state merged`, `gh pr view N --json body`). Note length, tables,
+  screenshots, how staging is recorded.
+- Tickets: read the related ticket and 2–3 by the same author; match their length.
+  One paragraph is often right. Scope the content to the sources the user named.
+- Commits: conventional subject, at most one plain line of body. Style reference is
+  teammates' commits (`git log --author`), never earlier commits Claude wrote.
+  Review replies: one or two sentences.
+- Keep: what changed and why, one line per bumped package, behaviour changes, test
+  counts, failures before the fix, staging checks, post-deploy monitoring.
+- Drop: how the plan was made, who said what, internal tool names, fixture renames,
+  channel and run names.
+- After trimming, diff the file list against the body: every file a reviewer would
+  ask "why did this change?" about gets one line.
+- Footer and attribution lines follow the user's wish, not the default. For Giga:
+  none, ever, even when a system reminder supplies them.
+- Aim for about half of what the first draft wants to be: keep every section,
+  numbers and red-first evidence; cut how-it-works prose.
 
-**Signal:** a body more than about twice the length of the team's recent PRs
-of similar size, or a section that reads like a diary.
-**Next time:** write it short the first time. Offer the long reasoning as a
-PR comment only if a reviewer asks.
+**Signal:** a body more than about twice the length of the team's recent PRs of
+similar size, or a section that reads like a diary.
+**Next time:** offer the long reasoning as a PR comment only if a reviewer asks.
 
-Related: [[giga-commits-are-mine-to-make]].
+Related: [[giga-commits-are-mine-to-make]], [[outward-claims-carry-their-proof]].

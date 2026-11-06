@@ -41,3 +41,13 @@ offline validation.
    in a guide file against the actual output (headers, column count).
 8. Unprovable without a device: OS display (foreground handling), the iOS APNs key in the
    provider console, and real token validity. Name them as owner-side checks.
+
+9. **Bundled services: run the built artifact** (Aug 2026, merged from
+   prove-the-built-artifact-runs). `tsc` + packaging green proved nothing three times:
+   esbuild drops `design:paramtypes`, so constructor DI (tsyringe, Inversify, Nest)
+   resolves `undefined` (fix in the build layer, e.g. an SWC esbuild plugin); a middy
+   4→7 upgrade broke GETs with no body; two "can't upgrade past X, it's ESM-only"
+   ceilings were false. After a build-config or dependency change, invoke the built
+   bundle once per handler shape (GET no body, JSON POST, scheduled event, authorizer),
+   assert injected deps are defined, and build+run the newer version before writing
+   any version ceiling.

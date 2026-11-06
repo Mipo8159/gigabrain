@@ -1,6 +1,6 @@
 ---
 name: vendor-ip-lists-label-direction-from-their-side
-description: "A SaaS vendor's published IP list (e.g. ip-ranges.atlassian.com) tags each CIDR egress/ingress from the vendor's side: egress = traffic they send you (webhooks), ingress = where your calls to them land. Check whether any allowlist exists before planning to 'add the new range'."
+description: "A SaaS vendor's published IP list (e.g. the vendor's ip-ranges JSON) tags each CIDR egress/ingress from the vendor's side: egress = traffic they send you (webhooks), ingress = where your calls to them land. Check whether any allowlist exists before planning to 'add the new range'."
 metadata:
   type: feedback
 ---
@@ -41,7 +41,7 @@ each recheck surfaced a layer the previous verdict hadn't covered:
   `http.client_ip` (first X-Forwarded-For; `client.address` only under the
   stable semconv). App access logs showed the load balancer's IP because Express
   `trust proxy` was off. NRQL has no `coalesce()`; use `cases()` facets. Spans
-  are kept ~8 days, so `SINCE 30 days` silently means 8.
+  are kept ~8 days (see [[measure-a-tracing-fix-with-a-span-baseline]] on retention).
 - **Zero vendor hits can be expected.** A Connect-style app's only
   vendor-initiated call is the install lifecycle hook; everything else is
   browser iframe traffic. Read the app manifest before reading a 0 as a gap.

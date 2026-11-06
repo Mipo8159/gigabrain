@@ -41,10 +41,18 @@ and each "are you absolutely sure?" turned up more:
    the ACL entry would have turned 410 into 404. Claude first recommended
    removing it, then reversed after reading the code; an earlier decommissioned
    route kept its entry for the same reason. The tombstone is a keep.
+4b. **Classify every hit by one stated necessity rule**, in the *first* answer: "if left
+   unchanged, does it break at runtime, in CI or in local dev, or does it still route
+   to, discover or grant access to the removed thing?" Show a per-hit verdict
+   (required / kept, with the reason); never present a grep-hit count as scope
+   (2026-10-26: 9 hit repos, 5 required; an unanchored agent re-derived the same 5).
+4c. **Coverage = every active repo, including uncloned ones:** shallow-clone the
+   org's other repos into scratch and grep (the code search API matches whole tokens
+   only and is rate-limited). Say how many repos, and how.
 5. Done when a re-run of the same grep, after the PRs, shows only the hits Giga
    chose to keep (old migrations, for example).
 
-5. Name every copy of a table. When a feature once moved between services,
+6. Name every copy of a table. When a feature once moved between services,
    the old service often keeps its own copy of the same tables. 2026-11-02:
    "which DB holds the session data?" was first answered with one database;
    a second copy with the same table names sat in the service the feature had

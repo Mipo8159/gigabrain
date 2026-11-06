@@ -54,3 +54,13 @@ is usually the load-balancer health check: facet by route before calling it "in 
 empty twice; Claude blamed the chart, then the account, and only a bare `SELECT count(*)` showed
 the data was there and the query was wrong (3 rounds). Give it in order: bare count on the
 event type → add the WHERE → add the FACET. The first empty step names the broken part.
+
+**Event retention caps long windows** (2026-10-26, merged from
+apm-event-retention-caps-long-windows). Raw event queries (transactions, spans) past
+retention (~8 days) don't error; they return fewer days. Same counts for 7d and 30d
+means you hit retention, not a quiet month. For usage claims over a week, query the
+metric store, e.g.
+`SELECT count(apm.service.transaction.duration) FROM Metric WHERE appId = … FACET transactionName SINCE 90 days ago`,
+and state the window actually covered. Log retention (often ~30 days) caps log checks
+the same way. Billboard charts hide small facets: switch to a table before saying
+"only these". Signal: "N days of zero traffic", "nobody calls this", a deprecation gate.

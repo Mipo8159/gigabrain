@@ -7,12 +7,12 @@ metadata:
 
 **In short:** when Giga needs to run something with `!`, give them the exact
 line, ready to paste. If the command needs a value only Giga has, give a
-validating wrapper (`tl-aws 123456`), or a line with a realistic example and
+validating wrapper (`aws-mfa 123456`), or a line with a realistic example and
 "change only the digits". Never use a `<placeholder>` in a command meant to
 be pasted.
 
 **Why:** 2026-10-22, one credentials refresh:
-- `<mfa>` was typed literally, then `<007022>`, then `<374370>`. zsh read
+- `<mfa>` was typed literally, then twice more as a real code still inside `<…>`. zsh read
   `<…>` as a redirection, and each try died with `parse error near |`.
 - When the line was finally right, `123456` was the example value itself.
 - Then a question was typed after the ECR login command on the same `!`
@@ -61,8 +61,10 @@ the bastion user), so the line should have been filled in from the start.
    didn't, by luck). Give one command per block, and say "paste only the value at the prompt".
    Verify by effect (the consumer accepts it), since secret stores never show the value.
 
+A leading space before `!` sends the line as a plain prompt and nothing runs (2026-11-06). If a `!` line arrives as text with no stdout, say it didn't run, then run it only because Giga asked.
+
 **Signal:** Claude is about to write a command for Giga to paste (`!`, an SSH terminal, a server).
 **Next time:** write it as Giga will paste it. If Giga will run it more than
 twice, ship a validating wrapper instead.
 
-Related: [[secrets-land-in-readme]], [[invisible-chars-get-written-literally]]
+Related: [[secrets-land-in-readme]], [[double-click-client-for-every-os]] (invisible characters)

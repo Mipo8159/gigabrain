@@ -46,3 +46,21 @@ error with a new-looking message showed up in the logs. A 3-day `count(*)` of th
 message showed it already peaking about 19 h before go-live, and lower after the deploy. It was a
 pre-existing data bug, not the release. Same rule: before calling an error
 "new since the deploy", put its count over time next to the go-live time.
+
+**Watching a prod deploy** (2026-11-02, merged from watch-a-deploy-in-three-tabs).
+Four questions in time order, one place each:
+1. **Before merge:** baseline = memory-utilization peak over 1–2 weeks (APM's
+   "compare with last week" covers latency, throughput and errors).
+2. **T+0–10 min, CI:** the per-job `deploy-production` result, not the run's
+   conclusion. Screenshots taken before it ran still show the old build.
+3. **T+10 min, orchestrator:** new revision = target, old = 0, N/N running. Read each
+   stopped task's reason now (they disappear after ~1 h): exit 137 or
+   `OutOfMemoryError` = OOM; "scaling activity initiated by deployment" + exit 0 =
+   normal trim.
+4. **T+15–60 min, APM:** summary with compare-with-last-week, deploy marker on the
+   right sha, logs continue past the marker. For any error that looks new, run the
+   count-over-time check above before blaming the deploy.
+5. **T+24 h:** memory peak ≤ baseline, no steady climb, no task restarts.
+The log search box can turn free text into a broken field filter (0 rows); use the
+query console with `LIKE`. Hand the steps over as a checklist with the click path,
+one action per step.

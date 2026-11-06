@@ -68,7 +68,7 @@ before any tunnel test.
 - **The same DB name existed on two servers** (`<svc>_test` on MySQL belonged to the
   old v1 service; v2's lived on MariaDB). Claude trusted a memory note ("svc is on
   MySQL"), and Giga hit `Table … doesn't exist`. The service's own config named the
-  server (`/Discovery/Mariadb/...`). Read that, not a note.
+  server (its service-discovery config path names the engine). Read that, not a note.
 - **`Access denied … @'<bastion IP>' (using password: YES)` means the tunnel and host
   are fine and the account is missing.** DB users are per server, and replicas copy
   the primary's users, so swapping host aliases can't fix it. Three logins from the

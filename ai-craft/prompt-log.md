@@ -288,3 +288,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "I am a little bit concerned about those changes, why would they break something on staging? did we not make them for deprecated service?"
 - **After:** "Expected: revoking SDK policies breaks nothing (service unused). Actual: project create fails on staging since <time>. Changed: auth-v2 migration ran 11-03, log row removed 11-04. I suspect something still calls sdk-session on create; prove or refute with file:line."
 - **Why:** the hypothesis was in Giga's head ("it's deprecated"); stating it makes the first step "find the remaining caller", which settled it in one grep.
+
+## 2026-11-06 · cleanup request
+- **Before:** "I see a lot of new repos have been spawned around gigabrain… can we spend some time in order to clean up gigabrain a little, so it stays smooth and as sharp as ever, but with less weight to it."
+- **After:** "Explain each folder next to gigabrain (one table). Then clean gigabrain: done when kit doctor/selftest/check-library stay green and you show before/after files, lines, MB and always-on tokens. Allowed: delete one-off clones, retire unused library skills, merge brain entries. Ask first: anything in work repos or ~/.claude."
+- **Why:** naming the proof and the delete boundary up front would have pre-approved the local-junk deletion that auto mode later blocked, and skipped one question round.

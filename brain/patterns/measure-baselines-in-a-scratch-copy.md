@@ -27,4 +27,4 @@ misleading `tsc` error about `pg-protocol`.
 **Signal:** the plan says "red first" or "audit before/after" while the user's uncommitted work sits in the tree.
 **Next time:** copy to the scratchpad first, measure there, and touch the real tree only for the final green run.
 
-Related: [[outward-claims-carry-their-proof]], [[shared-library-dependency-updates]].
+Related: [[outward-claims-carry-their-proof]], [[prove-an-upgrade-breaks-nothing]].

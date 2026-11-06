@@ -14,7 +14,7 @@ secured and without leaks, as much as possible". What worked, and what went wron
 - Giga saved tokens in 1Password but nothing exported them; the shell check
   caught it twice ("added it" ≠ loaded).
 - `op read` in `.zshrc` would have prompted Touch ID in every new shell,
-  including every command Claude runs. A `tl-env()` function run once per
+  including every command Claude runs. A `<proj>-env()` function run once per
   terminal avoided that.
 - An `op://…` reference rejected an em dash in the item title; renaming the
   item fixed it.

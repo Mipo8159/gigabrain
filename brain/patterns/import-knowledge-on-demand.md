@@ -32,3 +32,14 @@ rules only for what fails, after auditing that the failure isn't an unfair test.
 **Signal:** "let's absorb more repos" with no project waiting for the content.
 **Next time:** name the project and step first; if none exists, park the source in `library/candidates/`.
 For a knowledge skill: `bin/eval-knowledge --domain <d> --arms base` first.
+
+**A/B-testing an intervention needs headroom** (2026-10-17, merged from
+ab-test-an-intervention-needs-headroom). A forced-eval hook vs plain skill triggers:
+the existing suite was already 9/9, so 10 harder cases were written; result 27/30 vs
+27/30, so the hook wasn't installed (~$5).
+1. Run the baseline first; at ≥ 95% add harder cases (and keep negatives that must not
+   fire) or stop.
+2. Prove the intervention ran (a `hook_success` record via `--keep-temp`), not just
+   that it was configured.
+3. When wording changes because of a failing case, add one held-out case phrased
+   differently and require it to pass too.

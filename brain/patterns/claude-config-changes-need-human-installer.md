@@ -19,6 +19,9 @@ matches exactly once, make it idempotent, and dry-run it first with
 `HOME=$(mktemp -d)` on a copy of the settings. 2026-10-19: bundle every pending blocked
 step into one finalize script (pre-checks, apply, install, post-checks, optional `--commit`).
 Giga ran it with one `! bash …` and a 4-day round closed in a single step.
+2026-11-06: the same applies to deleting gitignored local files Giga never explicitly approved
+(old eval runs): auto mode blocked it, so ship a dry-run-by-default prune script with `--apply`
+that keeps anything a tracked file cites; Giga ran it once.
 
 **2. Where config is found (2026-10-02):**
 - A project agent with the same name **replaces** the global one.

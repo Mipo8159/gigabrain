@@ -33,7 +33,7 @@ to launch:
 | Narrow analysis (one code path) | main session | Subagents start cold; not for a 3-file read. |
 | Fixes in independent halves (backend repo vs UI repo) | a separate worktree that Giga launches: `cd <repo> && claude -w <task>` | Name the moment and the command. Giga launches it so they practise it. |
 | Test / verify | `verifier` subagent in the background, or a one-shot `claude -p` | Reruns the original repro plus one nearby case. Reports VERIFIED, FAILED, PLAUSIBLE or BLOCKED. Use it before saying "confirmed". |
-| Review | `reviewer` subagent in the background | Diffs over ~100 lines, or touching auth, money, data or infrastructure (CORE.md rule). |
+| Review | `reviewer` subagent in the background | Diffs over ~100 lines, or touching auth, money, data or infrastructure (CORE.md rule). Pass it the ticket/spec whenever one exists: on `bin/eval-intent` (2026-10-12) reviewer without spec caught 4/7 business gaps, with spec 7/7, the purpose-built `intent-reviewer` 6/7. Use `intent-reviewer` only when its report shape is the deliverable. |
 | Parts that must argue (competing hypotheses, multi-lens review) | agent team, 3–5 teammates | Experimental, costs several times the tokens. When to pick it over a subagent or worktree: [[worktrees-and-agent-teams]]. |
 
 Rules:
@@ -46,13 +46,18 @@ Rules:
   (caught and removed by the agent; the repo stayed clean). 2026-10-15: 14 exam
   writers shared one scratchpad and one overwrote another's `patch.py`. The rule
   existed but was not in the prompts, so put the dir in each prompt.
+- **Pick the smallest tool:** default to a subagent; move up to a worktree only when
+  **files collide**, and to an agent team only when the **parts must disagree**
+  (how-to and costs: [[worktrees-and-agent-teams]]). Giga launches worktrees; Claude
+  launches subagents and teams. Long unattended runs: [[unattended-runs-keep-mac-awake]].
 - **Argue the split.** Parallel work has costs: agents start without context,
   merges can conflict, and it takes Giga's attention. Say which part stays in
   order and why. A small fix in one file gets no worktree.
 - **The agent definitions** live in `gigabrain/global/agents/`: `researcher`,
   `reviewer`, `verifier` (added 2026-10-02, after Claude called a diagnosis
   "confirmed" too early) and `intent-reviewer` (2026-10-12). Propose a new role only after a session shows it
-  would have been used, never in advance.
+  would have been used, never in advance. A new review agent must beat `reviewer` + spec
+  on the same eval, with a negative control, before it joins a workflow.
 - How agents are discovered and overridden, and how to prove one loads: see
   [[claude-config-changes-need-human-installer]].
 

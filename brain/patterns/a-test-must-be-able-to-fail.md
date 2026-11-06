@@ -33,3 +33,12 @@ robustness code, add the most hostile input you can build.
 
 **Next time:** put the red run's failure line in the PR body next to the green
 count.
+
+**A green e2e on an async action proves only the ack** (2026-11-03, merged from
+green-e2e-on-async-action-proves-the-ack): an "archive" case stayed green while
+51 records sat half-archived, because its last `expect` was the success toast. For
+archive/delete/export/import/sync, read the case's last `expect`: a toast, a "pending"
+badge or a list row is acknowledgement only. Mark it "UI only" in the coverage map
+(next to "covered" and "gap"), add the real outcome check (DB flag, status endpoint,
+reload after the worker interval), and check whether the suite's own leftovers pile
+up in the queue it never verifies.

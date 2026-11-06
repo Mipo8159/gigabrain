@@ -55,27 +55,8 @@ Evidence is one dated, general line: no client names, URLs or schemas.
 | skill `inherit-legacy-style` | ecc | 2026-10-03 | 0.4 | — |
 | skill `accessibility` | ecc | 2026-10-03 | 0.4 | — |
 | skill `make-interfaces-feel-better` | ecc | 2026-10-03 | 0.4 | — |
-| skill `cisco-ios-patterns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `netmiko-ssh-automation` | ecc | 2026-10-03 | 0.4 | — |
-| skill `network-bgp-diagnostics` | ecc | 2026-10-03 | 0.4 | — |
-| skill `network-config-validation` | ecc | 2026-10-03 | 0.4 | — |
-| skill `network-interface-health` | ecc | 2026-10-03 | 0.4 | — |
-| skill `homelab-network-readiness` | ecc | 2026-10-03 | 0.4 | — |
-| skill `homelab-network-setup` | ecc | 2026-10-03 | 0.4 | — |
-| skill `homelab-pihole-dns` | ecc | 2026-10-03 | 0.4 | — |
-| skill `homelab-vlan-segmentation` | ecc | 2026-10-03 | 0.4 | — |
-| skill `homelab-wireguard-vpn` | ecc | 2026-10-03 | 0.4 | — |
-| skill `seo` | ecc | 2026-10-03 | 0.4 | — |
-| skill `manim-video` | ecc | 2026-10-03 | 0.4 | — |
-| skill `remotion-video-creation` | ecc | 2026-10-03 | 0.4 | — |
-| skill `video-editing` | ecc | 2026-10-03 | 0.4 | — |
-| skill `videodb` | ecc | 2026-10-03 | 0.4 | — |
-| skill `fal-ai-media` | ecc | 2026-10-03 | 0.4 | — |
-| skill `ui-demo` | ecc | 2026-10-03 | 0.4 | — |
-| skill `content-engine` | ecc | 2026-10-03 | 0.4 | — |
-| skill `email-ops` | ecc | 2026-10-03 | 0.4 | — |
-| skill `mailtrap-email-integration` | ecc | 2026-10-03 | 0.4 | — |
-| skill `brand-voice` | ecc | 2026-10-03 | 0.4 | — |
 | skill `visual-explainer` | visual-explainer | 2026-10-06 | 0.6 | 2026-10-13 · teach lessons, 9 pages · figure/token rules held up: all pass the render check, light/dark, phone ; 2026-10-14 · lesson rebuild, 9 pages by 9 agents · Paper register, figure and token rules held; kit added interaction on top, no rule needed changing |
 | skill `gh-address-comments` | openai-skills | 2026-11-02 | 0.4 | — |
 | skill `gh-fix-ci` | openai-skills | 2026-11-02 | 0.4 | — |
+
+**Retired 2026-11-06** (cleanup, no evidence and no project uses them; recoverable from git history or ECC at the pinned sha): `cisco-ios-patterns`, `netmiko-ssh-automation`, `network-bgp-diagnostics`, `network-config-validation`, `network-interface-health`, `homelab-network-readiness`, `homelab-network-setup`, `homelab-pihole-dns`, `homelab-vlan-segmentation`, `homelab-wireguard-vpn`, `content-engine`, `brand-voice`, `email-ops`, `seo`, `manim-video`, `fal-ai-media`, `remotion-video-creation`, `video-editing`, `videodb`, `ui-demo`, `mailtrap-email-integration`. Moved from global to opt-in plugin `eng` the same day (0 fires in 35 days): `architecture-decision-records`, `contract-first`, `hexagonal-architecture`, `inherit-legacy-style`, `loop-design-check`, `production-audit`, `search-first`, `secure-coding`, `verification-loop`.

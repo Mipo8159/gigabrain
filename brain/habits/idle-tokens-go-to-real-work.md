@@ -36,7 +36,7 @@ goes first to work that feeds the brain from real work (night knowledge jobs,
 lesson pipelines, roadmap phases), and practice steps that are Giga's (launching
 a worktree, coding the core) stay Giga's.
 
- "spare tokens", "idle", "overnight", "sharpen/improve gigabrain", "what percentage".
+**Signal:** "spare tokens", "idle", "overnight", "sharpen/improve gigabrain", "what percentage".
 **Next time:** answer with the ceiling + one real-work alternative before proposing tracks.
 
 Related: [[giga-wants-argued-recommendations]], [[steer-parallelism-and-agent-roles]].

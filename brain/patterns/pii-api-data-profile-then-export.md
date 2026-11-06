@@ -19,7 +19,7 @@ counts, date ranges and cross-references without one value in the transcript.
   was denied. xlsx is zipped XML, so the standard library wrote it with
   `t="inlineStr"` cells; parsing it back counted 0 `<f>` formula cells, and
   LibreOffice headless opened all three files with matching row counts.
-- A `_ge` (Georgian) title column held no Georgian. Other columns kept Georgian
+- A localized title column held no text in the local script. Other columns kept that script
   through the same code, which proved the source sent Latin text, not an export bug.
 
 **How to apply:**
