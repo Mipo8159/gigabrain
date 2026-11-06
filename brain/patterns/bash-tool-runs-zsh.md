@@ -53,3 +53,4 @@ prompt. Pasted into that terminal, a leading `!` is history expansion/negation a
 misfires. When Giga runs a command in their own terminal, give it without `!`.
 
 2026-11-03: hit again, `git show "$b:tests/test.sh"` read `$b` with the `:t` modifier and every repo looked like it had no CI script. Write `"${b}:path"` in every `git show`/`git cat-file` ref.
+2026-11-05/06: two more hits in one work session, `echo ======` between sections, once during analysis and once during the retro that read this entry. Logging hits isn't working; the fix is a PreToolUse guard that rejects a bare word starting with `=` before the shell sees it.

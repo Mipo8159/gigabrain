@@ -283,3 +283,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "make changes and build all of the PRs" → (later) "are you sure you are only removing sdk related pieces?" → "only remove pieces concerning to SDK deprecation. nothing else"
 - **After:** "Build the PRs. Every hunk must trace to the removal; list anything else you'd tidy as a separate suggestion, don't include it. Done when CI is green and the bot has no blocking comments."
 - **Why:** the purity rule arrived after the PRs were pushed, so each repo needed a revert commit and a re-review.
+
+## 2026-11-06 · incident question without expected/actual
+- **Before:** "I am a little bit concerned about those changes, why would they break something on staging? did we not make them for deprecated service?"
+- **After:** "Expected: revoking SDK policies breaks nothing (service unused). Actual: project create fails on staging since <time>. Changed: auth-v2 migration ran 11-03, log row removed 11-04. I suspect something still calls sdk-session on create; prove or refute with file:line."
+- **Why:** the hypothesis was in Giga's head ("it's deprecated"); stating it makes the first step "find the remaining caller", which settled it in one grep.

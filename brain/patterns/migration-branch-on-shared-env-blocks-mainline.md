@@ -65,3 +65,29 @@ and add "mainline deploys green" to its staging checklist. For a version-keyed
 runner (phinx, Flyway-style), add "version unique across mainline + open PRs".
 
 Related: [[in-place-value-migrations-race-deploys]], [[removal-inventory-is-one-sweep-not-a-drip]], [[outward-claims-carry-their-proof]].
+
+**Third consequence: the data change outlives everything else (2026-11-05, same rollout).**
+The migration revoked permissions ("soft-delete the policies for a retired
+service"). Two things removed the *traces* of the run, not its *effect*:
+deleting the tracker row (which unblocked deploys) and redeploying other
+branches over the service. The revoked rows stayed. A day later, project
+creation failed on staging for another team. The platform's mainline still
+called the retired service on every create (one write, no error handling), and
+the call now got a 403. "Nobody uses it" had been measured on reads (0 in 90
+days); the one remaining write was even listed in the plan, as the side effect
+that a later PR removes. On staging, the permission removal ran before that PR
+was live, and the next mainline deploy brought the call back. Fixed by hand: the
+migration's `down()` was run as SQL keyed on `deleted_by = <migration user>`,
+because `migrate:rollback` can't roll back a migration whose tracker row is gone.
+- Removing the tracker row ≠ rollback. Say "deploys unblocked; data change still
+  in place" until the rows themselves are checked.
+- Decommission order: **callers first, permission and endpoint last.** "Unused"
+  must cover writes and side effects (create/archive hooks), not only reads.
+- A branch deploy is temporary, but a DB change on shared staging is not. Never
+  run a revoke migration on shared staging before the caller-removal PR is on
+  mainline. A branch-only caller fix is undone by the next mainline deploy.
+- Keep the rollback ready to run as raw SQL (keyed on `deleted_by`), plus the
+  name of someone with write access, before the migration first runs anywhere.
+
+**Signal (added):** a removal plan revokes permissions or drops an endpoint, and
+the evidence for "unused" counts reads or traffic only.

@@ -65,3 +65,13 @@ ticket comment, Claude first stated a suite run that had never happened (that
 session only did setup). Before restating what "we did" in another session,
 grep that transcript or its memory note for the run's output; no output, no
 claim. Rows with no real check ("N/A", "we did nothing here") get cut, not padded.
+
+2026-11-05/06 (state words need the state checked): an earlier session told
+Giga the staging migration was "completed and rolled back". Only the tracker
+row had been removed; the permission rows stayed revoked, and a teammate's
+project creation broke the next day. Giga: "why are you making such mistakes?".
+The same week, Claude called a PR "merged" because a search showed it closed
+(`gh` state `CLOSED` means closed without merging; merged shows `MERGED`).
+Words like *rolled back*, *merged*, *deployed* and *reverted* name an end state:
+check that state itself (the rows, `state == MERGED`, a successful deploy run),
+not a step on the way to it.
