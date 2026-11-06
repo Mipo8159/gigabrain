@@ -9,48 +9,34 @@ metadata:
 whole string; `--include=*.ts` and `ls dir/CLAUDE*.md` die before the command
 runs if the glob has no match in cwd.
 
-**Why:** 2026-10-20, one session, four failures: a repo loop ran once with all
-names as one argument; `set -- $p` didn't split, so `gh pr view` got no number;
-two `grep --include=*.ts` calls aborted with "no matches found". An earlier
-entry ([[private-registry-404-means-auth-not-wired]]) had already hit the
-splitting case, buried as a side note, so it didn't prevent these.
+**The traps and their fixes:**
+- **No word splitting.** `for r in $R` and `set -- $p` see one word. Use a literal
+  list (`for r in a b c; do`) or a real array (`R=(a b c); for r in $R`). Pairs:
+  `for x in repo:1 repo:2; do r=${x%%:*}; n=${x##*:}`. Flags for a probe go in an
+  array too (`A=(--a --b="$T"); cmd "${A[@]}"`).
+- **Unmatched globs abort.** Always quote globs passed to tools:
+  `--include='*.ts'`, `find -name '*.md'`. Optional matches: `ls dir/*.md(N)` or
+  test with `[ -e ]` first.
+- **A word starting with `=` expands to a command path** (`=ls` → `/bin/ls`), so
+  `echo ===`/`echo ====FILES` fails with `== not found`. Use `echo '---'` as the
+  only separator.
+- **`$VAR:` followed by a letter is a history modifier** (`:a :h :t :r :e :s :u :l`),
+  inside quotes too: `git show $B:path` became `origin/masterpplication/...`, and
+  `"$b:tests/test.sh"` read `$b` with `:t`. Always brace: `"${B}:path"`,
+  `"${a}:test"`, in every `git show`/`git cat-file` ref and image tag.
+- **Giga's own terminal is zsh too:** the `! <cmd>` prefix works only in the Claude
+  prompt. In that terminal a leading `!` is history expansion, so give the command
+  without `!`.
 
-**How to apply:**
-- Lists: `for r in a b c; do` (literal) or a real array `R=(a b c); for r in $R`.
-- Pairs: `for x in repo:1 repo:2; do r=${x%%:*}; n=${x##*:}`.
-- Globs passed to tools: always quote: `--include='*.ts'`, `find -name '*.md'`.
-- Optional matches: `ls dir/*.md(N)` or test with `[ -e ]` first.
+**Hits:** 14+ between 2026-10-20 and 11-06 (globs ×5, `=`-words ×7, `:`-modifiers
+×4; the 4th, 11-06: `$base:apps/...` became an absolute path via `:a`), most of them after this entry and its CORE line existed. Reading the rule
+doesn't stop the `=` slip when composing long one-liners fast. **Open fix:** a
+PreToolUse check in `global/hooks/guard.py` that denies a bare word starting with
+`=` ("use echo '---'"), not another reminder.
 
-**More evidence (2026-10-21):** `--include=*.js` aborted again, one day after
-this entry was written, so read the Signal line *before* typing a grep. New
-case: `echo ===` fails with `== not found`, because zsh expands a word
-starting with `=` into a command path (`=ls` → `/bin/ls`). Use `echo '---'`.
+**Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument,
+a word starting with `=`, `$VAR:` followed by a letter.
+**Next time:** quote the glob, inline the list and brace the variable before
+running, not after the error.
 
-**Third hit (2026-10-22):** `--include=*.ts` and `echo ==USES` failed again in a
-cross-repo grep, each costing a rerun. The entry existed but isn't loaded unless
-something recalls it, so the rule now has one line in CORE.md.
-
-**Fourth hit (2026-10-22, same day, after the CORE line landed):** unquoted
-`--include=*.yml` and `echo =====` failed again in a cross-repo sweep. The rule
-is loaded; the slip happens when composing long one-liners fast. Use `'---'` as the
-only separator.
-
-**Fifth hit (2026-10-27): history modifiers.** `B=origin/master; git show $B:path/file`
-**Sixth hit (2026-10-28), twice in one session:** `"$b:tests/test.sh"` became the
-tail of `$b`, and `"t130-$repo-$a:test"` became `…-baseest`. Inside quotes too. In
-loops over refs or image tags, always brace: `"${b}:path"`, `"${a}:test"`.
-**Seventh hit (2026-11-02):** `echo ====` inside a retro's gather step, a third time for that exact form. Reading the rule doesn't stop it; a PreToolUse check for a word starting with `=` would.
-**Eighth hit (2026-11-02, later):** `echo ===FILES` as a section separator in a PR inspection, same day as the seventh. Eight hits, no hook yet: the `=`-word check belongs in `global/hooks/guard.py` (deny with "use echo '---'"), not in another reminder.
-silently became `origin/masterpplication/...`, because zsh read `$B:a` as the
-`:a` (absolute path) modifier. Any `$VAR:` followed by a letter (`:a :h :t :r :e
-:s :u :l`) is a modifier. Write `"${B}:path"`. `echo ===` failed again the same day, and `echo =====` again in a later session that day (a retro, while checking this very rule).
-
-**Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument, a word starting with `=`, `$VAR:` followed by a letter.
-**Next time:** quote the glob and inline the list before running, not after the error.
-**Ninth hit (2026-11-02, evening):** `echo =====` between sections of a code sweep. Still no hook.
-**Giga's own terminal is zsh too (2026-11-02):** the `! <cmd>` prefix works only in the Claude
-prompt. Pasted into that terminal, a leading `!` is history expansion/negation and the command
-misfires. When Giga runs a command in their own terminal, give it without `!`.
-
-2026-11-03: hit again, `git show "$b:tests/test.sh"` read `$b` with the `:t` modifier and every repo looked like it had no CI script. Write `"${b}:path"` in every `git show`/`git cat-file` ref.
-2026-11-05/06: two more hits in one work session, `echo ======` between sections, once during analysis and once during the retro that read this entry. Logging hits isn't working; the fix is a PreToolUse guard that rejects a bare word starting with `=` before the shell sees it.
+Related: [[private-registry-404-means-auth-not-wired]] (the word-splitting case in a token probe).
