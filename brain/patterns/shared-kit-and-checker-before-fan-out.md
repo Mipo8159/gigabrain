@@ -48,3 +48,10 @@ Related: [[test-guards-against-innocent-lookalikes]] (prove a checker can fail).
 producing the same kind of artifact.
 **Next time:** kit + checker + broken-copy proofs + background review before
 (or alongside) the first builder; one re-inject command for mid-run fixes.
+
+**A crash mid-fan-out costs only the missing parts** (2026-11-07): a network drop
+killed both background exam writers after 4 of 5 files each. Running the checker
+over what was on disk showed v1–v4 valid, so only two narrow "write v5, don't
+repeat v1–v4" agents were relaunched instead of the original two full jobs. Before
+relaunching after any agent failure, validate what's already written and relaunch
+only the remainder.

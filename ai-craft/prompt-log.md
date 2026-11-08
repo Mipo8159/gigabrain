@@ -293,3 +293,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "I see a lot of new repos have been spawned around gigabrain… can we spend some time in order to clean up gigabrain a little, so it stays smooth and as sharp as ever, but with less weight to it."
 - **After:** "Explain each folder next to gigabrain (one table). Then clean gigabrain: done when kit doctor/selftest/check-library stay green and you show before/after files, lines, MB and always-on tokens. Allowed: delete one-off clones, retire unused library skills, merge brain entries. Ask first: anything in work repos or ~/.claude."
 - **Why:** naming the proof and the delete boundary up front would have pre-approved the local-junk deletion that auto mode later blocked, and skipped one question round.
+
+## 2026-11-08 · deployment health check graded on the ladder (rung 1 → 3)
+- **Before:** "investigate all 6 deployments on new relic. the metrics the behavior and affect of each one … compare those numbers to normal ones. done when you feel confident that their measurements are stable and all six are ready to be deployed on prod."
+- **After:** "Investigate the 6 staging deployments of <date>, read-only, aggregate NRQL only. One subagent per service, each returns: metric | baseline | now | Δ | pass/fail | NRQL. Baseline: same 24 h a week earlier. Stable = error rate ≤ baseline + 0.5 pp, p95 ≤ +10%, memory flat, no new error class; below N rpm the verdict is 'can't tell'. Done when every service has a verdict with a query I can rerun; the prod go/no-go is mine."
+- **Why:** "feel confident" asks the model to grade itself; it has no baseline, thresholds, evidence, low-traffic path or split. This prompt became the trigger for the rung gate (habit rung-gate-before-work).

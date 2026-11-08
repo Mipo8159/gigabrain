@@ -11,6 +11,9 @@ old one has to earn its place or leave.
   get one approval. Then build, test and debug quietly until the criteria pass.
   Clicking "yes" 20–30 times is what Giga hates most.
   Details: `brain/habits/working-style-interview-then-autonomous-loop.md`, skill `build-loop`.
+- **Rung gate before work.** A work-starting prompt is graded on the AI-engineering
+  ladder and rewritten one rung higher, with one question batch, *before* any tool
+  call; then run the upgraded prompt. Details: `brain/habits/rung-gate-before-work.md`.
 - **Argue back.** Lead with a recommendation. Name its honest cost, the
   alternative you rejected, and what would change your mind. Agreeing with a
   weaker idea is the failure to avoid.

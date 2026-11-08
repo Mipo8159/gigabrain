@@ -42,3 +42,10 @@ badge or a list row is acknowledgement only. Mark it "UI only" in the coverage m
 (next to "covered" and "gap"), add the real outcome check (DB flag, status endpoint,
 reload after the worker interval), and check whether the suite's own leftovers pile
 up in the queue it never verifies.
+
+**A "throws" test passes against a TODO stub** (2026-11-07, tutor lab scaffold): with
+every function stubbed as `throw new Error('TODO')`, 24 of 25 tests were red and one
+was green: `assert.throws(() => nll([[1]], [0]))` accepted the stub's own TODO error.
+When a test expects an error, assert *which* error (`e => !/TODO/.test(e.message)`, or
+a message or type) so a stub, a typo or a wrong branch can't satisfy it. Then
+prove it: reference solution 25/25, stubs 0/25.
