@@ -1,0 +1,676 @@
+{
+  "topic": "ai-llm",
+  "variant": 4,
+  "of": 5,
+  "title": "How an LLM works — variant 4",
+  "description": "Building a toy LLM in TypeScript and checking each step by hand: BPE merges, cosine, attention outputs, causal masks, softmax with temperature, top-k, loss, a gradient step, and mapping the toy onto real Claude limits.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "tokens",
+      "name": "Tokenization and embeddings",
+      "weight": 0.2
+    },
+    {
+      "id": "transformer",
+      "name": "Attention and the transformer block",
+      "weight": 0.2
+    },
+    {
+      "id": "generation",
+      "name": "Sampling, generation, KV cache and cost",
+      "weight": 0.2
+    },
+    {
+      "id": "training",
+      "name": "Training, post-training and hallucination",
+      "weight": 0.2
+    },
+    {
+      "id": "context",
+      "name": "Context window and current Claude facts",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-llm-v4-q01",
+      "domain": "tokens",
+      "stem": "In your TypeScript toy-LLM lab you train a BPE tokenizer on the word counts hug×10, pug×5, pun×12, bun×4, hugs×5, starting from single characters. BPE merges the most frequent adjacent pair each round. Which merge happens first, and with what count?",
+      "options": [
+        {
+          "text": "(u, g) → `ug`, count 20",
+          "correct": true,
+          "why": "u-g appears in hug (10), pug (5) and hugs (5): 20, the highest pair count."
+        },
+        {
+          "text": "(u, n) → `un`, count 16",
+          "correct": false,
+          "why": "pun (12) + bun (4) = 16, below 20; it wins round 2 instead."
+        },
+        {
+          "text": "(p, u) → `pu`, count 17",
+          "correct": false,
+          "why": "pug (5) + pun (12) = 17 is a real count, but still below (u, g) at 20."
+        },
+        {
+          "text": "(h, u) → `hu`, count 15, because merges start from the first letter of the most common word",
+          "correct": false,
+          "why": "BPE picks the most frequent pair anywhere, not the start of the most common word; h-u counts 15."
+        }
+      ],
+      "explain": "BPE repeatedly merges the most frequent adjacent pair into a new token. Frequent fragments become single tokens; the merge list, applied in order, is the tokenizer.",
+      "refs": [
+        "https://arxiv.org/abs/1508.07909",
+        "https://github.com/karpathy/minbpe"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q02",
+      "domain": "tokens",
+      "stem": "Your lab's BPE fixture, trained on hug×10, pug×5, pun×12, bun×4, hugs×5, learns three merges in order: `ug`, then `un`, then `hug`. A test then encodes the word `hugs`. What token sequence should the test expect?",
+      "options": [
+        {
+          "text": "[h, ug, s]",
+          "correct": false,
+          "why": "The third merge (h, ug) → hug applies after ug exists, so h and ug are joined."
+        },
+        {
+          "text": "[hug, s]",
+          "correct": true,
+          "why": "Apply merges in order: u+g → ug, then h+ug → hug; no merge joins hug and s."
+        },
+        {
+          "text": "[hugs]",
+          "correct": false,
+          "why": "No learned merge creates hugs; only three merges were trained."
+        },
+        {
+          "text": "[h, u, g, s], because merges apply only to words that were in the corpus with exactly the same spelling",
+          "correct": false,
+          "why": "Merges are applied to any text, pair by pair; they are not a word list."
+        }
+      ],
+      "explain": "Encoding replays the learned merges in training order. The result depends on the merge list, which is why tokens rarely line up with whole words or single letters.",
+      "refs": [
+        "https://github.com/karpathy/minbpe",
+        "https://arxiv.org/abs/1508.07909"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q03",
+      "domain": "tokens",
+      "stem": "Your first lab tokenizer is character-level (vocabulary of 27). Switching to BPE with a few thousand merges shortens the same training text to about a quarter of its length in tokens. With a fixed context of 64 positions, what is the main trade-off?",
+      "options": [
+        {
+          "text": "Each position covers more text, so the context spans more of it, at the cost of a bigger vocabulary and embedding table",
+          "correct": true,
+          "why": "Fewer, larger tokens let a fixed window see more text, while every new token adds a row to the embedding and output layers."
+        },
+        {
+          "text": "Nothing changes, because the model still processes one character per position internally",
+          "correct": false,
+          "why": "The model processes one token per position; it never sees the characters inside a BPE token."
+        },
+        {
+          "text": "BPE makes the vocabulary smaller",
+          "correct": false,
+          "why": "BPE adds merged tokens on top of the base symbols, so the vocabulary grows."
+        },
+        {
+          "text": "Shorter sequences make the attention mask unnecessary, because there are fewer positions to hide",
+          "correct": false,
+          "why": "The causal mask is needed at any length to stop positions seeing the future."
+        }
+      ],
+      "explain": "Tokenizer granularity trades sequence length against vocabulary size. Subword tokens fit more text in a window but hide characters from the model.",
+      "refs": [
+        "https://arxiv.org/abs/1508.07909",
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q04",
+      "domain": "tokens",
+      "stem": "Your lab adds a toy embedding table and a test checks cosine similarity between two learned 2-D rows, `a = [3, 4]` and `b = [4, 3]`. What should the test expect?",
+      "options": [
+        {
+          "text": "0.96",
+          "correct": true,
+          "why": "a·b = 12 + 12 = 24; |a| = |b| = 5; cos = 24 / 25 = 0.96."
+        },
+        {
+          "text": "24, the dot product",
+          "correct": false,
+          "why": "Cosine divides the dot product by both lengths."
+        },
+        {
+          "text": "0.5, because the vectors are mirror images",
+          "correct": false,
+          "why": "Mirrored across the diagonal, they are still close in angle; cosine is 0.96."
+        },
+        {
+          "text": "0, since the vectors share no coordinate value in the same position and so are orthogonal",
+          "correct": false,
+          "why": "Orthogonal means a dot product of 0; here it is 24."
+        }
+      ],
+      "explain": "Cosine similarity compares direction: a·b / (|a||b|). Learned embedding rows for tokens used similarly point in similar directions.",
+      "refs": [
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q05",
+      "domain": "transformer",
+      "stem": "Your lab's attention test uses scaled scores `[2, 1, 0]` and value vectors `v1 = [1, 0]`, `v2 = [0, 1]`, `v3 = [1, 1]`. The softmax weights are `[0.665, 0.245, 0.090]`. What output vector should the test expect, to three decimals?",
+      "options": [
+        {
+          "text": "[0.665, 0.245]",
+          "correct": false,
+          "why": "That forgets v3's contribution, which adds 0.090 to both coordinates."
+        },
+        {
+          "text": "[0.755, 0.335]",
+          "correct": true,
+          "why": "0.665·[1,0] + 0.245·[0,1] + 0.090·[1,1] = [0.755, 0.335]."
+        },
+        {
+          "text": "[1.000, 1.000], since weights sum to 1",
+          "correct": false,
+          "why": "Weights summing to 1 makes the output a weighted average, not the sum of all coordinates."
+        },
+        {
+          "text": "[2, 1], the scaled scores passed straight through to the output",
+          "correct": false,
+          "why": "Scores decide the weights; the output is a mix of value vectors."
+        }
+      ],
+      "explain": "Attention output = Σ weightᵢ · vᵢ. The scores (from Q and K) decide how much of each value vector (V) flows into this position.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q06",
+      "domain": "transformer",
+      "stem": "A lab teammate implements the causal mask by zeroing future weights after softmax: `w = softmax(scores); w[j > i] = 0`. The model still trains. What is wrong with this approach?",
+      "options": [
+        {
+          "text": "Nothing: zeroing after softmax is the standard method",
+          "correct": false,
+          "why": "The standard method adds −∞ to the scores before softmax."
+        },
+        {
+          "text": "The remaining weights no longer sum to 1, so outputs shrink depending on position",
+          "correct": true,
+          "why": "Probability mass that went to future keys is thrown away instead of renormalised; masking with −∞ before softmax avoids this."
+        },
+        {
+          "text": "It masks past tokens instead of future ones",
+          "correct": false,
+          "why": "The condition j > i does target future positions; the issue is where it is applied."
+        },
+        {
+          "text": "Softmax cannot run on a matrix that contains zeros, so the next layer will produce NaN values",
+          "correct": false,
+          "why": "Zeros are fine for softmax; NaNs come from all-−∞ rows, which this code does not create."
+        }
+      ],
+      "explain": "Apply the causal mask to the scores, before softmax, with −∞: future positions then get exactly 0 weight and the visible ones still sum to 1.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q07",
+      "domain": "transformer",
+      "stem": "Which forward function correctly implements a pre-norm transformer block for your lab, matching the residual-stream design?",
+      "code": "// residual stream x: one vector per position\nfunction block(x: Tensor): Tensor {\n  // ??? attention and MLP sub-layers\n  return x;\n}",
+      "options": [
+        {
+          "text": "`x = norm(x + attn(x)); x = norm(x + mlp(x));`",
+          "correct": false,
+          "why": "That is the post-norm arrangement from the original paper, not the pre-norm form used in most modern decoders."
+        },
+        {
+          "text": "`x = x + attn(norm(x)); x = x + mlp(norm(x));`",
+          "correct": true,
+          "why": "Pre-norm: normalise the input to each sub-layer and add its output back into the residual stream."
+        },
+        {
+          "text": "`x = attn(norm(x)) + mlp(norm(x));`",
+          "correct": false,
+          "why": "It drops the residual x, so earlier information is lost."
+        },
+        {
+          "text": "`x = mlp(attn(norm(x)));`",
+          "correct": false,
+          "why": "No residual path at all: deep stacks of this train poorly and forget earlier information."
+        }
+      ],
+      "explain": "In pre-norm blocks each sub-layer reads a normalised copy of the residual stream and adds its result back: x = x + Attn(Norm(x)); x = x + MLP(Norm(x)).",
+      "refs": [
+        "https://transformer-circuits.pub/2021/framework/index.html",
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q08",
+      "domain": "transformer",
+      "stem": "In a smaller lab config the head size is `d_k = 16`. A test feeds raw scores `[8, 4, 0]` into one head. What weights should the test expect after scaling and softmax?",
+      "options": [
+        {
+          "text": "About [0.982, 0.018, 0.000]",
+          "correct": false,
+          "why": "That is softmax of the unscaled scores; the head divides by √16 = 4 first."
+        },
+        {
+          "text": "About [0.665, 0.245, 0.090]",
+          "correct": true,
+          "why": "Divide by √16 = 4 to get [2, 1, 0]; softmax gives [0.665, 0.245, 0.090]."
+        },
+        {
+          "text": "About [0.667, 0.333, 0.000]",
+          "correct": false,
+          "why": "That is a proportional split of the raw scores, not softmax."
+        },
+        {
+          "text": "About [0.422, 0.422, 0.155], since smaller heads flatten scores",
+          "correct": false,
+          "why": "Those weights belong to scaled scores [1, 1, 0]."
+        }
+      ],
+      "explain": "The scale is √d_k of the head, not of the whole model. Same scaled scores, same weights, whatever the head size.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q09",
+      "domain": "generation",
+      "stem": "Your lab's sampler test uses logits `[2.0, 1.0, 0.5, 0.0, -1.0]` for `[the, a, cat, dog, ran]` at temperature 1. What probability should the test expect for `the`?",
+      "options": [
+        {
+          "text": "0.563",
+          "correct": true,
+          "why": "softmax at T = 1 gives [0.563, 0.207, 0.126, 0.076, 0.028]."
+        },
+        {
+          "text": "0.4, its share of the positive logits",
+          "correct": false,
+          "why": "Logits go through exp before normalising; a share of raw logits is not a probability."
+        },
+        {
+          "text": "0.829",
+          "correct": false,
+          "why": "That is p(the) at T = 0.5, where the distribution is sharper."
+        },
+        {
+          "text": "1.0, because temperature 1 is greedy decoding that always picks the top token",
+          "correct": false,
+          "why": "Temperature 1 leaves the model's distribution unchanged; greedy corresponds to T → 0."
+        }
+      ],
+      "explain": "Softmax turns logits into probabilities: exp(zᵢ) / Σ exp(zⱼ). Temperature divides the logits first, so T = 1 is the model's own distribution.",
+      "refs": [
+        "https://github.com/karpathy/makemore",
+        "https://arxiv.org/abs/1904.09751"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q10",
+      "domain": "generation",
+      "stem": "Same logits `[2.0, 1.0, 0.5, 0.0, -1.0]`. A lab test sets temperature 2. What is p(`the`) now, and what does that say about higher temperatures?",
+      "options": [
+        {
+          "text": "0.829: higher temperature sharpens the distribution",
+          "correct": false,
+          "why": "0.829 is T = 0.5; dividing logits by a smaller number sharpens, by a larger one flattens."
+        },
+        {
+          "text": "0.375: higher temperature flattens it toward uniform",
+          "correct": true,
+          "why": "Logits / 2 = [1, 0.5, 0.25, 0, −0.5]; softmax gives [0.375, 0.227, 0.177, 0.138, 0.084]."
+        },
+        {
+          "text": "0.563: temperature only changes which token is drawn, not the probabilities",
+          "correct": false,
+          "why": "Temperature rescales logits before softmax, so it changes every probability."
+        },
+        {
+          "text": "0.2: at temperature 2 every token gets an equal share",
+          "correct": false,
+          "why": "Higher temperature moves toward uniform but does not reach it at T = 2."
+        }
+      ],
+      "explain": "Temperature T divides logits before softmax: T < 1 sharpens, T > 1 flattens. On current Claude models these knobs return 400, but they are standard mechanics elsewhere.",
+      "refs": [
+        "https://arxiv.org/abs/1904.09751"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q11",
+      "domain": "generation",
+      "stem": "Your lab sampler applies top-k with k = 2 to the T = 1 probabilities `[0.563, 0.207, 0.126, 0.076, 0.028]` and renormalises. What distribution should the test expect?",
+      "options": [
+        {
+          "text": "[0.563, 0.207], left as they are",
+          "correct": false,
+          "why": "Those sum to 0.770; sampling needs them renormalised to sum to 1."
+        },
+        {
+          "text": "[0.731, 0.269]",
+          "correct": true,
+          "why": "0.563 / 0.770 ≈ 0.731 and 0.207 / 0.770 ≈ 0.269 (the same as softmax over logits [2, 1])."
+        },
+        {
+          "text": "[0.5, 0.5], since top-k makes the kept tokens equally likely",
+          "correct": false,
+          "why": "Top-k keeps relative odds; it only drops the rest."
+        },
+        {
+          "text": "[0.563, 0.207, 0.230], with the dropped mass folded into one extra 'other' slot",
+          "correct": false,
+          "why": "There is no 'other' token; dropped tokens are removed and the rest renormalised."
+        }
+      ],
+      "explain": "Top-k keeps the k most likely tokens and renormalises; top-p keeps the smallest set reaching cumulative probability p. Both cut the unreliable tail.",
+      "refs": [
+        "https://arxiv.org/abs/1904.09751"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q12",
+      "domain": "generation",
+      "stem": "Your lab's `generate()` re-runs the full model over the whole sequence for each new token, and generating gets slower with every token. What change does real inference use?",
+      "options": [
+        {
+          "text": "Cache each layer's keys and values for past tokens and compute only the new token each step",
+          "correct": true,
+          "why": "With a KV cache, decode processes only the new position; earlier K and V are read from memory."
+        },
+        {
+          "text": "Generate all output tokens in one parallel pass, like the prompt",
+          "correct": false,
+          "why": "Each token depends on the one before it, so output must be generated serially."
+        },
+        {
+          "text": "Drop the attention layers during generation, since they are only needed in training",
+          "correct": false,
+          "why": "Attention is how each new token reads the context; it runs at inference too."
+        },
+        {
+          "text": "Re-tokenise only the new characters each step and keep running the full forward pass over the entire sequence as before",
+          "correct": false,
+          "why": "Tokenising is cheap; the cost is recomputing every position's layers, which the KV cache avoids."
+        }
+      ],
+      "explain": "Inference = prefill (prompt positions in parallel) then decode (one token per step). The KV cache makes decode cost per step proportional to the new token plus reading the cache, instead of re-running everything.",
+      "refs": [
+        "https://arxiv.org/abs/2211.05102"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q13",
+      "domain": "training",
+      "stem": "Your lab's bigram model over 27 characters reports a mean negative log-likelihood. Before training, with uniform predictions, what value should the test expect, and what would p = 0.7 on every correct next character give?",
+      "options": [
+        {
+          "text": "ln 27 ≈ 3.30 before training, and about 0.357 at p = 0.7",
+          "correct": true,
+          "why": "Uniform over 27 gives −ln(1/27) = ln 27 ≈ 3.296; −ln 0.7 ≈ 0.357."
+        },
+        {
+          "text": "27 before training, and 0.7 at p = 0.7",
+          "correct": false,
+          "why": "Loss is −ln p, not the vocabulary size or the probability itself."
+        },
+        {
+          "text": "ln 50000 ≈ 10.82 before training, and 0.3 at p = 0.7",
+          "correct": false,
+          "why": "10.82 is for a 50k vocabulary; and −ln 0.7 is 0.357, not 1 − 0.7."
+        },
+        {
+          "text": "0 before training, because an untrained model has not made any mistakes yet",
+          "correct": false,
+          "why": "Loss measures how much probability the model gives to the truth; uniform guessing scores ln V."
+        }
+      ],
+      "explain": "Mean NLL is the average of −ln p(correct next token). Uniform guessing over V gives ln V; lower is better, and perplexity e^loss is the effective number of choices.",
+      "refs": [
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q14",
+      "domain": "training",
+      "stem": "Your count-based bigram model reports a test loss of `Infinity` on a held-out name. The training set never contained the pair `q` → `z`. What is the standard fix?",
+      "options": [
+        {
+          "text": "Clip the loss at 10",
+          "correct": false,
+          "why": "Clipping hides the symptom; the model still assigns probability 0 to a possible event."
+        },
+        {
+          "text": "Remove names with rare pairs from the test set",
+          "correct": false,
+          "why": "That hides the problem and makes the evaluation dishonest."
+        },
+        {
+          "text": "Add-one smoothing: start every count at 1 so no pair has zero probability",
+          "correct": true,
+          "why": "An unseen pair has p = 0 and −ln 0 = ∞; adding one to every count keeps all probabilities positive."
+        },
+        {
+          "text": "Lower the temperature so the sampler never picks the rare pair",
+          "correct": false,
+          "why": "Sampling settings affect generation, not the loss on a given text."
+        }
+      ],
+      "explain": "−ln p explodes as p → 0. Count models smooth (add-1); neural models never output exactly 0 because softmax keeps every probability positive.",
+      "refs": [
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q15",
+      "domain": "training",
+      "stem": "In the lab's micrograd-style training loop, a weight is `θ = 0.5`, the learning rate is `0.1`, and the loss gradient for that weight is `∂L/∂θ = 2`. What is θ after one gradient-descent step?",
+      "options": [
+        {
+          "text": "0.7",
+          "correct": false,
+          "why": "That adds the step; gradient descent subtracts it to lower the loss."
+        },
+        {
+          "text": "0.3",
+          "correct": true,
+          "why": "θ ← θ − lr·∂L/∂θ = 0.5 − 0.1 × 2 = 0.3."
+        },
+        {
+          "text": "0.48",
+          "correct": false,
+          "why": "That shrinks the step tenfold more than the rule says; the update is lr × gradient = 0.1 × 2 = 0.2."
+        },
+        {
+          "text": "-1.5, since the step is the gradient minus the weight itself",
+          "correct": false,
+          "why": "The update scales the gradient by the learning rate; it does not subtract θ from the gradient."
+        }
+      ],
+      "explain": "Training repeats: forward pass, loss, backpropagation for gradients, then θ ← θ − lr·∂L/∂θ over batches. Pretraining an LLM is this loop at enormous scale.",
+      "refs": [
+        "https://github.com/karpathy/micrograd"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q16",
+      "domain": "training",
+      "stem": "Your lab model generates name-like strings but will never answer 'write me a function that…'. Comparing it with Claude, which two differences matter most? (Choose two.)",
+      "options": [
+        {
+          "text": "Post-training (supervised fine-tuning, RLHF or RLAIF) that turns a text continuer into an assistant",
+          "correct": true,
+          "why": "Pretraining alone yields continuation; following instructions comes from post-training."
+        },
+        {
+          "text": "Scale: far more parameters, data and compute, with capability improving smoothly as they grow",
+          "correct": true,
+          "why": "Scaling laws show loss falls smoothly with parameters, data and compute; a bigram model has almost none of each."
+        },
+        {
+          "text": "A built-in database that the model queries for facts at runtime",
+          "correct": false,
+          "why": "LLMs do not look things up; facts are compressed into weights, and retrieval only happens through tools."
+        },
+        {
+          "text": "A memory of earlier runs that it carries into the next request",
+          "correct": false,
+          "why": "Models are stateless at inference; any memory is context the app re-sends."
+        },
+        {
+          "text": "A separate grammar module that checks sentences before output",
+          "correct": false,
+          "why": "There is no grammar module; fluency comes from next-token training at scale."
+        }
+      ],
+      "explain": "The same next-token objective underlies the toy and production models. The gap is scale (Kaplan, Chinchilla) and post-training (InstructGPT, Constitutional AI, Tulu 3).",
+      "refs": [
+        "https://arxiv.org/abs/2001.08361",
+        "https://arxiv.org/abs/2203.02155"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q17",
+      "domain": "context",
+      "stem": "Your lab model has `blockSize = 8`, so it conditions on at most the previous 8 characters. When you call a real Claude model, what happens if the input exceeds its context window?",
+      "options": [
+        {
+          "text": "The oldest tokens are dropped silently, like a sliding block",
+          "correct": false,
+          "why": "The API does not slide the window for you; it rejects the request."
+        },
+        {
+          "text": "The request fails with 400 'prompt is too long'",
+          "correct": true,
+          "why": "Input over the window is an error; the application must trim, summarise or compact first."
+        },
+        {
+          "text": "The model reads the overflow in a second pass and merges the results",
+          "correct": false,
+          "why": "There is no automatic second pass."
+        },
+        {
+          "text": "It succeeds, but only the first 8k tokens get attention weights and the rest of the input is ignored entirely",
+          "correct": false,
+          "why": "Every token within the window can be attended to; over the window the request fails."
+        }
+      ],
+      "explain": "Every model has a fixed context window. The toy just truncates to blockSize; the Claude API returns 400 for input over the window, so the application must manage context.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q18",
+      "domain": "context",
+      "stem": "You wrap your lab's `generate()` as a chat endpoint. On the second user message the replies ignore the first exchange. The real Claude API behaves the same way if you do what your endpoint does. What is the shared cause?",
+      "options": [
+        {
+          "text": "Each call is stateless: the model only sees what that call sends, so the client must resend the history",
+          "correct": true,
+          "why": "Neither your toy nor the API keeps conversation state between calls."
+        },
+        {
+          "text": "The KV cache is cleared too early and should persist between calls",
+          "correct": false,
+          "why": "Even with caching, the conversation still has to be in the request; caches speed up repeated prefixes, not memory."
+        },
+        {
+          "text": "Your endpoint should switch to a larger temperature for follow-ups so that the earlier turn stays in play",
+          "correct": false,
+          "why": "Temperature cannot bring back text that is not in the input."
+        },
+        {
+          "text": "The model's weights forget the first message after it is answered",
+          "correct": false,
+          "why": "Weights never stored it; they are frozen at inference."
+        }
+      ],
+      "explain": "LLM calls are pure functions of their input. Chat memory is the app re-sending history (and paying for it each turn).",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q19",
+      "domain": "context",
+      "stem": "You port the lab sampler's knobs to a Claude client and send `temperature: 0.7, top_k: 40` to `claude-haiku-5-5`. Every call returns 400. What should the client do instead?",
+      "options": [
+        {
+          "text": "Keep only `top_k`, which current models still accept",
+          "correct": false,
+          "why": "`top_k` is rejected along with `temperature` and `top_p` on current models."
+        },
+        {
+          "text": "Send `temperature: 1`, the default value, which every model accepts on every API version",
+          "correct": false,
+          "why": "With API version 2026-10-21 any sampling value returns 400 on every model, so the safe client sends none."
+        },
+        {
+          "text": "Drop the sampling parameters for Claude and steer with prompt wording and `effort`",
+          "correct": true,
+          "why": "Current Claude models reject sampling knobs; the supported controls are prompts and `effort`."
+        },
+        {
+          "text": "Add `thinking: { type: \"disabled\" }`, which re-enables sampling knobs on Haiku",
+          "correct": false,
+          "why": "That was the rule for older models only; current models reject non-default values regardless of thinking."
+        }
+      ],
+      "explain": "Your lab's sampler teaches real mechanics that apply to open-weight models and other APIs. On current Claude (Opus 4.7+, 5.x, Fable) non-default `temperature`, `top_p` and `top_k` return 400.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/thinking",
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v4-q20",
+      "domain": "context",
+      "stem": "You test a long-context request on Sonnet 5.5 (1M window). The input is 820k tokens and, during the turn, the model produces 100k thinking tokens. Treating the window as input plus everything generated in that turn, how many tokens are left for the visible answer before the window is full?",
+      "options": [
+        {
+          "text": "About 180,000, because thinking is not counted in the window",
+          "correct": false,
+          "why": "Thinking tokens do count toward the window, and they also bill as output."
+        },
+        {
+          "text": "About 80,000",
+          "correct": true,
+          "why": "1,000k − 820k input − 100k thinking = 80k tokens left."
+        },
+        {
+          "text": "About 128,000, the max output, regardless of input",
+          "correct": false,
+          "why": "Max output is a separate cap; the window still bounds input plus generated tokens."
+        },
+        {
+          "text": "Zero, because input may only use half the window",
+          "correct": false,
+          "why": "There is no half-window rule; input can use most of it, at the cost of context rot."
+        }
+      ],
+      "explain": "Budget the window as input + thinking + answer. Thinking counts toward the window and bills as output; leave headroom rather than filling the window, which also degrades quality.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://platform.claude.com/docs/en/build-with-claude/thinking"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,674 @@
+{
+  "topic": "ai-llm",
+  "variant": 5,
+  "of": 5,
+  "title": "How an LLM works — variant 5",
+  "description": "A product team shipping its first LLM-backed help assistant: sizing tokens and spend, debugging odd outputs on an open-weight prototype, and explaining model behaviour to a product manager.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "tokens",
+      "name": "Tokenization and embeddings",
+      "weight": 0.2
+    },
+    {
+      "id": "transformer",
+      "name": "Attention and the transformer block",
+      "weight": 0.2
+    },
+    {
+      "id": "generation",
+      "name": "Sampling, generation, KV cache and cost",
+      "weight": 0.2
+    },
+    {
+      "id": "training",
+      "name": "Training, post-training and hallucination",
+      "weight": 0.2
+    },
+    {
+      "id": "context",
+      "name": "Context window and current Claude facts",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-llm-v5-q01",
+      "domain": "tokens",
+      "stem": "Your team's first LLM feature is a help assistant for a product manual. The PM wants to know what it costs to paste the whole manual, about 250,000 characters of English, into a prompt for a current Claude model. Using Anthropic's figure for the current tokenizer (1M tokens ≈ 2.5M characters), roughly how many input tokens is that?",
+      "options": [
+        {
+          "text": "About 100,000 tokens",
+          "correct": true,
+          "why": "2.5M characters per 1M tokens is 2.5 characters per token, so 250,000 / 2.5 = 100,000 tokens."
+        },
+        {
+          "text": "About 62,500 tokens, from the four-characters-per-token rule",
+          "correct": false,
+          "why": "Four characters per token is an older rule of thumb; the current tokenizer packs fewer characters per token, so this underestimates the bill."
+        },
+        {
+          "text": "About 250,000 tokens, since each character becomes one token",
+          "correct": false,
+          "why": "Subword tokenizers merge frequent character sequences, so English text needs far fewer tokens than characters."
+        },
+        {
+          "text": "About 45,000 tokens, counting roughly one token per English word in the manual",
+          "correct": false,
+          "why": "Tokens are not words; on the current tokenizer a word is close to two tokens, so counting words badly underestimates."
+        }
+      ],
+      "explain": "Budget tokens from the tokenizer, not from words or a fixed character ratio. Anthropic's current tokenizer averages about 2.5 characters per token on English (1M tokens ≈ 2.5M characters ≈ 555k words); for a real number, call `count_tokens` on the actual text.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q02",
+      "domain": "tokens",
+      "stem": "The product is called `Zorblaxio`, a made-up word. The PM asks engineering to 'add Zorblaxio to the model's vocabulary' so the assistant understands the product better. What do you tell them?",
+      "options": [
+        {
+          "text": "The tokenizer is fixed; the name becomes a few subword ids, so explain the product in the prompt",
+          "correct": true,
+          "why": "The vocabulary cannot be changed through the API, and an unfamiliar name still encodes fine as pieces; meaning comes from context you supply."
+        },
+        {
+          "text": "Register the word through a tokenizer endpoint so it becomes a single token",
+          "correct": false,
+          "why": "There is no such endpoint; the tokenizer and its embedding table are fixed parts of the trained model."
+        },
+        {
+          "text": "Spell the name letter by letter with spaces so the model reads each character",
+          "correct": false,
+          "why": "This only makes the input longer and odder; the model already handles the name as subword pieces and needs a description, not spelling."
+        },
+        {
+          "text": "Nothing can help, because a word that never appeared in training produces an unknown-token error and is dropped",
+          "correct": false,
+          "why": "Byte-level BPE can encode any string, so there are no unknown tokens; rare words just take more pieces."
+        }
+      ],
+      "explain": "A model's tokenizer and embedding table are fixed when it is trained. New words still encode, as several subword or byte pieces, and the model works out what they mean from the surrounding text. So to teach it a product name, describe the product in the prompt; you cannot add words to its vocabulary.",
+      "refs": [
+        "https://arxiv.org/abs/1508.07909"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q03",
+      "domain": "tokens",
+      "stem": "Logging token counts per request, you see that answers full of part numbers like `XQ7-ZZ9-K4` use about three times as many tokens per character as plain English answers of similar length. The PM asks if something is broken. Which explanation is right?",
+      "options": [
+        {
+          "text": "The token counter misreads code-like text, so the logs should switch to characters divided by four",
+          "correct": false,
+          "why": "The counts are real and billed; a fixed character ratio is exactly what breaks on content like part numbers."
+        },
+        {
+          "text": "BPE merges were learned from common text, so rare codes fall back to short pieces",
+          "correct": true,
+          "why": "BPE keeps merging the most frequent pairs, so common words become single tokens while rare codes stay as short fragments or bytes."
+        },
+        {
+          "text": "The model inserts hidden separator tokens around every hyphen to keep the code intact for output",
+          "correct": false,
+          "why": "No hidden separators are added; the count comes entirely from how the fixed tokenizer splits the string."
+        },
+        {
+          "text": "Uppercase letters always cost two tokens each, one for the letter and one for the case",
+          "correct": false,
+          "why": "Case is not tokenised separately; uppercase pieces just tend to be rarer and so less merged, not encoded with a case marker."
+        }
+      ],
+      "explain": "Byte-pair encoding builds its vocabulary by repeatedly merging the most frequent adjacent pair in its training text. Common words end up as one token, while strings it rarely saw, such as codes, IDs and hashes, split into many short pieces. Token cost per character therefore depends on content, not just length.",
+      "refs": [
+        "https://arxiv.org/abs/1508.07909"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q04",
+      "domain": "tokens",
+      "stem": "You are writing a one-page explainer for the PM on what the model actually receives when a user types a question. Which statements belong in it? (Choose two.)",
+      "options": [
+        {
+          "text": "The text is cut into subword tokens by a fixed tokenizer, and the model receives a sequence of integer ids",
+          "correct": true,
+          "why": "The model never sees characters or words directly, only token ids from its tokenizer."
+        },
+        {
+          "text": "The number of tokens for the same text varies by language, by content and by model",
+          "correct": true,
+          "why": "Code, rare strings and many non-English languages take more tokens, and newer Claude tokenizers produce about 30% more tokens for the same text."
+        },
+        {
+          "text": "One token is one word, so a 300-word question is 300 tokens",
+          "correct": false,
+          "why": "Tokens are subword pieces; the ratio to words is not 1:1 and changes with language and model."
+        },
+        {
+          "text": "The tokenizer keeps learning new words from user questions, so the vocabulary grows over time",
+          "correct": false,
+          "why": "The vocabulary is fixed when the model is trained; nothing users type changes it."
+        },
+        {
+          "text": "Each token's embedding is computed fresh by the first layer from the token's letters",
+          "correct": false,
+          "why": "An embedding is a row looked up in a learned table by token id; there is no computation over letters."
+        }
+      ],
+      "explain": "Input is a list of integer token ids from a fixed tokenizer; each id looks up one row of a learned embedding table. Token counts depend on the text and the tokenizer, so 'one token = one word' and 'four characters per token' are only rough guides.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q05",
+      "domain": "transformer",
+      "stem": "While debugging an open-weight prototype, you inspect one attention head (`d_k = 64`) at position 2 of a 3-token sequence. Its query's raw dot products with the keys at positions 1, 2 and 3 are `[16, 8, 24]`. The model is a causal decoder. What weights does the head assign to positions 1, 2 and 3?",
+      "options": [
+        {
+          "text": "`[0.731, 0.269, 0]`",
+          "correct": true,
+          "why": "Position 3 is in the future, so it is set to −∞ and gets weight 0; the scaled scores [2, 1] give e²/(e²+e¹) = 0.731 and 0.269."
+        },
+        {
+          "text": "`[0.245, 0.090, 0.665]`",
+          "correct": false,
+          "why": "That is the softmax of [2, 1, 3] with no mask, which lets position 2 read a token that comes after it."
+        },
+        {
+          "text": "`[0.665, 0.245, 0.090]`",
+          "correct": false,
+          "why": "That treats the masked score as 0 instead of −∞, so the future position still gets some weight."
+        },
+        {
+          "text": "`[1.000, 0.000, 0]`, almost exactly, because softmax picks the largest score",
+          "correct": false,
+          "why": "That is what unscaled scores [16, 8] would give; dividing by √64 = 8 is what keeps softmax from saturating like this."
+        }
+      ],
+      "explain": "Attention scales raw scores by √d_k, applies the causal mask by setting later positions to −∞, then takes softmax. A −∞ score becomes exactly 0 weight, so the remaining weights are renormalised over the earlier positions only. Here [2, 1] → [0.731, 0.269].",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q06",
+      "domain": "transformer",
+      "stem": "A teammate's debugging tool takes the vector at the last position after block 20 of a 40-block open-weight model and runs it through the final norm and unembedding. It already shows plausible next tokens. The PM asks how a half-finished model can 'already know' the answer. Which explanation fits the architecture?",
+      "options": [
+        {
+          "text": "Every block adds its update to one shared vector per position, the residual stream, so middle layers already live in the space the output layer reads",
+          "correct": true,
+          "why": "With x = x + Attn(Norm(x)) and x = x + MLP(Norm(x)), each block refines the same vector; reading it early gives a rough draft of the final prediction."
+        },
+        {
+          "text": "The model runs the full 40 blocks secretly during block 20, and the tool shows a cached copy of the final answer from that hidden pass",
+          "correct": false,
+          "why": "A forward pass runs the blocks in order once; there is no hidden earlier full pass that the tool could be reading."
+        },
+        {
+          "text": "Blocks 21–40 are copies of blocks 1–20, so the second half adds nothing new and the model could simply be cut in half",
+          "correct": false,
+          "why": "The blocks have the same shape but separately learned weights; later blocks keep refining the prediction."
+        },
+        {
+          "text": "The tool is reading the embedding table, which stores the answer to each question",
+          "correct": false,
+          "why": "The embedding table only maps token ids to starting vectors; it holds no answers to questions."
+        }
+      ],
+      "explain": "A decoder-only transformer is a stack of identical-shaped blocks that each add an update to a residual stream, one vector per position. Because every layer writes into the same space, intermediate vectors can be decoded into rough predictions. This is why interpretability tools read the stream between layers.",
+      "refs": [
+        "https://transformer-circuits.pub/2021/framework/index.html"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q07",
+      "domain": "transformer",
+      "stem": "Testing the prototype, users ask both 'how do I connect to the river **bank** sensor' and 'how do I link my **bank** account'. Token `bank` enters both prompts as the same embedding row, yet answers come out right for each. Where does the model tell the two meanings apart?",
+      "options": [
+        {
+          "text": "In the attention layers, which mix in information from surrounding tokens so the vector at `bank` changes with its context",
+          "correct": true,
+          "why": "Attention lets each position pull in values from earlier positions, so after a few blocks the `bank` vector carries its context."
+        },
+        {
+          "text": "In the tokenizer, which assigns a different id to `bank` depending on the sentence",
+          "correct": false,
+          "why": "The tokenizer is fixed and context-free; the same text always gets the same ids."
+        },
+        {
+          "text": "In the embedding table, which stores several rows per token and picks the right one using the user's previous chats with the assistant",
+          "correct": false,
+          "why": "There is one row per token id, and the model has no access to previous chats unless they are sent in the request."
+        },
+        {
+          "text": "Nowhere inside the model: the API runs a separate word-sense classifier before the transformer",
+          "correct": false,
+          "why": "No separate classifier is involved; context-dependent meaning is built by the transformer's own blocks."
+        }
+      ],
+      "explain": "Embeddings are a context-free lookup: one id, one starting vector. Attention and MLP blocks then rewrite each position's vector using the tokens before it, so the same token ends up with different representations in different sentences.",
+      "refs": [
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q08",
+      "domain": "transformer",
+      "stem": "The open-weight prototype has a vocabulary of 50,000 tokens. After the final block, your debug print shows a list of 50,000 numbers taken from the last position only. The PM asks why only the last position matters for the next word and what those numbers are. Which answer is correct?",
+      "options": [
+        {
+          "text": "They are logits, one per vocabulary item; softmax turns them into next-token probabilities, and the last position is the one that has attended to the whole prompt",
+          "correct": true,
+          "why": "Under the causal mask only the last position has seen every earlier token, so its vector is projected to one logit per vocabulary item."
+        },
+        {
+          "text": "They are the probabilities of each word appearing anywhere in the answer, which the model then sorts to write its reply",
+          "correct": false,
+          "why": "The scores are for the single next token only; the reply is built one token at a time in a loop."
+        },
+        {
+          "text": "They are the embeddings of the prompt, stored at the last position for reuse",
+          "correct": false,
+          "why": "Embeddings are vectors of model width per token, not one score per vocabulary item."
+        },
+        {
+          "text": "They are attention weights over 50,000 earlier tokens",
+          "correct": false,
+          "why": "Attention weights range over positions in the sequence, not over the vocabulary, and this prompt is far shorter than 50,000."
+        }
+      ],
+      "explain": "The model is a function from a token sequence to a distribution over the next token. The final vector at the last position is projected to one logit per vocabulary entry, softmax makes probabilities, and one token is sampled. Generation repeats this after appending the new token.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q09",
+      "domain": "generation",
+      "stem": "The PM wants the daily cost of the help assistant on Opus 5.5 ($4 input / $20 output per million tokens). Expect 1,000 users asking 5 questions a day; each request sends 8,000 input tokens and returns 500 output tokens, with no thinking. What is the daily cost?",
+      "options": [
+        {
+          "text": "$210",
+          "correct": true,
+          "why": "5,000 requests × 8,000 = 40M input × $4 = $160, plus 5,000 × 500 = 2.5M output × $20 = $50."
+        },
+        {
+          "text": "$170, pricing all 42.5M tokens at the input rate",
+          "correct": false,
+          "why": "Output is billed at five times the input rate, so treating all tokens alike undercounts the answers."
+        },
+        {
+          "text": "$105, from the Sonnet 5.5 rates of $2 / $10",
+          "correct": false,
+          "why": "That is the same traffic at Sonnet 5.5 prices, not at Opus 5.5 prices as the question asks."
+        },
+        {
+          "text": "$850, pricing all 42.5M tokens at the output rate",
+          "correct": false,
+          "why": "Only the generated tokens bill at the output rate; the 40M input tokens bill at $4 per million."
+        }
+      ],
+      "explain": "Price input and output separately: tokens × rate for each, then add. On every current Claude model output costs 5× input, so even a short answer can be a big share of the bill.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q10",
+      "domain": "generation",
+      "stem": "Before moving to the Claude API, the team prototypes on an open-weight model that still accepts sampling knobs. For one step the logits are `[2.0, 1.0, 0.5, 0.0, -1.0]` for `[the, a, cat, dog, ran]`. A teammate sets temperature to 0.5. What is p(`the`), and what does that show?",
+      "options": [
+        {
+          "text": "0.829: dividing logits by T < 1 sharpens the distribution towards the top token",
+          "correct": true,
+          "why": "Logits become [4, 2, 1, 0, −2]; softmax gives about 0.829 for `the`, up from 0.563 at T = 1."
+        },
+        {
+          "text": "0.563: temperature only affects which token is drawn, not the probabilities",
+          "correct": false,
+          "why": "0.563 is the T = 1 value; temperature divides the logits before softmax, so the probabilities change."
+        },
+        {
+          "text": "0.375: a lower temperature flattens the distribution so rarer tokens get picked more often",
+          "correct": false,
+          "why": "0.375 is p(`the`) at T = 2; lower temperatures sharpen the distribution rather than flattening it."
+        },
+        {
+          "text": "0.731: half the temperature keeps only the top two tokens",
+          "correct": false,
+          "why": "0.731 is the top-k = 2 result at T = 1; temperature rescales all logits and drops none of them."
+        }
+      ],
+      "explain": "Temperature divides logits before softmax: T < 1 sharpens towards the top token, T > 1 flattens. On these logits p(`the`) goes 0.375 (T = 2) → 0.563 (T = 1) → 0.829 (T = 0.5). On current Claude models this knob cannot be set, so steer with prompts and `effort` instead.",
+      "refs": [
+        "https://arxiv.org/abs/1904.09751"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q11",
+      "domain": "generation",
+      "stem": "The PM suggests making answers longer and more detailed 'because the input is the expensive part, it is five times bigger'. A typical request on Sonnet 5.5 ($2 input / $10 output per million) sends 10,000 input tokens and returns 2,000 output tokens. What share of the request's cost is the output?",
+      "options": [
+        {
+          "text": "About 17%, because output is 2,000 of 12,000 tokens",
+          "correct": false,
+          "why": "That is the share of tokens, not of cost; each output token costs five times as much as an input token."
+        },
+        {
+          "text": "Half: $0.02 for input and $0.02 for output",
+          "correct": true,
+          "why": "10,000 × $2/M = $0.02 and 2,000 × $10/M = $0.02, so the output is 50% of a $0.04 request."
+        },
+        {
+          "text": "About 5%, since cached input dominates the cost on Sonnet 5.5",
+          "correct": false,
+          "why": "Nothing here is cached, and output is billed at 5× input whether or not any input is cached."
+        },
+        {
+          "text": "About 83%, because output tokens cost five times more and so dominate whenever any output is produced at all",
+          "correct": false,
+          "why": "The 5× rate applies to only 2,000 tokens here; with 10,000 input tokens the two halves come out equal."
+        }
+      ],
+      "explain": "Output is billed at 5× input on every current Claude model, and it is also generated serially, one token at a time. A request with five times more input than output therefore splits its cost about evenly, so longer answers raise cost and latency much more than the PM expects.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q12",
+      "domain": "generation",
+      "stem": "In a demo, the PM asks the help assistant on `claude-sonnet-5-5` the same question twice and gets two differently worded answers. Your code sets no sampling parameters. The PM asks whether this is a bug and wants the wording locked. What is the sound response?",
+      "options": [
+        {
+          "text": "Set `temperature: 0` on the request so the model always picks the most likely token",
+          "correct": false,
+          "why": "On current Claude models any non-default `temperature` returns 400, and even greedy decoding is not reliably deterministic."
+        },
+        {
+          "text": "Not a bug: each token is sampled from a distribution; for consistency, use clearer instructions or a template, or store and reuse approved answers",
+          "correct": true,
+          "why": "Variation comes from sampling; on current Claude you steer with the prompt and structure, and exact wording needs the app to store it."
+        },
+        {
+          "text": "It is a bug in the API's random seed; file a support ticket and pin the seed parameter in the client",
+          "correct": false,
+          "why": "Variation is the expected result of sampling, and there is no seed parameter to pin."
+        },
+        {
+          "text": "The model learned from the first question and changed its answer the second time",
+          "correct": false,
+          "why": "Weights are frozen at inference, and each call is independent unless the earlier exchange is resent."
+        }
+      ],
+      "explain": "Generation samples one token at a time from a probability distribution, so wording varies between runs. On current Claude the sampling knobs cannot be changed, and temperature 0 would not guarantee identical output anyway. For consistent wording, constrain the format in the prompt, or store answers that have been approved.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q13",
+      "domain": "training",
+      "stem": "Beta users correct the assistant in chat ('no, the export limit is 10,000 rows'). It accepts the correction, but the next day other users get the old wrong answer again. The PM asks why it 'didn't learn'. What do you explain, and what do you change?",
+      "options": [
+        {
+          "text": "Weights are frozen at inference; the correction only conditioned that one conversation. Put the correct limit in the prompt or in retrieved docs",
+          "correct": true,
+          "why": "In-context learning uses only the current window; a durable fix means sending the fact on every request."
+        },
+        {
+          "text": "The model did learn, but each user gets a separately trained copy, so share one session across users",
+          "correct": false,
+          "why": "There are no per-user copies, and sharing a session would leak conversations; the weights simply do not change."
+        },
+        {
+          "text": "Corrections take about a week to propagate into the model, so wait and check again",
+          "correct": false,
+          "why": "Nothing propagates; training happens offline and is not fed by your users' chats."
+        },
+        {
+          "text": "Ask users to repeat each correction several times so the model reinforces it",
+          "correct": false,
+          "why": "Repetition only fills that conversation's window; later conversations still start from the same frozen weights."
+        }
+      ],
+      "explain": "A deployed model's weights do not change during use. What looks like learning in a chat is conditioning on the text in the current window, and it disappears when the next request is sent without it. Facts the product depends on must be supplied by the application, in the prompt or through retrieval.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q14",
+      "domain": "training",
+      "stem": "In beta, the assistant sometimes quotes a refund-policy clause that does not exist, and it sounds confident each time. The PM wants this reduced before launch. Which changes target the cause? (Choose two.)",
+      "options": [
+        {
+          "text": "Send the actual policy text with each question and instruct the model to answer only from it",
+          "correct": true,
+          "why": "Grounding replaces the model's compressed memory with the real source, so it has the actual clauses to quote."
+        },
+        {
+          "text": "Tell the model explicitly that 'I don't know, let me connect you to support' is an acceptable answer",
+          "correct": true,
+          "why": "Guessing is rewarded by training and evals; giving it permission to abstain makes guessing less likely."
+        },
+        {
+          "text": "Lower the temperature so it stops making things up",
+          "correct": false,
+          "why": "Current Claude rejects temperature changes with a 400, and lower randomness still picks the most likely wrong clause."
+        },
+        {
+          "text": "Wait for the next model release, since invented clauses are a bug that gets patched",
+          "correct": false,
+          "why": "Hallucination is structural, coming from probability matching and evals that reward guessing, so it is mitigated rather than patched."
+        },
+        {
+          "text": "Ask the model to look up the latest policy on the company website before answering",
+          "correct": false,
+          "why": "Without a tool or retrieval step the model cannot look anything up; it would answer from its weights and may claim it checked."
+        }
+      ],
+      "explain": "A model answers by producing likely text, and training plus evals that score guesses above abstentions push it to sound sure. The reliable mitigations are grounding (give it the source) and explicit permission to say 'I don't know'.",
+      "refs": [
+        "https://arxiv.org/abs/2509.04664"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q15",
+      "domain": "training",
+      "stem": "The team fine-tunes a small open-weight model on past support transcripts. The dashboard reports a held-out loss of 0.357 nats per token, and the PM asks for something more intuitive. What perplexity does that correspond to, and how do you put it?",
+      "options": [
+        {
+          "text": "About 0.70: the model is right 70% of the time",
+          "correct": false,
+          "why": "0.70 is e^−0.357, the probability on the correct token; perplexity is e^loss, and it is not an accuracy figure."
+        },
+        {
+          "text": "About 10.8: roughly as unsure as a uniform guess over the vocabulary",
+          "correct": false,
+          "why": "10.8 is the loss of uniform guessing over a 50k vocabulary, not the perplexity for a loss of 0.357."
+        },
+        {
+          "text": "About 1.43: on average it is about as unsure as choosing between 1.4 equally likely tokens",
+          "correct": true,
+          "why": "Perplexity = e^0.357 ≈ 1.43, an effective number of choices per token; lower is better and 1 is perfect."
+        },
+        {
+          "text": "Exactly 0.357, since loss and perplexity are the same number shown in different units on the dashboard",
+          "correct": false,
+          "why": "Perplexity is the exponential of the loss, so the two numbers differ except when both are trivially small."
+        }
+      ],
+      "explain": "Loss per token is −ln p of the correct token, averaged. Perplexity, e^loss, turns it into an 'effective number of equally likely choices': 0.357 → 1.43, while uniform guessing over 50k tokens gives a loss of ln 50000 ≈ 10.82.",
+      "refs": [
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q16",
+      "domain": "training",
+      "stem": "Asked about a competitor's pricing, the assistant gives a figure and says 'according to their website'. Your integration gives the model no tools and no retrieval. The PM concludes that it browses the web when needed. What is actually happening?",
+      "options": [
+        {
+          "text": "It visited the site through a built-in browser that the API turns on whenever a question mentions a company",
+          "correct": false,
+          "why": "The API runs no tools unless your request defines them; with none defined, nothing was fetched."
+        },
+        {
+          "text": "It generated the figure and citation from patterns in its weights; it can only fetch live data through a tool or retrieval step you provide",
+          "correct": true,
+          "why": "Weights compress training statistics; without a tool there is no lookup, so the 'source' is generated text like the rest."
+        },
+        {
+          "text": "It looked the price up in its embedding table, which stores facts about companies",
+          "correct": false,
+          "why": "The embedding table maps token ids to vectors; it is not a database of facts to look up."
+        },
+        {
+          "text": "It is quoting the competitor's website accurately, because pretraining included that page",
+          "correct": false,
+          "why": "Even text seen in training is stored only as compressed statistics, and the page may have changed since the training cutoff."
+        }
+      ],
+      "explain": "A model does not look things up: its knowledge is a lossy compression of training data, frozen at the cutoff. Claims of having checked a source are generated text too. Live or verifiable facts need a tool or retrieval step that puts the real source in the context.",
+      "refs": [
+        "https://www.anthropic.com/research/tracing-thoughts-language-model"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q17",
+      "domain": "context",
+      "stem": "The PM wants the assistant to greet returning users with 'last time you asked about exports' and to remember that they prefer short answers. Today each new session starts with an empty message list. How should this be built?",
+      "options": [
+        {
+          "text": "Turn on the API's memory setting so the model keeps a profile for each API key",
+          "correct": false,
+          "why": "The Messages API is stateless; it keeps nothing between calls that the application does not send again."
+        },
+        {
+          "text": "Store a short summary and the preferences in your database, and add them to the system prompt each session",
+          "correct": true,
+          "why": "Each call carries everything the model sees, so persistence is the app's job: save the facts and resend them."
+        },
+        {
+          "text": "Reuse the same conversation id across sessions so the model recognises the user and recalls everything they discussed",
+          "correct": false,
+          "why": "The model receives only the messages in the request; an id alone carries none of the earlier content."
+        },
+        {
+          "text": "Fine-tune the model nightly on each user's chats",
+          "correct": false,
+          "why": "This is costly, slow and leaks data between users; resending a short profile does the job at once."
+        }
+      ],
+      "explain": "LLM APIs are stateless: every request must contain the whole context the model should use. 'Memory' is an application feature: store what matters, then put it back into the prompt on each call. Keep it short, because it costs input tokens on every request.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q18",
+      "domain": "context",
+      "stem": "To 'get the smarter model', the team switches the assistant from `claude-sonnet-5-5` to `claude-opus-5-5` with adaptive thinking on and no other change. On hard troubleshooting questions it now thinks noticeably less than before. What is the most likely reason?",
+      "options": [
+        {
+          "text": "Opus 5.5 does not support adaptive thinking, so the request quietly fell back to no thinking",
+          "correct": false,
+          "why": "Adaptive thinking with `effort` is the supported mode on current models, including Opus 5.5."
+        },
+        {
+          "text": "Opus 5.5 has a smaller context window, so less room was left for thinking tokens",
+          "correct": false,
+          "why": "Both models have a 1M-token window and 128K max output, so window size does not explain the change."
+        },
+        {
+          "text": "The default `effort` is medium on Opus 5.5 and high on Sonnet 5.5; set it explicitly",
+          "correct": true,
+          "why": "Default effort differs per model, so switching ids without setting `effort` changes how much the model thinks."
+        },
+        {
+          "text": "The old `budget_tokens` value from the Sonnet setup is being ignored, so add `budget_tokens: 32000` to the Opus calls",
+          "correct": false,
+          "why": "Manual `budget_tokens` is rejected with 400 on 4.7+ models; `effort` is the supported way to control thinking."
+        }
+      ],
+      "explain": "On current Claude models, thinking is adaptive and controlled by `effort`, and the default differs by model: Fable 5.1 high, Opus 5.5 medium, Sonnet 5.5 high, Haiku 5.5 medium. When you change the model id, set `effort` explicitly so behaviour and cost do not shift silently.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q19",
+      "domain": "context",
+      "stem": "The PM wants a 'translate the whole manual' button that sends the 300k-token manual to `claude-opus-5-5` in one request and expects the full translation, about 330k tokens, in the reply. It fits in the 1M window, so the PM assumes one call will do. What is the problem, and what do you build?",
+      "options": [
+        {
+          "text": "No problem: 300k input plus 330k output is under 1M, so a single call returns the full translation",
+          "correct": false,
+          "why": "The window is not the only limit; a single response can contain at most 128K output tokens."
+        },
+        {
+          "text": "The input is too long for Opus 5.5, so switch to Fable 5.1, which has the larger window",
+          "correct": false,
+          "why": "All current models have the same 1M window and 128K output cap, so switching model changes neither limit."
+        },
+        {
+          "text": "Output is capped at 128K tokens per response; translate section by section in separate calls",
+          "correct": true,
+          "why": "Splitting keeps each reply under the output cap, and shorter inputs also suffer less from context rot."
+        },
+        {
+          "text": "Set `max_tokens` to 400,000 so the response has room for the whole translation, and keep the single call",
+          "correct": false,
+          "why": "`max_tokens` cannot exceed the model's 128K output cap; the request is rejected rather than extended."
+        }
+      ],
+      "explain": "Two limits apply to every call: the context window (input plus everything generated in the turn) and the maximum output per response. Current Claude models have a 1M window but a 128K output cap, and thinking tokens count toward both. Long generation jobs have to be split into chunks.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/models/overview"
+      ]
+    },
+    {
+      "id": "ai-llm-v5-q20",
+      "domain": "context",
+      "stem": "Before launch you brief the PM on how conversation length affects the assistant. Which statements are accurate? (Choose two.)",
+      "options": [
+        {
+          "text": "Every call carries the whole conversation, so each turn's input, and its cost, grows as the chat gets longer",
+          "correct": true,
+          "why": "The API is stateless, so the app resends the full history and pays for those input tokens on every turn."
+        },
+        {
+          "text": "As the context fills, accuracy and recall degrade, so a trimmed, relevant context often answers better than a full one",
+          "correct": true,
+          "why": "Context rot: models do not use a long window uniformly, and what is in it, and where, matters."
+        },
+        {
+          "text": "The model keeps the conversation server-side, so only the newest message is billed",
+          "correct": false,
+          "why": "Nothing is kept between calls; whatever history the model should see is sent and billed again."
+        },
+        {
+          "text": "With a 1M-token window, the model weighs every part of a long chat equally",
+          "correct": false,
+          "why": "Fitting in the window does not mean every part is used equally; recall drops as the context grows."
+        },
+        {
+          "text": "If a chat grows past the window, the API silently drops the oldest messages and answers anyway",
+          "correct": false,
+          "why": "Input over the window returns a 400 'prompt is too long'; trimming or compaction is something you choose to do."
+        }
+      ],
+      "explain": "Two facts shape long chats: the API is stateless, so history is resent and billed every turn, and long contexts degrade (context rot). Keep conversations lean: summarise or trim old turns, and send only what the next answer needs.",
+      "refs": [
+        "https://www.trychroma.com/research/context-rot"
+      ]
+    }
+  ]
+}

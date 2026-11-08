@@ -42,6 +42,48 @@ TERMINAL_PASTE = re.compile(r"drwx|^\S*otal \d+|\$ \w+", re.M)
 VISUAL = re.compile(r"\bvisuali[sz]e|\bdiagram|\bdraw (it|this|me)|\bgrasp\b|help me (understand|see)|"
                     r"(need|want) to understand|understand (it |this |that )?better|explain (it )?visually|picture (it|this)", re.I)
 TRIVIAL = re.compile(r"^(y|yes|no|ok|okay|exit|continue|go|thanks|thank you|nice|perfect|allright|alright)\W*$", re.I)
+# Rung gate (habit rung-gate-before-work, asked by Giga 2026-11-08): a work-starting prompt is graded
+# on the AI-engineering ladder and upgraded *before* anything runs. Regexes only estimate; Claude grades.
+WORK = re.compile(r"\b(investigate|analy[sz]e|review|audit|check|compare|research|look into|find out|debug|"
+                  r"trace|diagnose|test|verify|deploy|plan|design|migrate|clean ?up|upgrade|bump)\b", re.I)
+SKIP_GATE = re.compile(r"\bskip (the )?gate\b|\bno gate\b", re.I)
+SUBJECTIVE = re.compile(r"(you )?feel confident|you('re| are) (confident|sure)|make sure|looks? (good|right|fine)|"
+                        r"you think|until (it|everything) works|properly|correctly|as needed|if needed", re.I)
+CHECKABLE = re.compile(r"\d|threshold|baseline|p9\d|\btests? (pass|green|red)|\bcurl\b|exit 0|\bquery\b|nrql|"
+                       r"rerun|re-run|\bassert|returns? \d{3}|≤|<=|>=|within", re.I)
+ENVIRON = re.compile(r"\b(staging|prod|production|local(ly)?|dev|sandbox|baseline|compared? (to|with)|vs\.?|"
+                     r"last (week|day|deploy)|before (the )?deploy)\b", re.I)
+BOUNDARY = re.compile(r"read[- ]only|don'?t|do not|never|ask (me )?(first|before)|no (commits?|push(es)?|deploys?)|"
+                      r"(decision|go/no-go|call) is mine|i (decide|control)", re.I)
+EVIDENCE = re.compile(r"\bproof\b|\bevidence\b|show (me )?(the )?(query|queries|output|command|diff)|"
+                      r"rerun|re-run|screenshot|\bnrql\b|with (the )?(query|command)", re.I)
+SPLIT = re.compile(r"sub-?agents?|\bagents?\b|parallel|worktree|background|fan[- ]out|\bsplit\b", re.I)
+SHAPE = re.compile(r"\btable\b|\bcolumns?\b|\bformat\b|\bjson\b|return (only|exactly|one|a)|one line per|per (item|service|repo)", re.I)
+
+
+def rung_gate(p):
+    """(estimated rung, missing rubric items) for a work-starting prompt. Heuristic; Claude grades for real."""
+    done = bool(DONE.search(p))
+    subjective = bool(SUBJECTIVE.search(p))
+    checkable = bool(CHECKABLE.search(p)) and not subjective
+    has = {"checkable done-line": done and checkable, "baseline / environment": bool(ENVIRON.search(p)),
+           "boundary + decision owner": bool(BOUNDARY.search(p)), "rerunnable evidence": bool(EVIDENCE.search(p)),
+           "split across agents": bool(SPLIT.search(p)), "fixed output shape": bool(SHAPE.search(p))}
+    rung = 0
+    if done:
+        rung = 1
+        if has["checkable done-line"] and has["baseline / environment"]:
+            rung = 2
+            if has["split across agents"] and has["boundary + decision owner"] and has["rerunnable evidence"]:
+                rung = 3
+    missing = [k for k, v in has.items() if not v]
+    if subjective:
+        missing.insert(0, "done-line is a feeling (\"feel confident\" / \"make sure\"), not a check")
+    if not done:
+        missing.insert(0, "no done-line")
+    return rung, missing
+
+
 
 
 def git_root(cwd):
@@ -113,6 +155,18 @@ def cues(p, cwd=""):
         flags["debug_no_hypothesis"] = True
         out.append("Bug report without expected/actual/hypothesis. Follow debug-protocol (reproduce first); "
                    "tip: 'Expected X, got Y, changed since Z, I suspect W'.")
+    working = (building or bool(WORK.search(p))) and not question and not TERMINAL_PASTE.search(p) and len(p) >= 40
+    if working and not SKIP_GATE.search(p):
+        rung, missing = rung_gate(p)
+        flags["rung"] = rung
+        if missing:
+            flags["gate"] = True
+            out.append(f"RUNG GATE (habit rung-gate-before-work): estimated rung {rung}; missing: {'; '.join(missing[:4])}. "
+                       "BEFORE any tool call: (1) one line 'Rung N → N+1' naming the gaps; (2) the prompt rewritten one "
+                       "rung higher as a quote block, your defaults marked (proposed); (3) ONE AskUserQuestion batch for "
+                       "what only Giga can decide (thresholds, baseline, boundary, env), proposed default first. Run the "
+                       "upgraded prompt only after Giga confirms; this is the single up-front interview, not an extra round. "
+                       "If the estimate is wrong and the prompt already meets the next rung, say 'rung N ✓' and proceed.")
     items = len(LIST_ITEM.findall(p)) + len(ALSO.findall(p))
     if building and items >= 3:
         flags["multi_task"] = True

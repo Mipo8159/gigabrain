@@ -1,0 +1,673 @@
+{
+  "topic": "ai-context",
+  "variant": 3,
+  "of": 5,
+  "title": "Context engineering — variant 3",
+  "description": "A cost blow-up: why spend grows with conversation length and tool definitions, cache prefix order, TTL choice and pricing maths, cache invalidators, effort and tokenizer effects, and the Claude Code levers that keep the window small.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "state",
+      "name": "Statelessness and request shape",
+      "weight": 0.15
+    },
+    {
+      "id": "prompting",
+      "name": "Prompting techniques",
+      "weight": 0.15
+    },
+    {
+      "id": "caching",
+      "name": "Prompt caching",
+      "weight": 0.4
+    },
+    {
+      "id": "limits",
+      "name": "Window limits, degradation and compaction",
+      "weight": 0.15
+    },
+    {
+      "id": "claudecode",
+      "name": "What Claude Code loads",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-context-v3-q01",
+      "domain": "state",
+      "stem": "The monthly bill for your in-app assistant grew much faster than the number of conversations. Most conversations are long, and every message is short. What best explains the shape of the bill?",
+      "options": [
+        {
+          "text": "Every request resends all prior turns, so later messages carry ever larger inputs",
+          "correct": true,
+          "why": "Input per request grows with the conversation, so a long chat costs far more than its message count suggests."
+        },
+        {
+          "text": "The API charges a per-conversation storage fee that grows with each turn of the chat history",
+          "correct": false,
+          "why": "There is no server-side conversation to store; the client resends it."
+        },
+        {
+          "text": "Output tokens accumulate across the conversation and are billed again on each turn",
+          "correct": false,
+          "why": "Each response is billed once as output; it is the resent input that grows."
+        },
+        {
+          "text": "Each cache write is charged again for every earlier turn in the conversation",
+          "correct": false,
+          "why": "A write is charged once per prefix it stores, not per earlier turn."
+        }
+      ],
+      "explain": "Because the model is stateless, turn N carries turns 1 to N−1 again. Total input over a conversation grows much faster than linearly, which is why caching, trimming and compaction matter for long chats.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages",
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q02",
+      "domain": "state",
+      "stem": "An FAQ bot was built on a shared agent setup that defines 40 tools (about 15k tokens of schemas). FAQ answers almost never call a tool. Where does that cost show up?",
+      "options": [
+        {
+          "text": "Nowhere, because tools are only billed when the model calls them",
+          "correct": false,
+          "why": "Definitions are part of the request whether or not they are used."
+        },
+        {
+          "text": "Once per conversation, since the API keeps the tool list after the first request",
+          "correct": false,
+          "why": "Nothing is kept between requests; tools are resent each time."
+        },
+        {
+          "text": "On every request, since definitions are input that also fills the window",
+          "correct": true,
+          "why": "Tool definitions count toward input and the window on each call; trim to what this bot needs."
+        },
+        {
+          "text": "Only on cache misses, because tool definitions are cached automatically at zero cost on every model",
+          "correct": false,
+          "why": "Caching needs breakpoints and a minimum length, and reads are discounted, not free."
+        }
+      ],
+      "explain": "Tool definitions are part of every request: they count toward the window and are billed as input. A bot that needs no tools should not carry 40 of them.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://platform.claude.com/docs/en/api/messages"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q03",
+      "domain": "state",
+      "stem": "A support chat attaches a screenshot in its first turn and then runs for 30 more turns about unrelated settings. Where does the screenshot's cost land?",
+      "options": [
+        {
+          "text": "Only on the turn it was attached, since images are billed once",
+          "correct": false,
+          "why": "It is resent with the history, so it is billed and counted again."
+        },
+        {
+          "text": "On every request while it stays in `messages`",
+          "correct": true,
+          "why": "Images in the history are resent each time and count toward the window."
+        },
+        {
+          "text": "Nowhere after the first turn, because the API stores the image server-side and only references it on later turns",
+          "correct": false,
+          "why": "The Messages API keeps no state; whatever is in `messages` is sent again."
+        },
+        {
+          "text": "Only as output, since the model describes the image in its answer",
+          "correct": false,
+          "why": "The image is input on every request that includes it."
+        }
+      ],
+      "explain": "Everything in `messages` is resent and counted on each call, including images and documents. Dropping or summarising stale attachments is one of the cheapest context savings.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q04",
+      "domain": "prompting",
+      "stem": "To 'get the best answers', a teammate set maximum effort on every endpoint, including a one-word sentiment classifier. Output spend tripled. What do you tell them?",
+      "options": [
+        {
+          "text": "Thinking is free; the rise must be caused by something else",
+          "correct": false,
+          "why": "Thinking tokens are billed as output."
+        },
+        {
+          "text": "Effort only changes input pricing, so the classifier is unaffected",
+          "correct": false,
+          "why": "Effort influences how much the model thinks, which is output."
+        },
+        {
+          "text": "Lower effort where the task is simple; thinking is billed as output",
+          "correct": true,
+          "why": "More effort usually means more thinking, billed as output and counted in the window."
+        },
+        {
+          "text": "Cut `max_tokens` on the classifier to 10, which caps the thinking and keeps every endpoint at maximum effort",
+          "correct": false,
+          "why": "That risks truncated responses; choosing the right effort is the real knob."
+        }
+      ],
+      "explain": "Adaptive thinking with an `effort` setting decides how much the model reasons. Thinking blocks are billed as output and occupy the window, so match effort to the task.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q05",
+      "domain": "prompting",
+      "stem": "In a cost review, someone proposes deleting the one-sentence role at the top of the system prompt and the XML tags around its sections, to save about 40 tokens per request on a 25k-token prompt. What is the better call?",
+      "options": [
+        {
+          "text": "Delete both, since every token saved compounds over millions of requests",
+          "correct": false,
+          "why": "40 of 25k tokens is noise compared with the quality loss."
+        },
+        {
+          "text": "Keep the role but drop the tags, because the model ignores XML structure anyway",
+          "correct": false,
+          "why": "XML tags give the model clear boundaries; they are not ignored."
+        },
+        {
+          "text": "Keep both; look for savings in the large blocks instead",
+          "correct": true,
+          "why": "A single role sentence measurably focuses behaviour and tags cost little; the 25k body is where money goes."
+        },
+        {
+          "text": "Drop the role and replace it with a larger set of few-shot examples, which steer behaviour for fewer tokens",
+          "correct": false,
+          "why": "Examples cost more tokens than one sentence, and they serve a different purpose."
+        }
+      ],
+      "explain": "A role in the system prompt focuses behaviour ('even a single sentence makes a difference') and XML tags separate content cheaply. Cost work should target large, repeated context, not small structural tokens.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q06",
+      "domain": "prompting",
+      "stem": "After moving a pipeline from a Claude 4.6 model to a 4.7 one, with identical prompts, input token counts went up by about a third. Nothing else changed. Why?",
+      "options": [
+        {
+          "text": "Caching is switched off by default on newer models",
+          "correct": false,
+          "why": "Caching works the same way; it does not change token counts."
+        },
+        {
+          "text": "Claude 4.7+ uses a new tokenizer that turns the same text into roughly 30% more tokens",
+          "correct": true,
+          "why": "The text is the same; the tokenizer counts it differently."
+        },
+        {
+          "text": "Thinking tokens are now billed as input on newer models",
+          "correct": false,
+          "why": "Thinking is billed as output."
+        },
+        {
+          "text": "The system prompt is now sent twice, once in `system` and once in `messages`",
+          "correct": false,
+          "why": "The request shape has not changed between generations."
+        }
+      ],
+      "explain": "Token counts depend on the tokenizer. Claude 4.7+ produces about 30% more tokens for the same text, so recheck budgets and costs after a model upgrade.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q07",
+      "domain": "caching",
+      "stem": "Assume (illustrative) $5 per million base input tokens, cache reads at 0.1×, and a 5-minute cache. A burst of 10 requests within a minute shares a 20k-token prefix. What does that prefix cost in total with caching?",
+      "options": [
+        {
+          "text": "About $0.19",
+          "correct": false,
+          "why": "This prices the first write at the base rate and forgets the 1.25× write premium."
+        },
+        {
+          "text": "About $0.22",
+          "correct": true,
+          "why": "One write at 1.25× ($0.125) plus nine reads at 0.1× ($0.09) is $0.215, against $1.00 uncached."
+        },
+        {
+          "text": "About $0.29",
+          "correct": false,
+          "why": "This uses the 1-hour write price (2×) instead of the 5-minute one."
+        },
+        {
+          "text": "About $0.10",
+          "correct": false,
+          "why": "This charges all ten requests at the read price and forgets the first one is a write."
+        }
+      ],
+      "explain": "One write plus N−1 reads: 20k × $5/M × 1.25 = $0.125 for the write, 9 × 20k × $5/M × 0.1 = $0.09 for the reads. About 78% less than ten full-price requests.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q08",
+      "domain": "caching",
+      "stem": "A reporting job calls the model every 10 minutes for an hour (6 calls) with the same 40k-token prefix. Assume (illustrative) $5 per million base input tokens and reads at 0.1×. Which cache TTL is cheaper for the prefix?",
+      "options": [
+        {
+          "text": "The 5-minute TTL, because a 1-hour write costs 2× base",
+          "correct": false,
+          "why": "With 10-minute gaps the 5-minute cache always expires, so every call pays a 1.25× write: about $1.50."
+        },
+        {
+          "text": "The 1-hour TTL: about $0.50 against about $1.50",
+          "correct": true,
+          "why": "One 2× write ($0.40) plus five reads ($0.10) beats six 1.25× writes ($1.50)."
+        },
+        {
+          "text": "Neither: no caching ($1.20) is cheaper than both options",
+          "correct": false,
+          "why": "It beats the 5-minute TTL, but the 1-hour TTL is cheaper still."
+        },
+        {
+          "text": "They cost the same, because every read refreshes the TTL and keeps the cache warm whichever duration you pick",
+          "correct": false,
+          "why": "A read can only refresh a cache that has not expired yet; 10 minutes is past 5."
+        }
+      ],
+      "explain": "Pick the TTL from the gap between requests. If gaps exceed 5 minutes, a 5-minute cache never gets read and costs more than no cache; the 1-hour TTL pays 2× once and then 0.1× per read.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q09",
+      "domain": "caching",
+      "stem": "Your system prompt starts with the line `Current time: <ISO timestamp>` followed by 12k tokens of fixed policy. A breakpoint sits at the end of the system prompt. Cache reads are always zero. What fixes it?",
+      "options": [
+        {
+          "text": "Moving the timestamp after the cached part, for example into the user message",
+          "correct": true,
+          "why": "The prefix must match exactly; a value at the very start changes it every time."
+        },
+        {
+          "text": "Switching to the 1-hour TTL, so the cache lives long enough to be read by later requests",
+          "correct": false,
+          "why": "Duration does not matter when the prefix never repeats."
+        },
+        {
+          "text": "Adding a second breakpoint halfway through the policy text",
+          "correct": false,
+          "why": "That prefix also begins with the changing timestamp, so it never repeats either."
+        },
+        {
+          "text": "Nothing; timestamps are ignored during prefix matching",
+          "correct": false,
+          "why": "Matching is exact; nothing is ignored."
+        }
+      ],
+      "explain": "A cache entry is a prefix. Anything that changes per request must come after the last breakpoint, or every request becomes a fresh write.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q10",
+      "domain": "caching",
+      "stem": "Your system prompt has two blocks: first a per-user profile (about 1k tokens, different for every user), then shared product guidelines (about 15k tokens). Cache hits only happen when the same user sends twice. What is the fix?",
+      "options": [
+        {
+          "text": "Mark the profile block with the 1-hour TTL so it survives longer between that user's visits",
+          "correct": false,
+          "why": "It still differs for every user, so the guidelines after it never match across users."
+        },
+        {
+          "text": "Put the shared guidelines first with a breakpoint, and the profile after it",
+          "correct": true,
+          "why": "Stable shared content must form the prefix; per-user content comes after the breakpoint."
+        },
+        {
+          "text": "Split the guidelines into four blocks, each with its own breakpoint, to cache them more finely",
+          "correct": false,
+          "why": "They all still sit behind the per-user block, so none of them match across users."
+        },
+        {
+          "text": "Move the guidelines into a tool description so they are cached at the tools level",
+          "correct": false,
+          "why": "Abusing tool descriptions for documents is a hack, and it does not address the ordering problem in the system prompt."
+        }
+      ],
+      "explain": "The cache matches from the start of the request: tools, then system, then messages. Order content from most stable and most shared to most volatile, and put breakpoints at the end of each stable section.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q11",
+      "domain": "caching",
+      "stem": "To save money, a router sends easy questions with low effort and hard ones with high effort, on the same model and the same long prompt. The cache hit rate collapsed after the change. Why?",
+      "options": [
+        {
+          "text": "Effort only affects output, so it cannot be the cause",
+          "correct": false,
+          "why": "Thinking and effort configuration are documented cache invalidators."
+        },
+        {
+          "text": "Changing thinking or effort configuration invalidates the cache, so alternating keeps rewriting it",
+          "correct": true,
+          "why": "Each switch between effort levels misses the cached prefix."
+        },
+        {
+          "text": "Low-effort requests fall below the minimum cacheable prompt length",
+          "correct": false,
+          "why": "Minimum length depends on the prompt and model, not on effort."
+        },
+        {
+          "text": "The router now spreads traffic across two API keys, and each key keeps its own separate cache",
+          "correct": false,
+          "why": "Nothing in the scenario changes keys; the effort change alone explains it."
+        }
+      ],
+      "explain": "Thinking and effort settings are part of what a cache entry depends on. Alternating them per request means repeated misses; keep one setting per pipeline or accept a separate cache per setting.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q12",
+      "domain": "caching",
+      "stem": "You want to know which changes make the next request miss the cache for the whole prefix, system prompt included. Which two do? (Choose two.)",
+      "options": [
+        {
+          "text": "Editing the description of one tool",
+          "correct": true,
+          "why": "Any tool-definition change invalidates the entire cache, since tools come first."
+        },
+        {
+          "text": "Sending the same prompt to a different model",
+          "correct": true,
+          "why": "Caches are per model; nothing is shared across models."
+        },
+        {
+          "text": "Appending a new user message at the end",
+          "correct": false,
+          "why": "That is the normal case: the earlier prefix still matches."
+        },
+        {
+          "text": "Reading the cache, which refreshes its TTL",
+          "correct": false,
+          "why": "A read keeps the cache warm; it does not invalidate it."
+        },
+        {
+          "text": "Adding a second breakpoint later in the messages",
+          "correct": false,
+          "why": "Extra breakpoints add cache points; they do not invalidate earlier ones."
+        }
+      ],
+      "explain": "The prefix runs tools → system → messages, and a change invalidates that level and everything after. Tool-definition changes and model switches hit everything; new messages at the end do not.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q13",
+      "domain": "caching",
+      "stem": "On Opus 5.5, cache reads are billed at 0.05× base input. Assume (illustrative) $10 per million base input tokens and a 5-minute cache. 50 requests in quick succession share a 100k-token prefix. Roughly what does the prefix cost with caching?",
+      "options": [
+        {
+          "text": "About $2.50",
+          "correct": false,
+          "why": "This charges all 50 requests at the read price and skips the write."
+        },
+        {
+          "text": "About $3.70",
+          "correct": true,
+          "why": "One write at 1.25× ($1.25) plus 49 reads at 0.05× ($2.45)."
+        },
+        {
+          "text": "About $6.15",
+          "correct": false,
+          "why": "This uses the 0.1× read price of most models, not the 0.05× of this one."
+        },
+        {
+          "text": "About $50",
+          "correct": false,
+          "why": "That is the uncached price: 50 × 100k × $10/M."
+        }
+      ],
+      "explain": "Read discounts vary by model: 0.1× on most, 0.05× on Opus and Sonnet 5.5, 0.025× on Fable and Mythos 5.1. Writes stay at 1.25× (5 min) or 2× (1 hour).",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q14",
+      "domain": "caching",
+      "stem": "An agent shows a 90% cache hit rate but still fails with `model_context_window_exceeded`. A teammate is surprised: 'most of the context is cached, so it shouldn't count'. What is the accurate reply?",
+      "options": [
+        {
+          "text": "Cached tokens still occupy the window; caching changes price, not size",
+          "correct": true,
+          "why": "The full prefix is still part of every request."
+        },
+        {
+          "text": "They are right; the error must come from output tokens alone",
+          "correct": false,
+          "why": "Cached input counts, so output is not the only contributor."
+        },
+        {
+          "text": "Cached tokens count only half toward the window",
+          "correct": false,
+          "why": "There is no partial counting; every token counts."
+        },
+        {
+          "text": "The 5-minute TTL expired and the cache was counted twice, once as a write and once as a read on the next call",
+          "correct": false,
+          "why": "Nothing is counted twice; the issue is that cached tokens count at all."
+        }
+      ],
+      "explain": "Caching is a billing and latency optimisation. The cached tokens are still in the request, so the window fills exactly as it would without caching.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q15",
+      "domain": "limits",
+      "stem": "A Claude Code session sits at about 400k tokens and you plan around 50 more turns of work on the same task. A teammate says `/compact` is wasteful because it causes a full uncached re-read. How do you weigh it?",
+      "options": [
+        {
+          "text": "Never compact: with caching, a large context costs almost nothing per request",
+          "correct": false,
+          "why": "Even at 0.1× a 400k prefix is read on every request, and quality degrades with size."
+        },
+        {
+          "text": "Compaction is free, so the question does not arise",
+          "correct": false,
+          "why": "Compaction triggers an uncached re-read; that is a real cost."
+        },
+        {
+          "text": "One uncached read buys a much smaller prefix for the remaining turns",
+          "correct": true,
+          "why": "Over 50 turns of 5–15 requests each, a smaller prefix usually pays back the single miss."
+        },
+        {
+          "text": "Prefer `/clear` every time, because it is always the cheaper of the two",
+          "correct": false,
+          "why": "It is cheaper but throws away the task context you still need."
+        }
+      ],
+      "explain": "Compaction costs one uncached read, and every later request reads a much smaller prefix and suffers less context rot. For a long remaining session that trade is usually worth it.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching",
+        "https://code.claude.com/docs/en/context-window"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q16",
+      "domain": "limits",
+      "stem": "A long-running API agent accumulates hundreds of old tool results, and input cost per step keeps climbing. You do not want to write your own summariser. Which API feature fits?",
+      "options": [
+        {
+          "text": "The memory tool, which stores old tool results on Anthropic's servers",
+          "correct": false,
+          "why": "The memory tool is client-side: your code stores files under /memories."
+        },
+        {
+          "text": "`count_tokens`, which compresses a request before you send it",
+          "correct": false,
+          "why": "It only estimates size; it changes nothing."
+        },
+        {
+          "text": "Context editing, which clears old tool uses past a threshold and keeps the latest few",
+          "correct": true,
+          "why": "The beta can clear old tool results, for example at 100k tokens while keeping 3."
+        },
+        {
+          "text": "The 1-hour cache, since cached tool results are no longer billed",
+          "correct": false,
+          "why": "Cached tokens are discounted, not free, and still fill the window."
+        }
+      ],
+      "explain": "Context editing (beta) clears old tool uses once context passes a threshold, and can also clear thinking. Clearing changes the prefix, so expect a cache miss at that point.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-editing",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q17",
+      "domain": "limits",
+      "stem": "To track spend, someone proposes calling `count_tokens` before every production request and logging the result as the cost. What is wrong with that plan?",
+      "options": [
+        {
+          "text": "It is billed per call, so it doubles the input bill",
+          "correct": false,
+          "why": "Token counting is free."
+        },
+        {
+          "text": "It estimates and is rate-limited; bill from the response usage fields",
+          "correct": true,
+          "why": "Use counting for pre-flight checks and the actual usage numbers for accounting."
+        },
+        {
+          "text": "It counts only the system prompt, not the messages",
+          "correct": false,
+          "why": "It counts the request you give it."
+        },
+        {
+          "text": "It only works on models without prompt caching, so the numbers will be misleading on everything newer than Claude 4",
+          "correct": false,
+          "why": "That is not a documented limitation; the problem is that counts are estimates."
+        }
+      ],
+      "explain": "`count_tokens` is free, returns an estimate and has its own rate limits. Billing should come from the usage the API reports on each response, which also shows cache reads and writes.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q18",
+      "domain": "claudecode",
+      "stem": "In Claude Code, you need a search across 2,000 files to find every caller of a deprecated helper. You want the main session's window, and its cost per turn, to stay small afterwards. What fits?",
+      "options": [
+        {
+          "text": "Run the search in the main session and then run `/compact` to shrink it",
+          "correct": false,
+          "why": "It works but bloats the session first and costs an uncached read."
+        },
+        {
+          "text": "Delegate the search to a subagent that returns only a short list of callers",
+          "correct": true,
+          "why": "The subagent reads in its own window; only its final report enters the main one."
+        },
+        {
+          "text": "Paste all 2,000 files into the chat so the model has them up front",
+          "correct": false,
+          "why": "That fills the window and degrades quality."
+        },
+        {
+          "text": "Turn on the 1-hour cache so the extra files cost less while they sit in the window",
+          "correct": false,
+          "why": "Caching cuts price, not size, and the noise still degrades later turns."
+        }
+      ],
+      "explain": "Subagents have their own windows. The main session sees only the final report, typically 0.5–2k tokens, so research-heavy steps stay out of the main context.",
+      "refs": [
+        "https://code.claude.com/docs/en/sub-agents",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q19",
+      "domain": "claudecode",
+      "stem": "You have 30 skills installed in Claude Code, some with long bodies and reference files. A colleague estimates they add 300k tokens to every request. What actually happens?",
+      "options": [
+        {
+          "text": "All 30 bodies load at session start, so the estimate is right",
+          "correct": false,
+          "why": "Bodies load only when invoked."
+        },
+        {
+          "text": "Only each skill's description stays in context; a body loads when the skill is invoked",
+          "correct": true,
+          "why": "Descriptions are always present; bodies and supporting files load on demand."
+        },
+        {
+          "text": "Nothing loads until you type the skill's slash command",
+          "correct": false,
+          "why": "Descriptions are always present so the model can choose skills."
+        },
+        {
+          "text": "Skills are summarised by a smaller model before each request so they fit",
+          "correct": false,
+          "why": "No such summary exists; descriptions are sent as written."
+        }
+      ],
+      "explain": "Skills use progressive disclosure: the description (with `when_to_use`, capped at 1,536 characters) is always in context; the body loads on invoke and stays; supporting files load on demand; scripts are executed, not loaded.",
+      "refs": [
+        "https://code.claude.com/docs/en/skills"
+      ]
+    },
+    {
+      "id": "ai-context-v3-q20",
+      "domain": "claudecode",
+      "stem": "Each time Claude runs your test suite, about 20k lines of verbose output land in the conversation, and the session bill grows fast. You want Claude to see only failures and the summary. Which mechanism fits?",
+      "options": [
+        {
+          "text": "A CLAUDE.md rule asking Claude to ignore passing tests",
+          "correct": false,
+          "why": "The output is already in the context once returned; ignoring it does not remove it."
+        },
+        {
+          "text": "A hook that filters the tool output before the model sees it",
+          "correct": true,
+          "why": "Hooks can filter tool output, so only the useful part enters the window."
+        },
+        {
+          "text": "A larger `max_tokens` so the output fits more comfortably in the response",
+          "correct": false,
+          "why": "Tool output is input, not the model's output."
+        },
+        {
+          "text": "Running `/compact` after every test run so the logs are summarised away again",
+          "correct": false,
+          "why": "That pays an uncached read each time instead of keeping the logs out."
+        }
+      ],
+      "explain": "Hooks are deterministic shell commands at lifecycle points. Besides blocking or rewriting calls, they can trim tool output so noisy results never reach the model.",
+      "refs": [
+        "https://code.claude.com/docs/en/hooks-guide",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    }
+  ]
+}

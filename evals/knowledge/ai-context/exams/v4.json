@@ -1,0 +1,671 @@
+{
+  "topic": "ai-context",
+  "variant": 4,
+  "of": 5,
+  "title": "Context engineering — variant 4",
+  "description": "A long-running agent: the client-driven tool loop and persistence, keeping tool results small, moving cache breakpoints and TTL for slow loops, overflow stop reasons, compaction, context editing and the memory tool, token budgets, and Claude Code overnight runs.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "state",
+      "name": "Statelessness and request shape",
+      "weight": 0.2
+    },
+    {
+      "id": "prompting",
+      "name": "Prompting techniques",
+      "weight": 0.15
+    },
+    {
+      "id": "caching",
+      "name": "Prompt caching",
+      "weight": 0.15
+    },
+    {
+      "id": "limits",
+      "name": "Window limits, degradation and compaction",
+      "weight": 0.35
+    },
+    {
+      "id": "claudecode",
+      "name": "What Claude Code loads",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-context-v4-q01",
+      "domain": "state",
+      "stem": "Your Node agent loop appends each `tool_use` and `tool_result` to `messages` and calls the API again. To cut cost, a teammate changes it to send only the system prompt and the last three messages. The agent starts redoing steps it already finished. Why?",
+      "options": [
+        {
+          "text": "The model only knows what is in the current request, so the dropped turns are gone",
+          "correct": true,
+          "why": "Statelessness means the trimmed history is the agent's entire memory."
+        },
+        {
+          "text": "The API detects the truncated history and resets the agent's internal state to the beginning of the task",
+          "correct": false,
+          "why": "There is no server-side agent state to reset."
+        },
+        {
+          "text": "The cache still holds the old turns, but the model is not allowed to read them",
+          "correct": false,
+          "why": "A cache only discounts a prefix you send; it never supplies missing turns."
+        },
+        {
+          "text": "Three messages is below the minimum length for tool use",
+          "correct": false,
+          "why": "There is no such minimum; the problem is lost information."
+        }
+      ],
+      "explain": "An agent's progress lives in the messages the client sends. If you trim history, replace it deliberately with a summary or notes, otherwise the model loses track of what it has done.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages",
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q02",
+      "domain": "state",
+      "stem": "One of the agent's tools returns the full 2 MB JSON response of an inventory API. From that step on, every request is slow and expensive, even though the agent needed only three fields. What is the best change?",
+      "options": [
+        {
+          "text": "Return only the fields needed, or an id the agent can use to fetch details later",
+          "correct": true,
+          "why": "Whatever a tool returns stays in `messages` and is resent on every later request."
+        },
+        {
+          "text": "Raise `max_tokens` so the model can process the large result faster on each of the later steps",
+          "correct": false,
+          "why": "`max_tokens` limits output and does nothing for input size."
+        },
+        {
+          "text": "Put a cache breakpoint on the tool result so it is free on later requests",
+          "correct": false,
+          "why": "Cached tokens are cheaper, not free, and they still fill the window."
+        },
+        {
+          "text": "Send the JSON as an image so it uses fewer tokens",
+          "correct": false,
+          "why": "That is a hack with no documented saving, and it makes the data harder to read."
+        }
+      ],
+      "explain": "Tool results become part of the conversation and are resent on each call. Keep them small and high-signal; keep references such as ids or paths and load details just in time.",
+      "refs": [
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q03",
+      "domain": "state",
+      "stem": "The pod running a two-hour agent job crashes after 40 minutes. You want the job to continue where it left off on a new pod. What makes that possible?",
+      "options": [
+        {
+          "text": "The API keeps the agent session for a while, so call it again with the same request id",
+          "correct": false,
+          "why": "There is no server-side session to resume."
+        },
+        {
+          "text": "Calling with an empty `messages` array while the 5-minute cache is still warm",
+          "correct": false,
+          "why": "The cache never stands in for content you do not send."
+        },
+        {
+          "text": "Your own persisted copy of the messages (or structured notes) that you resend",
+          "correct": true,
+          "why": "Since the API is stateless, a resumable agent stores its own history or notes."
+        },
+        {
+          "text": "Nothing; an agent run cannot be resumed after a crash and has to start again from the first step",
+          "correct": false,
+          "why": "It can, if your code persisted what it needs to rebuild the request."
+        }
+      ],
+      "explain": "Because requests are self-contained, durability is the client's job. Persist the message history or a structured progress note, and rebuild the request from it after a restart.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages",
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q04",
+      "domain": "state",
+      "stem": "A security reviewer reads your tool list, sees `delete_environment(name)`, and asks whether Claude could delete an environment on its own if a prompt injection told it to. What is the accurate answer?",
+      "options": [
+        {
+          "text": "Yes; once a tool is defined, the API calls your endpoint directly",
+          "correct": false,
+          "why": "The API never calls your systems; the model only emits a request."
+        },
+        {
+          "text": "No; the model can only emit a `tool_use` request, and your code decides whether to run it",
+          "correct": true,
+          "why": "Execution happens in your loop, so that is where checks and confirmations belong."
+        },
+        {
+          "text": "No; tools with destructive names are automatically refused by the model",
+          "correct": false,
+          "why": "There is no such automatic refusal to rely on."
+        },
+        {
+          "text": "Only if the tool's schema marks it as `strict: true`",
+          "correct": false,
+          "why": "`strict` concerns the shape of inputs, not who executes the call."
+        }
+      ],
+      "explain": "In tool use the model never executes anything. It returns a `tool_use` block; your code runs the function and returns a `tool_result`. Guardrails for dangerous tools belong in that code path.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q05",
+      "domain": "prompting",
+      "stem": "Your agent should reason between tool calls (look at a result, think, then decide the next call). It uses adaptive thinking on a Claude 4.7 model. A teammate is searching for a beta header to enable 'interleaved thinking'. What do you tell them?",
+      "options": [
+        {
+          "text": "Interleaved thinking is automatic here",
+          "correct": true,
+          "why": "With adaptive thinking on current models, thinking between tool calls happens without extra setup."
+        },
+        {
+          "text": "Interleaved thinking needs `budget_tokens` set per tool call",
+          "correct": false,
+          "why": "Manual budgets return 400 on 4.7+."
+        },
+        {
+          "text": "Prefill each assistant turn with a short reasoning sentence so the model is forced to think before every tool call",
+          "correct": false,
+          "why": "Prefill returns 400 from 4.6 on."
+        },
+        {
+          "text": "Ask for visible chain-of-thought text after each tool result instead",
+          "correct": false,
+          "why": "That is a different, visible technique and costs output tokens in the answer."
+        }
+      ],
+      "explain": "On current models, use `thinking: {type: \"adaptive\"}` with `effort`; interleaved thinking between tool calls is automatic. Thinking tokens are billed as output and count in the window.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q06",
+      "domain": "prompting",
+      "stem": "Now and then the agent calls `create_ticket` with `priority: \"high\"` where your schema says an integer, and your handler throws. You want tool inputs to always match the schema. Which change fits?",
+      "options": [
+        {
+          "text": "Validate and retry with the error message, which is the only option",
+          "correct": false,
+          "why": "Validation is wise, but you can also make the inputs conform up front."
+        },
+        {
+          "text": "Set `strict: true` on the tool definition",
+          "correct": true,
+          "why": "Strict tools make the model's input conform to the schema."
+        },
+        {
+          "text": "Describe the types in capitals in the tool description, so the model treats the schema as a hard rule",
+          "correct": false,
+          "why": "Still just an instruction, with no guarantee."
+        },
+        {
+          "text": "Prefill the assistant turn with the start of a valid `tool_use` block",
+          "correct": false,
+          "why": "Prefill returns 400 on current models."
+        }
+      ],
+      "explain": "Structured outputs cover both final responses (`output_config.format` with a JSON schema) and tool inputs (`strict: true`). The same schema limits apply: no recursion, no min/max constraints, closed objects.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q07",
+      "domain": "prompting",
+      "stem": "At the end of each step the agent writes a progress summary that your code parses, but the summary is mixed into free text in different places each time. You want a stable, easy-to-extract section without changing the overall response format. What do you ask for?",
+      "options": [
+        {
+          "text": "A `<progress>` XML tag around the summary",
+          "correct": true,
+          "why": "XML tags give clear, machine-findable boundaries."
+        },
+        {
+          "text": "A prefill that starts the response with the word Summary",
+          "correct": false,
+          "why": "Prefill returns 400 from 4.6 on."
+        },
+        {
+          "text": "A longer, more detailed system prompt describing where the summary should go in the text",
+          "correct": false,
+          "why": "Prose alone gives no unambiguous boundary to parse."
+        },
+        {
+          "text": "Higher effort, so the model is more consistent",
+          "correct": false,
+          "why": "Effort changes depth of reasoning, not output layout."
+        }
+      ],
+      "explain": "XML tags work in both directions: around inputs to separate them, and in outputs to give your code an unambiguous section to extract. When you need the whole response as data, use structured outputs.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q08",
+      "domain": "caching",
+      "stem": "Your agent sets one `cache_control` breakpoint at the end of the system prompt. By step 40, most input tokens are uncached message history. What change caches the growing history too?",
+      "options": [
+        {
+          "text": "Use the top-level automatic `cache_control`, which moves the breakpoint forward as messages grow",
+          "correct": true,
+          "why": "Automatic caching places the breakpoint at the latest cacheable point each request."
+        },
+        {
+          "text": "Increase the TTL to 1 hour so the history is kept",
+          "correct": false,
+          "why": "TTL affects how long an entry lives, not what is in it."
+        },
+        {
+          "text": "Add breakpoints to every message so each one is cached separately as it arrives",
+          "correct": false,
+          "why": "There is a limit of 4 breakpoints, and per-block marking is not needed."
+        },
+        {
+          "text": "Move the history into the system prompt so it is covered by the existing breakpoint",
+          "correct": false,
+          "why": "That rewrites the system prompt every step and breaks its cache."
+        }
+      ],
+      "explain": "`cache_control` can be set at the top level (automatic, moves forward with the conversation) or on up to 4 blocks. For agent loops, the moving breakpoint keeps the growing history cached.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q09",
+      "domain": "caching",
+      "stem": "Between two requests, one agent step adds about 25 new content blocks (many small tool calls and results). You use a single breakpoint on the last block. The second request writes a new cache entry but does not read the earlier one. What explains it?",
+      "options": [
+        {
+          "text": "The system only looks back 20 blocks for an earlier cache entry; add an intermediate breakpoint",
+          "correct": true,
+          "why": "With more than 20 new blocks, the earlier entry is beyond the lookback window."
+        },
+        {
+          "text": "Tool results are excluded from caching",
+          "correct": false,
+          "why": "They are part of the prefix like any other block."
+        },
+        {
+          "text": "The breakpoint must be on a user text block, never on a tool result",
+          "correct": false,
+          "why": "No such rule; the issue is the distance between entries."
+        },
+        {
+          "text": "The 5-minute TTL expired during the step",
+          "correct": false,
+          "why": "Possible in general, but the block count alone explains a miss here."
+        }
+      ],
+      "explain": "Cache lookup checks back a limited number of blocks (20) from a breakpoint for a previous entry. In loops that add many blocks per step, place an extra breakpoint so consecutive requests overlap.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q10",
+      "domain": "caching",
+      "stem": "A scheduled agent runs one step every 30 minutes with the same 60k-token prefix, using the default 5-minute cache. A teammate notes the bill is slightly higher than before caching was enabled. Why, and what should change?",
+      "options": [
+        {
+          "text": "Each run pays a 1.25× write that is never read; use the 1-hour TTL",
+          "correct": true,
+          "why": "With 30-minute gaps the 5-minute entry always expires, so caching only adds the write premium."
+        },
+        {
+          "text": "Caching never pays for prefixes under 100k tokens, so remove it entirely and accept the full input price on every run",
+          "correct": false,
+          "why": "The minimum is 512 tokens on Claude 5; 60k qualifies easily."
+        },
+        {
+          "text": "Reads cost more than base input on scheduled jobs",
+          "correct": false,
+          "why": "Reads are 0.1× base or less."
+        },
+        {
+          "text": "The cache is fine; the extra cost must be thinking tokens",
+          "correct": false,
+          "why": "The write premium alone explains a bill above no-cache."
+        }
+      ],
+      "explain": "A cache write costs 1.25× (5 min) or 2× (1 hour). If requests are further apart than the TTL, you pay the premium and never read. For half-hourly runs the 1-hour TTL turns most runs into 0.1× reads.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q11",
+      "domain": "limits",
+      "stem": "Your agent loop treats any `stop_reason` other than `end_turn` or `tool_use` as a crash. On a 4.5+ model, a long run dies with `model_context_window_exceeded`. How should the loop handle this?",
+      "options": [
+        {
+          "text": "Retry the same request with a higher `max_tokens`",
+          "correct": false,
+          "why": "More output room makes the overflow worse, not better."
+        },
+        {
+          "text": "Treat it as a signal to shrink the context, then continue",
+          "correct": true,
+          "why": "It means input plus output filled the window; compact, clear or summarise, then carry on."
+        },
+        {
+          "text": "Ignore it; the API has already compacted the history and the next call will succeed",
+          "correct": false,
+          "why": "Nothing is compacted unless you use that beta feature."
+        },
+        {
+          "text": "Switch to a model with a larger window and resend the same request unchanged",
+          "correct": false,
+          "why": "That postpones the problem, and context rot grows meanwhile."
+        }
+      ],
+      "explain": "On 4.5+ an input that fits but leaves no room for output stops with `model_context_window_exceeded`; input larger than the window is a 400. A long-running loop needs a plan for both: compaction, context editing or notes.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q12",
+      "domain": "limits",
+      "stem": "You want the API itself to summarise an agent's history automatically as it approaches the limit, instead of maintaining your own summariser. The agent runs on a Claude 4.6 model. Which feature fits?",
+      "options": [
+        {
+          "text": "Server-side compaction (beta)",
+          "correct": true,
+          "why": "It summarises history on the API side for 4.6+ models."
+        },
+        {
+          "text": "The memory tool, which summarises history into files",
+          "correct": false,
+          "why": "The memory tool is client-side file storage, not summarisation."
+        },
+        {
+          "text": "Context editing, which writes a summary of what it clears",
+          "correct": false,
+          "why": "Context editing clears old tool uses or thinking; it does not summarise them."
+        },
+        {
+          "text": "`count_tokens` with a target size, which trims the request until it fits under that number",
+          "correct": false,
+          "why": "It only estimates token counts."
+        }
+      ],
+      "explain": "Three API-side levers for long agents: server-side compaction (beta, 4.6+) summarises; context editing (beta) clears old tool uses or thinking; the memory tool lets the model read and write files your code stores.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://platform.claude.com/docs/en/build-with-claude/context-editing"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q13",
+      "domain": "limits",
+      "stem": "The agent must remember findings across separate runs days apart. You plan to use the API memory tool. What does your application have to provide?",
+      "options": [
+        {
+          "text": "Nothing; Anthropic stores the memory files server-side",
+          "correct": false,
+          "why": "The memory tool is client-side."
+        },
+        {
+          "text": "Storage for the files under `/memories`, by handling the tool's calls in your code",
+          "correct": true,
+          "why": "Your code executes the memory operations and persists the files."
+        },
+        {
+          "text": "A Claude Code installation, since the memory tool is the same as auto memory",
+          "correct": false,
+          "why": "The API memory tool and Claude Code auto memory are different things."
+        },
+        {
+          "text": "A larger context window, since memories are added to the window and stay there permanently",
+          "correct": false,
+          "why": "Memories live in files and are read when needed, which is the point."
+        }
+      ],
+      "explain": "The memory tool is client-side: the model issues file operations under `/memories` and your application performs them. It is separate from Claude Code's auto memory.",
+      "refs": [
+        "https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q14",
+      "domain": "limits",
+      "stem": "You enable context editing (beta) on a long-running research agent. Which two statements describe what it does? (Choose two.)",
+      "options": [
+        {
+          "text": "It clears old tool uses once context passes a threshold, keeping the most recent few",
+          "correct": true,
+          "why": "For example clearing at 100k tokens while keeping 3 tool uses."
+        },
+        {
+          "text": "It can clear old thinking blocks",
+          "correct": true,
+          "why": "Clearing thinking is one of its options."
+        },
+        {
+          "text": "It summarises cleared tool results into a short note",
+          "correct": false,
+          "why": "It clears; summarising is what compaction does."
+        },
+        {
+          "text": "It saves cleared results to `/memories` automatically",
+          "correct": false,
+          "why": "It does not write files on its own."
+        },
+        {
+          "text": "It lowers the price of the remaining tokens",
+          "correct": false,
+          "why": "It reduces the number of tokens, not their price; clearing also changes the prefix and causes a cache miss."
+        }
+      ],
+      "explain": "Context editing clears old tool uses past a threshold and can clear thinking. It shrinks the context but changes the prefix, so the request after a clear misses the cache.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-editing",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q15",
+      "domain": "limits",
+      "stem": "After about three hours, a research agent's choices get noticeably worse even though it is only at 40% of a 1M window. Which change addresses the cause?",
+      "options": [
+        {
+          "text": "Move to a model with a larger window",
+          "correct": false,
+          "why": "The window is not full; size is not the limit here."
+        },
+        {
+          "text": "Hand sub-tasks to sub-agents with clean windows and keep notes outside the window",
+          "correct": true,
+          "why": "Accuracy degrades as context grows; clean contexts and external notes fight that."
+        },
+        {
+          "text": "Enable the 1-hour cache so the early context stays fresh",
+          "correct": false,
+          "why": "Caching changes price; output is identical."
+        },
+        {
+          "text": "Raise `max_tokens` so the agent has more room to think before deciding on each next step",
+          "correct": false,
+          "why": "Room for output does not fix degraded attention over a long input."
+        }
+      ],
+      "explain": "Context rot sets in well before the window is full. Long agents stay sharp by keeping the window small: just-in-time retrieval, compaction, structured notes and sub-agents that return distilled summaries.",
+      "refs": [
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q16",
+      "domain": "limits",
+      "stem": "Budget check for an agent on a 1M-token window: system prompt plus tools take 20k; each iteration adds about 12k of tool results and 2k of output and thinking. You want to compact at 80% of the window. After roughly how many iterations?",
+      "options": [
+        {
+          "text": "About 55",
+          "correct": true,
+          "why": "(800k − 20k) / 14k ≈ 55."
+        },
+        {
+          "text": "About 65",
+          "correct": false,
+          "why": "This forgets that output and thinking also stay in the window."
+        },
+        {
+          "text": "About 70",
+          "correct": false,
+          "why": "This budgets against the full window, not the 80% trigger."
+        },
+        {
+          "text": "About 40",
+          "correct": false,
+          "why": "This overestimates the per-iteration growth."
+        }
+      ],
+      "explain": "Everything stays in the window: system, tools, tool results and the model's own output including thinking. Budget with all of it, and leave headroom for the next response.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q17",
+      "domain": "limits",
+      "stem": "A coding agent starts each task by loading all 300 source files of the service 'so it has everything'. A colleague proposes giving it file paths and a read tool instead. Who is right, and why?",
+      "options": [
+        {
+          "text": "Loading everything, since the model cannot know which file it needs",
+          "correct": false,
+          "why": "The model can search and read through tools as it goes."
+        },
+        {
+          "text": "Paths and a read tool: just-in-time retrieval keeps the window small and focused",
+          "correct": true,
+          "why": "Keeping references and loading on demand avoids context rot and cost."
+        },
+        {
+          "text": "Loading everything, because cached files are free after the first request",
+          "correct": false,
+          "why": "Cached tokens are discounted, not free, and still occupy the window."
+        },
+        {
+          "text": "Neither; files should go in the system prompt, where they are guaranteed to be given priority attention",
+          "correct": false,
+          "why": "No location in the request gets special immunity from context rot."
+        }
+      ],
+      "explain": "Anthropic recommends just-in-time context: keep lightweight identifiers such as paths or ids and load data through tools when needed, the way Claude Code itself searches and reads files.",
+      "refs": [
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q18",
+      "domain": "claudecode",
+      "stem": "During a long overnight Claude Code run, Claude invoked eight large skills. After several compactions, some skill instructions seem to be missing. What explains it?",
+      "options": [
+        {
+          "text": "Skills are dropped entirely after compaction and must be invoked again from scratch",
+          "correct": false,
+          "why": "Invoked skills do re-attach, within limits."
+        },
+        {
+          "text": "Invoked skills re-attach after compaction, but only up to 5k tokens each and 25k in total",
+          "correct": true,
+          "why": "Eight large skills exceed that budget."
+        },
+        {
+          "text": "Skill descriptions are removed after compaction",
+          "correct": false,
+          "why": "Descriptions are re-injected after compaction."
+        },
+        {
+          "text": "Compaction rewrites the skill files on disk into a shorter form",
+          "correct": false,
+          "why": "Compaction changes the conversation, not files."
+        }
+      ],
+      "explain": "After compaction, invoked skills re-attach up to 5k tokens each and 25k in total. Keep skill bodies short and put long reference material in supporting files that load on demand.",
+      "refs": [
+        "https://code.claude.com/docs/en/skills",
+        "https://code.claude.com/docs/en/context-window"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q19",
+      "domain": "claudecode",
+      "stem": "An overnight Claude Code run delegates each module to a subagent. The main session must later run the right tests, but each subagent ends with 'Done, all changes made.' What change helps most?",
+      "options": [
+        {
+          "text": "Instruct each subagent to end with a report listing the files it changed",
+          "correct": true,
+          "why": "Only the final report returns to the main session."
+        },
+        {
+          "text": "Let the main session read the subagent's full conversation afterwards",
+          "correct": false,
+          "why": "The main session receives only the final report."
+        },
+        {
+          "text": "Give subagents access to auto memory so they share state with the main session",
+          "correct": false,
+          "why": "Subagents do not load auto memory, and it would not carry their results anyway."
+        },
+        {
+          "text": "Raise the subagents' effort so they write longer and more detailed answers",
+          "correct": false,
+          "why": "Effort does not decide what the report contains."
+        }
+      ],
+      "explain": "A subagent works in its own window and returns only its final message. Specify exactly what that report must contain, since it is the only thing the parent will see.",
+      "refs": [
+        "https://code.claude.com/docs/en/sub-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v4-q20",
+      "domain": "claudecode",
+      "stem": "Before an unattended overnight run, you want to be certain Claude never runs `git push` or `rm -rf`, whatever it reads in files or tool output. Where do you put that rule?",
+      "options": [
+        {
+          "text": "At the top of the root CLAUDE.md, marked as critical",
+          "correct": false,
+          "why": "CLAUDE.md is context, not enforced configuration."
+        },
+        {
+          "text": "In a PreToolUse hook that blocks those commands",
+          "correct": true,
+          "why": "A hook is a deterministic shell command that can block a tool call."
+        },
+        {
+          "text": "In every subagent's delegation prompt as well as in CLAUDE.md, so that it is repeated in every context",
+          "correct": false,
+          "why": "More copies are still instructions, not a guarantee."
+        },
+        {
+          "text": "In auto memory, which has higher priority than CLAUDE.md",
+          "correct": false,
+          "why": "There is no such priority, and it is still just context."
+        }
+      ],
+      "explain": "Instructions shape behaviour but do not enforce it. Hooks and permissions do: a PreToolUse hook runs before every matching tool call and can block or rewrite it.",
+      "refs": [
+        "https://code.claude.com/docs/en/hooks-guide",
+        "https://code.claude.com/docs/en/memory"
+      ]
+    }
+  ]
+}

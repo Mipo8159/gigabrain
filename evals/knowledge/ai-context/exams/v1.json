@@ -1,0 +1,679 @@
+{
+  "topic": "ai-context",
+  "variant": 1,
+  "of": 5,
+  "title": "Context engineering — variant 1",
+  "description": "Building an LLM feature into a Node/TS service: request shape and the tool loop, XML, few-shot, structured outputs, adaptive thinking, cache breakpoints and cost, overflow behaviour, and the Claude Code session you build it in.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "state",
+      "name": "Statelessness and request shape",
+      "weight": 0.2
+    },
+    {
+      "id": "prompting",
+      "name": "Prompting techniques",
+      "weight": 0.3
+    },
+    {
+      "id": "caching",
+      "name": "Prompt caching",
+      "weight": 0.2
+    },
+    {
+      "id": "limits",
+      "name": "Window limits, degradation and compaction",
+      "weight": 0.15
+    },
+    {
+      "id": "claudecode",
+      "name": "What Claude Code loads",
+      "weight": 0.15
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-context-v1-q01",
+      "domain": "state",
+      "stem": "You are adding a multi-turn 'ask about this incident' chat to a Node/TS service that calls the Messages API. To save bandwidth, the first version sends only the newest user message plus a `conversationId` field in your own request wrapper. Users report that the bot forgets what they said two messages ago. What is the right fix?",
+      "options": [
+        {
+          "text": "Persist the turns yourself and resend system, tools and the full `messages` history on every call",
+          "correct": true,
+          "why": "The API is stateless: the model only sees what is in the current request, so every prior turn has to be sent again."
+        },
+        {
+          "text": "Pass the `conversationId` to the API as metadata so it can link the requests to one server-side session",
+          "correct": false,
+          "why": "Tempting if you are used to session APIs, but the Messages API keeps no conversation state between requests."
+        },
+        {
+          "text": "Raise `max_tokens` so the model has room to recall the earlier turns",
+          "correct": false,
+          "why": "`max_tokens` only caps the length of the output; it does not bring back turns you never sent."
+        },
+        {
+          "text": "Put a cache breakpoint on the first message so the API keeps the history",
+          "correct": false,
+          "why": "Caching only discounts a prefix you resend; it never adds missing turns to the request."
+        }
+      ],
+      "explain": "Each Messages API call is self-contained: the client resends the system prompt, tool definitions and every earlier turn. 'Memory' in a chat product is the client's job, which is why long chats grow in cost with every turn.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages",
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q02",
+      "domain": "state",
+      "stem": "Your service gives Claude a `lookup_deploy(id)` tool. A response comes back with `stop_reason: \"tool_use\"` and a `tool_use` block asking for deploy `d-42`. What does your Node code do next?",
+      "options": [
+        {
+          "text": "Nothing: the API runs `lookup_deploy` and the next response will contain the result",
+          "correct": false,
+          "why": "The model never executes anything; it only emits a request to call the tool."
+        },
+        {
+          "text": "Run the function, then call again with the assistant turn plus a user turn holding a `tool_result` for that `tool_use_id`",
+          "correct": true,
+          "why": "A tool call is two more messages: the assistant's `tool_use` and a user-role `tool_result` that references its id."
+        },
+        {
+          "text": "Run the function and put its output into the `system` prompt for the next request",
+          "correct": false,
+          "why": "The system prompt is not where tool output belongs, and the model would not link it to the pending `tool_use`."
+        },
+        {
+          "text": "Run it and send only a new user text message with the result, dropping the assistant turn",
+          "correct": false,
+          "why": "Dropping the assistant `tool_use` turn breaks the pairing; the result has to answer that block by id."
+        }
+      ],
+      "explain": "Tool use is a loop the client drives: `tool_use` goes out in an assistant message, your code runs the function, and the result comes back in a user message as a `tool_result` block with the matching `tool_use_id`.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q03",
+      "domain": "state",
+      "stem": "The internal deploy API behind `lookup_deploy` returns a 404 for an unknown id. You want Claude to notice the failure and ask the user for a corrected id rather than invent an answer. How should your code report it?",
+      "options": [
+        {
+          "text": "Throw, catch it higher up and retry the request without the tool call",
+          "correct": false,
+          "why": "Retrying without the call loses the information the model needs to recover and can loop."
+        },
+        {
+          "text": "Send a `tool_result` with the error text and `is_error: true`",
+          "correct": true,
+          "why": "The `tool_result` block has an `is_error` flag, so the model sees the failure as data and can react to it."
+        },
+        {
+          "text": "Leave the `tool_use` unanswered so the model infers that something went wrong",
+          "correct": false,
+          "why": "An unanswered `tool_use` is an invalid conversation shape, not a signal the model can reason about."
+        },
+        {
+          "text": "Write the error into the system prompt for the next turn",
+          "correct": false,
+          "why": "Mixing per-call errors into the system prompt muddies instructions and changes the cached prefix each time."
+        }
+      ],
+      "explain": "Errors from your tools are just another tool result. Returning them in a `tool_result` with `is_error: true` lets the model adjust its next step, while keeping the request shape valid.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q04",
+      "domain": "state",
+      "stem": "Requests from the incident chat are starting to fail near the context limit, and you are auditing what actually counts against the window. Which items count toward the context window on a request? (Choose three.)",
+      "options": [
+        {
+          "text": "The JSON schemas of every tool in `tools`, even ones never called",
+          "correct": true,
+          "why": "Tool definitions are part of every request and count toward the window."
+        },
+        {
+          "text": "Thinking blocks the model generates in its response",
+          "correct": true,
+          "why": "Output, including thinking, counts toward the window."
+        },
+        {
+          "text": "Earlier `tool_result` blocks still in `messages`",
+          "correct": true,
+          "why": "Every message you resend counts, including tool results, images and documents."
+        },
+        {
+          "text": "Tokens served from the prompt cache",
+          "correct": false,
+          "why": "Tempting because they are cheap, but cached tokens still occupy the window; caching changes price, not size."
+        },
+        {
+          "text": "Images from earlier turns once the model has already answered about them",
+          "correct": false,
+          "why": "If they are still in `messages` they are resent and count every time."
+        }
+      ],
+      "explain": "The window holds everything: system prompt, tool definitions, all messages including tool results, images and documents, and the output including thinking. Caching lowers price but not the token count.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q05",
+      "domain": "prompting",
+      "stem": "Your system prompt is one long block: the triage instructions, the team's severity policy, two sample summaries and the raw incident report all run together. Claude sometimes treats a sentence inside the incident report as an instruction. Which change gives the cleanest fix?",
+      "options": [
+        {
+          "text": "Wrap the instructions, the policy, the examples and the report each in their own XML tags",
+          "correct": true,
+          "why": "XML tags such as `<instructions>` and `<document>` give the model unambiguous boundaries between parts."
+        },
+        {
+          "text": "Write the instructions in capitals so they stand out from the report",
+          "correct": false,
+          "why": "Emphasis does not tell the model where the report starts and ends."
+        },
+        {
+          "text": "Move the incident report into a tool's `description` field so it is not in the prompt",
+          "correct": false,
+          "why": "Tool descriptions are still context, and misusing them for documents confuses what the tool does."
+        },
+        {
+          "text": "Split it into three separate requests and merge the answers in code",
+          "correct": false,
+          "why": "That loses the shared context the model needs and multiplies cost without solving the boundary problem."
+        }
+      ],
+      "explain": "Claude reads XML tags as structure. Tagging instructions, context, examples and documents separately is a cheap, reliable way to keep the model from confusing data with instructions.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q06",
+      "domain": "prompting",
+      "stem": "A summarisation endpoint sends a 60k-token incident log plus the question 'Which change most likely caused this outage?'. You are deciding where the question goes in the user message. What does Anthropic's guidance recommend?",
+      "options": [
+        {
+          "text": "Put the question first so the model knows what to look for while reading",
+          "correct": false,
+          "why": "Intuitive, but Anthropic's tests found the opposite order works better for long inputs."
+        },
+        {
+          "text": "Put the log first and the question at the end",
+          "correct": true,
+          "why": "For long context, documents first and the query last improved quality by up to 30% in Anthropic's tests."
+        },
+        {
+          "text": "Put the question in the system prompt and the log in the user message",
+          "correct": false,
+          "why": "It does not apply the documented pattern of query after the long document, and buries the task far from where the answer is produced."
+        },
+        {
+          "text": "Spread short reminders of the question between chunks of the log",
+          "correct": false,
+          "why": "That adds tokens and breaks the document apart, with no documented benefit."
+        }
+      ],
+      "explain": "With long inputs, place the documents at the top and the query at the bottom. Anthropic reports up to 30% better answers in tests with this ordering.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q07",
+      "domain": "prompting",
+      "stem": "Your JSON extraction used to prefill the assistant turn with `{` so Claude would answer in JSON. After moving to a Claude 4.7 model, every request returns HTTP 400. What do you change?",
+      "options": [
+        {
+          "text": "Prefill with three backticks and `json` instead of a brace",
+          "correct": false,
+          "why": "Any partial final assistant message is a prefill, and prefill returns 400 from Claude 4.6 on."
+        },
+        {
+          "text": "Drop the prefill and use structured outputs with `output_config.format` set to a JSON schema",
+          "correct": true,
+          "why": "Structured outputs constrain the response to your schema and replace the prefill trick."
+        },
+        {
+          "text": "Keep the prefill and set temperature to 0 so the model stays deterministic",
+          "correct": false,
+          "why": "Temperature has nothing to do with the 400; the prefill itself is rejected."
+        },
+        {
+          "text": "Pin the service to an older model indefinitely so the prefill keeps working",
+          "correct": false,
+          "why": "It postpones the problem and blocks upgrades; the supported path is instructions, XML, structured outputs or tools."
+        }
+      ],
+      "explain": "Prefilling a partial assistant message returns 400 from Claude 4.6 onwards. For guaranteed JSON use structured outputs (`output_config.format` with `type: \"json_schema\"`) or a strict tool.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/structured-outputs",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q08",
+      "domain": "prompting",
+      "stem": "You generate the JSON Schema for structured outputs from a Zod type. The type has a recursive `children: Incident[]` field, `minLength` on `title` and `maximum: 5` on `severity`, and objects currently allow extra keys. Which changes does the structured-outputs schema need? (Choose three.)",
+      "options": [
+        {
+          "text": "Remove the recursive `children` reference",
+          "correct": true,
+          "why": "Recursive schemas are not supported in structured outputs."
+        },
+        {
+          "text": "Move the `minLength` and `maximum` checks into your own validation after parsing",
+          "correct": true,
+          "why": "Min/max constraints are not supported, so enforce them in code."
+        },
+        {
+          "text": "Set `additionalProperties: false` on the objects",
+          "correct": true,
+          "why": "Structured outputs expects objects to be closed with `additionalProperties: false`."
+        },
+        {
+          "text": "Prefill an opening brace so the model starts the object correctly",
+          "correct": false,
+          "why": "Prefill returns 400 on current models and is not needed with structured outputs."
+        },
+        {
+          "text": "Paste the schema into the system prompt inside XML tags instead of sending it as a format",
+          "correct": false,
+          "why": "That is just an instruction; it loses the guarantee that structured outputs gives."
+        },
+        {
+          "text": "Add `minItems` to every array so empty lists cannot be produced",
+          "correct": false,
+          "why": "That is another min constraint, which is exactly what the feature does not support."
+        }
+      ],
+      "explain": "Structured outputs (`output_config.format` with a JSON schema) guarantee shape but not every JSON Schema feature: no recursion, no min/max constraints, and closed objects. Validate value ranges in your own code.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q09",
+      "domain": "prompting",
+      "stem": "To steer the summary format you added three example summaries to the prompt. All three happen to be database outages and all three have exactly three bullets. Now nearly every summary has three bullets and mentions the database, even for network incidents. What is the best fix?",
+      "options": [
+        {
+          "text": "Delete the examples and describe the format in prose only",
+          "correct": false,
+          "why": "Examples are among the most reliable ways to steer format; dropping them throws away the useful part."
+        },
+        {
+          "text": "Use examples that vary in incident type and bullet count, keeping only the format you want constant",
+          "correct": true,
+          "why": "The model copies incidental features of examples, so vary everything you do not want copied."
+        },
+        {
+          "text": "Add ten more examples of the same database outage so the pattern is clearer",
+          "correct": false,
+          "why": "More copies of the same incidentals make the copying stronger, not weaker."
+        },
+        {
+          "text": "Move the examples to the end of the user message, after the incident",
+          "correct": false,
+          "why": "Order is not the issue; the examples' shared accidental features are."
+        }
+      ],
+      "explain": "Few-shot examples steer format, tone and structure very reliably, and the model also picks up whatever the examples happen to share. Make examples diverse so the only common thread is what you actually want.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q10",
+      "domain": "prompting",
+      "stem": "A root-cause endpoint needs deeper reasoning. A teammate sends `thinking: {type: \"enabled\", budget_tokens: 8000}` to a Claude 4.7 model and gets HTTP 400. What should the request use instead?",
+      "options": [
+        {
+          "text": "`thinking: {type: \"adaptive\"}` together with an `effort` setting",
+          "correct": true,
+          "why": "Manual `budget_tokens` returns 400 on 4.7+; adaptive thinking plus effort is the current knob."
+        },
+        {
+          "text": "The same object with `budget_tokens` lowered under 1,024",
+          "correct": false,
+          "why": "The size of the budget is not the problem; manual budgets are rejected on these models."
+        },
+        {
+          "text": "A prefilled assistant message that opens a `<thinking>` tag so the model starts reasoning",
+          "correct": false,
+          "why": "Prefill returns 400 too, and it would produce visible text, not thinking blocks."
+        },
+        {
+          "text": "A larger `max_tokens` with no thinking parameter, so there is space left over for the model to think in",
+          "correct": false,
+          "why": "Room for output does not turn on thinking; thinking is a separate configuration."
+        }
+      ],
+      "explain": "On Claude 4.6 `budget_tokens` is deprecated and on 4.7+ it returns 400. Use `thinking: {type: \"adaptive\"}` and control depth with `effort`. Thinking tokens are billed as output and count toward the window.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q11",
+      "domain": "caching",
+      "stem": "The request has 2k tokens of tools and an 8k-token system prompt that never change, then the user message, which includes a fresh timestamp and a new incident each time. You put `cache_control` only on that last user message. `cache_read_input_tokens` stays at 0. What should you change?",
+      "options": [
+        {
+          "text": "Switch the breakpoint to the 1-hour TTL",
+          "correct": false,
+          "why": "A longer TTL does not help when the cached prefix is never the same twice."
+        },
+        {
+          "text": "Put the breakpoint at the end of the stable system prompt instead",
+          "correct": true,
+          "why": "The breakpoint has to sit on content that repeats exactly; a block that changes each request never hits."
+        },
+        {
+          "text": "Send the timestamp in the system prompt so the user message stays stable",
+          "correct": false,
+          "why": "That moves the changing value earlier and breaks the system-level prefix too."
+        },
+        {
+          "text": "Add three more breakpoints inside the user message, one per paragraph",
+          "correct": false,
+          "why": "Every block of that message changes, so more breakpoints there still never hit."
+        }
+      ],
+      "explain": "Caching is an exact prefix match. A breakpoint marks where a prefix is stored; if that block differs every request, the stored prefix is never reused. Mark the end of the stable part, and keep volatile data after it.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q12",
+      "domain": "caching",
+      "stem": "Assume (illustrative) a base input price of $3 per million tokens, a model whose cache reads cost 0.1× base, and a 5-minute cache. Ten requests within two minutes share a 30k-token prefix. Roughly what does that prefix cost with caching, against no caching?",
+      "options": [
+        {
+          "text": "About $0.19 with caching against $0.90 without",
+          "correct": true,
+          "why": "One write at 1.25× (30k × $3/M × 1.25 = $0.1125) plus nine reads at 0.1× ($0.081) is about $0.19; no cache is 10 × $0.09."
+        },
+        {
+          "text": "About $0.09 with caching against $0.90 without",
+          "correct": false,
+          "why": "This charges every request at the read price and forgets that the first one pays the 1.25× write."
+        },
+        {
+          "text": "About $0.26 with caching against $0.90 without",
+          "correct": false,
+          "why": "This uses the 1-hour write price (2×), not the 5-minute one (1.25×)."
+        },
+        {
+          "text": "About $0.11 with caching against $0.90 without",
+          "correct": false,
+          "why": "This counts only the write and forgets the nine reads."
+        }
+      ],
+      "explain": "Cache maths: a 5-minute write costs 1.25× base input, a 1-hour write 2×, and a read 0.1× on most models. Price one write plus N−1 reads, and compare with N full-price requests.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q13",
+      "domain": "caching",
+      "stem": "A feature flag adds a fifth tool, `page_oncall`, to the `tools` array for beta customers only, appended at the end. Beta and non-beta requests otherwise share the same system prompt. What happens to caching?",
+      "options": [
+        {
+          "text": "Only the tools level differs; the cached system prompt is still shared between both groups",
+          "correct": false,
+          "why": "Tools come first in the prefix, so a change there shifts everything after it."
+        },
+        {
+          "text": "Appending at the end keeps the other four tools' cache, so only the new tool is a write",
+          "correct": false,
+          "why": "Order does not save you: any tool-definition change invalidates the whole cache."
+        },
+        {
+          "text": "The two groups build separate caches with nothing shared, since the tools differ",
+          "correct": true,
+          "why": "Prefix order is tools, then system, then messages, and any tool-definition change invalidates all of it."
+        },
+        {
+          "text": "Tool definitions are excluded from cache matching, so nothing changes",
+          "correct": false,
+          "why": "Tool definitions are the first part of the cached prefix."
+        }
+      ],
+      "explain": "The cached prefix runs tools → system → messages and must match exactly. Changing any tool definition invalidates every level. Keep the `tools` array stable, or accept one cache per distinct tool set.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q14",
+      "domain": "caching",
+      "stem": "To test caching you put `cache_control` on a 300-token system prompt for a Claude 5 family model. Both `cache_creation_input_tokens` and `cache_read_input_tokens` come back as 0 and there is no error. Why?",
+      "options": [
+        {
+          "text": "Caching needs a beta header you have not sent",
+          "correct": false,
+          "why": "Plausible-sounding, but prompt caching needs no extra header; the cause here is the prefix length."
+        },
+        {
+          "text": "The prompt is under the 512-token minimum, so it is silently not cached",
+          "correct": true,
+          "why": "Prefixes shorter than the model's minimum cacheable length are just not cached, with no error."
+        },
+        {
+          "text": "Breakpoints only work on messages, not on the system prompt",
+          "correct": false,
+          "why": "Breakpoints can go on system blocks; the system prompt is a common place for one."
+        },
+        {
+          "text": "The 5-minute TTL expired before the second request arrived",
+          "correct": false,
+          "why": "Then the first request would still show a cache write, which it does not."
+        }
+      ],
+      "explain": "Each model has a minimum cacheable prefix: 512 tokens on the Claude 5 family and 1,024–4,096 on older models. Shorter prefixes are skipped silently, so always check the usage fields.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q15",
+      "domain": "limits",
+      "stem": "On a 1M-token model from the 4.5+ generation you send about 990k tokens of input with `max_tokens: 32000`. What happens?",
+      "options": [
+        {
+          "text": "The API returns HTTP 400 straight away because input plus `max_tokens` exceeds the window",
+          "correct": false,
+          "why": "That was the older behaviour; on 4.5+ only input larger than the window is a 400."
+        },
+        {
+          "text": "The API drops the oldest messages until everything fits",
+          "correct": false,
+          "why": "The API does not trim your messages; that is the client's job."
+        },
+        {
+          "text": "Generation runs and may end with `stop_reason: \"model_context_window_exceeded\"`",
+          "correct": true,
+          "why": "On 4.5+, when input plus `max_tokens` exceeds the window, the model generates until the window is full."
+        },
+        {
+          "text": "The server compacts the history automatically because you are near the limit, then completes the answer normally",
+          "correct": false,
+          "why": "Server-side compaction is an opt-in beta, not a default rescue."
+        }
+      ],
+      "explain": "Two overflow cases: input alone larger than the window is a 400; on 4.5+, input that fits but leaves too little room for `max_tokens` runs and stops with `model_context_window_exceeded`. Handle that stop reason in code.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q16",
+      "domain": "limits",
+      "stem": "Users can upload incident attachments. Before calling the model you want to know whether a request will fit and roughly what it costs. What is a sound approach?",
+      "options": [
+        {
+          "text": "Divide character count by four; it matches the tokenizer exactly",
+          "correct": false,
+          "why": "It is a rough rule of thumb, and Claude 4.7+ uses about 30% more tokens for the same text."
+        },
+        {
+          "text": "Call `count_tokens`; it is free but an estimate and rate-limited, so keep headroom",
+          "correct": true,
+          "why": "The token-counting endpoint costs nothing, returns an estimate and has its own rate limits."
+        },
+        {
+          "text": "Send the request and catch the 400, since a failed request is the cheapest check",
+          "correct": false,
+          "why": "That spends a round trip per check and only tells you about the hard limit."
+        },
+        {
+          "text": "Call `count_tokens` on a 10% sample of requests, because each count is billed like a normal request",
+          "correct": false,
+          "why": "Token counting is free; the real constraints are its estimate nature and rate limit."
+        }
+      ],
+      "explain": "`count_tokens` gives a free estimate of input size, subject to rate limits. Use it for pre-flight checks and leave margin; it is not an exact bill.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q17",
+      "domain": "limits",
+      "stem": "To be safe, the summariser attaches all 40 related incident reports (about 300k tokens) to every request. Compared with sending the five most relevant ones, answers got worse. What explains this, and what should you do?",
+      "options": [
+        {
+          "text": "The window was too small; move to a model with a bigger one",
+          "correct": false,
+          "why": "300k fits in a 1M window; the problem is quality, not overflow."
+        },
+        {
+          "text": "Accuracy drops as context grows; send a small, relevant set and fetch more on demand",
+          "correct": true,
+          "why": "Context rot: more tokens spread a finite attention budget, so curate the smallest high-signal set."
+        },
+        {
+          "text": "Turn on caching, which also sharpens the model's attention over the cached prefix",
+          "correct": false,
+          "why": "Caching changes price only; output is identical with or without it."
+        },
+        {
+          "text": "Add few-shot examples so the model learns to ignore irrelevant reports in the bundle you send",
+          "correct": false,
+          "why": "That adds yet more tokens and does not address why accuracy fell."
+        }
+      ],
+      "explain": "Anthropic calls it context rot: as token count grows, accuracy and recall degrade. Aim for the smallest set of high-signal tokens, and retrieve the rest just in time through tools.",
+      "refs": [
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q18",
+      "domain": "claudecode",
+      "stem": "While building the feature in Claude Code, you add 'always use the shared `httpClient` wrapper' to the project CLAUDE.md halfway through the session. Claude keeps calling `fetch` directly. Why?",
+      "options": [
+        {
+          "text": "CLAUDE.md is only read when the project is first opened in Claude Code",
+          "correct": false,
+          "why": "It is read at each session start; the issue is the mid-session edit."
+        },
+        {
+          "text": "Edits to CLAUDE.md made mid-session apply only after `/clear`, `/compact` or a restart",
+          "correct": true,
+          "why": "The project context was loaded at the start; the new rule is not in what is being sent."
+        },
+        {
+          "text": "Rules only work when placed in an `@import`ed file",
+          "correct": false,
+          "why": "Imports expand into the same context; they are not required for rules."
+        },
+        {
+          "text": "The rule needs to be repeated in every message you type",
+          "correct": false,
+          "why": "Repeating it adds tokens; reloading the context is what makes the edit visible."
+        }
+      ],
+      "explain": "Claude Code loads CLAUDE.md into the project context once. An edit takes effect after `/clear`, `/compact` or a restart, and that reload is an uncached read of the prefix.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching",
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q19",
+      "domain": "claudecode",
+      "stem": "You spend twenty minutes agreeing with Claude on how to migrate call sites, then delegate 'migrate the remaining call sites using the approach we discussed' to a subagent. It uses a different approach. Why?",
+      "options": [
+        {
+          "text": "The subagent sees none of the parent conversation, only its prompt and CLAUDE.md",
+          "correct": true,
+          "why": "Subagents start with a clean window; 'the approach we discussed' is not in it."
+        },
+        {
+          "text": "Subagents run on a smaller model that ignores instructions",
+          "correct": false,
+          "why": "The model is not the issue; the instruction it needed was never sent."
+        },
+        {
+          "text": "The subagent's cache had expired, so it lost the conversation",
+          "correct": false,
+          "why": "Caches never carry conversation; they only discount a resent prefix."
+        },
+        {
+          "text": "Subagents load auto memory instead of the conversation, and memory held an old approach that won out",
+          "correct": false,
+          "why": "Subagents do not load auto memory at all."
+        }
+      ],
+      "explain": "A subagent has its own window, system prompt and tools. It receives the delegation prompt and CLAUDE.md (Explore and Plan skip even that), and only its final report comes back. Put every decision it needs into the prompt.",
+      "refs": [
+        "https://code.claude.com/docs/en/sub-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v1-q20",
+      "domain": "claudecode",
+      "stem": "Your project connects three MCP servers exposing about 60 tools in total, and you worry their schemas eat the window on every turn. By default, what does Claude Code send about these tools?",
+      "options": [
+        {
+          "text": "Every full schema on every request, since tools are part of the request",
+          "correct": false,
+          "why": "That is the raw API default, but Claude Code defers MCP tools through tool search."
+        },
+        {
+          "text": "Only the tool names, loading a tool's full definition when it is needed",
+          "correct": true,
+          "why": "MCP tools are deferred by default: names only until used."
+        },
+        {
+          "text": "Nothing until you run a command to enable each server",
+          "correct": false,
+          "why": "Connected servers are available; their tools are deferred, not hidden."
+        },
+        {
+          "text": "A short model-generated summary of each server instead of the tools",
+          "correct": false,
+          "why": "No such summary is documented; the names themselves are sent."
+        }
+      ],
+      "explain": "Claude Code defers MCP tool definitions by default and sends names only; the full schema loads when a tool is actually used. That keeps a large tool set from crowding the window.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    }
+  ]
+}

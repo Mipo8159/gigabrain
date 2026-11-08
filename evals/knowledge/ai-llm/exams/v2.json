@@ -1,0 +1,679 @@
+{
+  "topic": "ai-llm",
+  "variant": 2,
+  "of": 5,
+  "title": "How an LLM works — variant 2",
+  "description": "Cost and capacity planning for a high-volume ticket summariser: token budgets across tokenizers and languages, per-token attention cost, KV cache memory, caching, the 5x output price and thinking spend.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "tokens",
+      "name": "Tokenization and embeddings",
+      "weight": 0.2
+    },
+    {
+      "id": "transformer",
+      "name": "Attention and the transformer block",
+      "weight": 0.2
+    },
+    {
+      "id": "generation",
+      "name": "Sampling, generation, KV cache and cost",
+      "weight": 0.2
+    },
+    {
+      "id": "training",
+      "name": "Training, post-training and hallucination",
+      "weight": 0.2
+    },
+    {
+      "id": "context",
+      "name": "Context window and current Claude facts",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-llm-v2-q01",
+      "domain": "tokens",
+      "stem": "You are sizing a nightly job that summarises support tickets with a current Claude model. The batch is about 111,000 English words. Using Anthropic's figure for the current tokenizer (1M tokens ≈ 555k words), roughly how many input tokens should you budget?",
+      "options": [
+        {
+          "text": "About 148,000, since one token is about three quarters of a word",
+          "correct": false,
+          "why": "That is the older OpenAI rule of thumb; it undercounts on Anthropic's current tokenizer."
+        },
+        {
+          "text": "About 200,000",
+          "correct": true,
+          "why": "111k words × (1M / 555k) ≈ 200k tokens: the current tokenizer uses about 1.8 tokens per English word."
+        },
+        {
+          "text": "About 111,000, one token per word",
+          "correct": false,
+          "why": "Tokens are subword pieces, not words; common words may be one token but many are split."
+        },
+        {
+          "text": "About 28,000, by dividing the word count by four characters per token",
+          "correct": false,
+          "why": "That mixes units: the '4 characters per token' rule applies to characters, not words."
+        }
+      ],
+      "explain": "Rules of thumb about tokens vary by tokenizer, language and content. For budgeting use the vendor's figure for the model you call, and for exact numbers call `count_tokens` with that model id.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://platform.claude.com/docs/en/models/overview"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q02",
+      "domain": "tokens",
+      "stem": "The same ticket summariser costs about three times more per ticket for tickets written in Georgian than for English tickets of similar length in words. Nothing else differs. What is the most likely explanation?",
+      "options": [
+        {
+          "text": "Non-English requests are billed at a higher per-token rate",
+          "correct": false,
+          "why": "Pricing is per token and the same for every language; the difference is in how many tokens the text becomes."
+        },
+        {
+          "text": "The model translates Georgian to English internally, and the hidden translation is billed as output tokens",
+          "correct": false,
+          "why": "There is no billed hidden translation step; the extra cost appears in the input token count."
+        },
+        {
+          "text": "Subword merges reflect the tokenizer's training data, so less common scripts split into more tokens per word",
+          "correct": true,
+          "why": "BPE merges frequent byte sequences first; text that was rarer in that data is cut into smaller pieces, down to bytes."
+        },
+        {
+          "text": "Unicode characters outside ASCII produce unknown tokens that are retried",
+          "correct": false,
+          "why": "Byte-level BPE can represent any byte sequence, so there are no unknown tokens and no retries."
+        }
+      ],
+      "explain": "Byte-level BPE starts from bytes and merges the most frequent pairs. Frequent patterns become single tokens; less common ones stay split. That is why tokens per word vary by language and content.",
+      "refs": [
+        "https://arxiv.org/abs/1508.07909",
+        "https://github.com/karpathy/minbpe"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q03",
+      "domain": "tokens",
+      "stem": "A team moves a 300M-input-token-per-month summarisation workload from an earlier Claude model to Opus 5.5 with identical prompts. Using Anthropic's note about the current tokenizer, how many input tokens per month should the new budget assume?",
+      "options": [
+        {
+          "text": "About 300M, because the text did not change",
+          "correct": false,
+          "why": "The text is the same, but the tokenizer is not; the count depends on the tokenizer."
+        },
+        {
+          "text": "About 390M",
+          "correct": true,
+          "why": "The current tokenizer produces roughly 30% more tokens than earlier Claude tokenizers for the same text: 300M × 1.3."
+        },
+        {
+          "text": "About 210M, because newer tokenizers compress text better",
+          "correct": false,
+          "why": "It is the other direction for this change: Anthropic documents roughly 30% more tokens."
+        },
+        {
+          "text": "About 555M, because one million tokens now holds 555k words instead of a million",
+          "correct": false,
+          "why": "That misreads the words-per-token figure as a multiplier on an existing token count."
+        }
+      ],
+      "explain": "Tokenizer changes move token counts for unchanged text. Budget for about +30% when moving to Opus 4.7 or later, and verify with `count_tokens` on a sample before switching.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q04",
+      "domain": "tokens",
+      "stem": "Before summarising, the pipeline drops near-duplicate tickets by comparing embedding vectors with cosine similarity, merging pairs above 0.75. Two tickets embed (in a toy 2-D example) to `a = [1, 2]` and `b = [2, 1]`. What is their cosine similarity, and are they merged?",
+      "options": [
+        {
+          "text": "0.8, so they are merged",
+          "correct": true,
+          "why": "a·b = 1·2 + 2·1 = 4 and |a| = |b| = √5, so cos = 4/5 = 0.8, which is above 0.75."
+        },
+        {
+          "text": "0.5, so they are kept apart",
+          "correct": false,
+          "why": "That is not the cosine of these vectors; 4 divided by √5·√5 is 0.8."
+        },
+        {
+          "text": "4, so they are merged because the dot product is above the threshold",
+          "correct": false,
+          "why": "The raw dot product depends on vector length; cosine divides by both lengths to land in [−1, 1]."
+        },
+        {
+          "text": "0, because the vectors point in different directions so they are orthogonal",
+          "correct": false,
+          "why": "Orthogonal vectors have a dot product of 0; these have 4, so the angle between them is small."
+        }
+      ],
+      "explain": "Embeddings put items with similar usage near each other, and cosine similarity measures the angle between vectors regardless of their length. The model's own input embedding table works the same way: similar tokens get nearby rows.",
+      "refs": [
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q05",
+      "domain": "transformer",
+      "stem": "In a toy model, a teammate removes the division by √d_k (d_k = 64) 'to save an operation'. A head's raw scores are `[16, 8, 0]`. What happens to the weights, and why does it matter for training?",
+      "options": [
+        {
+          "text": "They stay about [0.665, 0.245, 0.090], since softmax ignores scale",
+          "correct": false,
+          "why": "Softmax depends strongly on scale; those are the weights for the scaled scores [2, 1, 0]."
+        },
+        {
+          "text": "They become nearly [1, 0, 0]: softmax saturates and gradients through the other keys almost vanish",
+          "correct": true,
+          "why": "exp(16) dwarfs exp(8) and exp(0), so one key takes all the weight; the scaling keeps softmax in a useful range."
+        },
+        {
+          "text": "They become exactly [0.667, 0.333, 0], a proportional split",
+          "correct": false,
+          "why": "Softmax never gives a proportional split of raw scores, and gives no unmasked key exactly zero."
+        },
+        {
+          "text": "Nothing changes, because layer normalisation rescales the scores before softmax runs in every block",
+          "correct": false,
+          "why": "Layer norm acts on the residual stream before attention, not on QKᵀ scores; it does not replace the √d_k division."
+        }
+      ],
+      "explain": "Dot products grow with dimension. Dividing by √d_k keeps scores moderate so softmax spreads weight and gradients flow; without it, attention collapses to near one-hot and learns poorly.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q06",
+      "domain": "transformer",
+      "stem": "You are sizing a small model for an internal experiment with `d_model = 1024` and 16 attention heads, split evenly as in the original transformer. What is each head's key dimension, and what does each head divide its scores by?",
+      "options": [
+        {
+          "text": "64 per head, scores divided by 8",
+          "correct": true,
+          "why": "1024 / 16 = 64 dimensions per head, and √64 = 8."
+        },
+        {
+          "text": "1024 per head, scores divided by 32",
+          "correct": false,
+          "why": "Heads split d_model; they do not each get the full width."
+        },
+        {
+          "text": "16 per head, scores divided by 4",
+          "correct": false,
+          "why": "That divides by the dimension instead of the head count: 1024 / 64 would give 16 heads of 64, not this."
+        },
+        {
+          "text": "64 per head, scores divided by 64 because the scale is d_k itself rather than its square root",
+          "correct": false,
+          "why": "The head size is right, but the scale is √d_k = 8, not d_k."
+        }
+      ],
+      "explain": "Multi-head attention splits d_model into h heads of d_model/h (for example 8 × 64 = 512) so different heads can attend to different relations in parallel; each head scales by √d_k of its own size.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q07",
+      "domain": "transformer",
+      "stem": "Capacity tests on an open-weight model you host show that each generated token gets slower as the conversation grows from 10k to 200k tokens, even though the per-token compute for the new token's MLP is the same. Which mechanism explains the slowdown?",
+      "options": [
+        {
+          "text": "The MLP grows its hidden layer for longer inputs",
+          "correct": false,
+          "why": "MLP size is fixed by the architecture; it does not change with context length."
+        },
+        {
+          "text": "The tokenizer re-encodes the whole conversation for every new token",
+          "correct": false,
+          "why": "Tokenizing is cheap and done once per request; it is not the per-token cost here."
+        },
+        {
+          "text": "The new token's query attends over every earlier position, so each step reads a cache of keys and values that grows with context",
+          "correct": true,
+          "why": "Attention looks back at all earlier positions; with a KV cache that means reading more stored keys and values per step as the context grows."
+        },
+        {
+          "text": "Longer conversations force a smaller batch size, so the model switches to slower precision",
+          "correct": false,
+          "why": "Precision does not change with conversation length; the extra work is attention reading a bigger KV cache."
+        }
+      ],
+      "explain": "Attention cost per new token grows with the number of earlier positions. That is why long contexts cost more time and memory to serve, and one reason to send less context.",
+      "refs": [
+        "https://arxiv.org/abs/2211.05102",
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q08",
+      "domain": "transformer",
+      "stem": "A vendor slide says: 'Claude uses rotary position embeddings, so it handles unlimited context length.' You are asked whether to cite it in your capacity plan. What is the defensible position?",
+      "options": [
+        {
+          "text": "Cite it: rotary embeddings remove any limit on context length",
+          "correct": false,
+          "why": "RoPE encodes relative position by rotating Q and K; it does not remove the model's documented window limit."
+        },
+        {
+          "text": "Do not cite it: Claude's architecture is not disclosed, and the API documents a fixed context window",
+          "correct": true,
+          "why": "Anthropic does not publish Claude's internal architecture; plan against the documented window (1M on current models) instead."
+        },
+        {
+          "text": "Cite it with a caveat that Claude also uses absolute sinusoidal positions instead of RoPE in its later layers",
+          "correct": false,
+          "why": "That swaps one undisclosed claim for another; whatever Claude uses internally is not public."
+        },
+        {
+          "text": "Do not cite it: transformers have no notion of position at all",
+          "correct": false,
+          "why": "Without position information attention cannot tell order; models add it through embeddings such as sinusoidal or RoPE."
+        }
+      ],
+      "explain": "Mechanism claims about 'Claude' should be about the generic decoder-only transformer unless Anthropic has disclosed them. RoPE rotates queries and keys by position and is common in open models; Claude's use of it is undisclosed.",
+      "refs": [
+        "https://arxiv.org/abs/2104.09864",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q09",
+      "domain": "generation",
+      "stem": "Finance asks for the monthly cost of a summariser on Opus 5.5 ($4 input / $20 output per million tokens). It handles 10,000 tickets a month, each 4,000 input tokens and 400 output tokens, without thinking. What is the monthly cost?",
+      "options": [
+        {
+          "text": "$176",
+          "correct": false,
+          "why": "That bills the output at the input rate (44M × $4); output costs 5× input."
+        },
+        {
+          "text": "$240",
+          "correct": true,
+          "why": "Input: 40M × $4 = $160. Output: 4M × $20 = $80. Total $240."
+        },
+        {
+          "text": "$880",
+          "correct": false,
+          "why": "That bills all 44M tokens at the output rate."
+        },
+        {
+          "text": "$160, since output is too small to matter",
+          "correct": false,
+          "why": "Output is 10% of the tokens but at 5× the price it is a third of the bill."
+        }
+      ],
+      "explain": "Output costs 5× input on every current Claude model. Even short outputs can be a large share of the bill; always price both sides.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q10",
+      "domain": "generation",
+      "stem": "Every summariser request starts with the same 50k-token instruction and example block, and you make 10,000 requests a month on Sonnet 5.5 ($2 per million input tokens; cache reads $0.10 per million). Ignoring the one-time cache write, roughly how much does caching that prefix save per month?",
+      "options": [
+        {
+          "text": "About $950",
+          "correct": true,
+          "why": "Uncached: 500M tokens × $2 = $1,000. Cached reads: 500M × $0.10 = $50. Savings ≈ $950."
+        },
+        {
+          "text": "About $50, since caching only removes the write cost",
+          "correct": false,
+          "why": "$50 is what the cached reads still cost, not what you save."
+        },
+        {
+          "text": "Nothing, because cached tokens are billed as output",
+          "correct": false,
+          "why": "Cache reads are billed at a fraction of the input rate, about 5% on Sonnet 5.5."
+        },
+        {
+          "text": "About $500, because cache reads cost half of normal input on every model",
+          "correct": false,
+          "why": "Cache reads cost about 5% of the input price on Sonnet 5.5, not 50%."
+        }
+      ],
+      "explain": "Because requests are stateless, a shared prefix is re-sent every time. Prompt caching turns those repeated input tokens into cheap cache reads, which is the biggest lever for workloads with a long fixed preamble.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q11",
+      "domain": "generation",
+      "stem": "You plan GPU memory for an open-weight model you host (not Claude). Its config: 32 layers, 8 key/value heads of size 128, 2-byte values. The KV cache stores one K and one V per layer per head per token. Roughly how much KV cache does one 100k-token conversation hold?",
+      "options": [
+        {
+          "text": "About 128 KiB in total, since the cache holds one token",
+          "correct": false,
+          "why": "128 KiB is the size per token; the cache holds every past token."
+        },
+        {
+          "text": "About 12 GiB",
+          "correct": true,
+          "why": "2 × 32 × 8 × 128 × 2 B = 128 KiB per token; × 100k tokens ≈ 12 GiB."
+        },
+        {
+          "text": "About 1.5 TiB, since the cache stores the whole model per token",
+          "correct": false,
+          "why": "The cache stores only K and V vectors per layer, not weights."
+        },
+        {
+          "text": "Nothing beyond the prompt text, because keys and values are recomputed for each new token instead of being stored",
+          "correct": false,
+          "why": "Recomputing is what the KV cache avoids; it trades memory for not re-running the prefix."
+        }
+      ],
+      "explain": "The KV cache stores K and V for every layer and past token, so decode computes only the new token. Its size grows linearly with context and limits how many long conversations a GPU can serve at once.",
+      "refs": [
+        "https://arxiv.org/abs/2211.05102"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q12",
+      "domain": "generation",
+      "stem": "To cap reasoning cost, a teammate adds `thinking: { type: \"enabled\", budget_tokens: 4000 }` to Opus 5.5 calls, and they fail with 400. What is the supported way to make the model think less on routine tickets?",
+      "options": [
+        {
+          "text": "Use `budget_tokens: 1024`, the documented minimum",
+          "correct": false,
+          "why": "Manual `budget_tokens` returns 400 on Opus 4.7 and later, whatever the value."
+        },
+        {
+          "text": "Use adaptive thinking and set a lower `effort`",
+          "correct": true,
+          "why": "Current models use adaptive thinking; `effort` is the control for how much they think."
+        },
+        {
+          "text": "Lower `temperature`, which shortens reasoning",
+          "correct": false,
+          "why": "Non-default temperature also returns 400 on current Claude, and it does not control thinking length."
+        },
+        {
+          "text": "Set `max_tokens` to 500 so that thinking cannot exceed it",
+          "correct": false,
+          "why": "That caps all output, including the answer, and can cut the answer off; effort is the intended knob."
+        }
+      ],
+      "explain": "Manual `budget_tokens` was deprecated on 4.6 and returns 400 on 4.7+. Use adaptive thinking with `effort` (default medium on Opus 5.5) and remember thinking bills as output.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/thinking",
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q13",
+      "domain": "training",
+      "stem": "Planning an in-house experiment, you want to train a 7B-parameter model compute-optimally using the Chinchilla rule of thumb. Roughly how many training tokens should you plan for?",
+      "options": [
+        {
+          "text": "About 7B tokens, one per parameter",
+          "correct": false,
+          "why": "Chinchilla found far more data per parameter is compute-optimal, about 20 tokens per parameter."
+        },
+        {
+          "text": "About 140B tokens",
+          "correct": true,
+          "why": "≈ 20 tokens per parameter × 7B = 140B tokens."
+        },
+        {
+          "text": "About 1.4T tokens",
+          "correct": false,
+          "why": "That is the Chinchilla figure for a 70B model, ten times bigger."
+        },
+        {
+          "text": "As few as possible; more data only adds noise once the parameter count is fixed",
+          "correct": false,
+          "why": "Scaling results show loss keeps falling smoothly with more data and compute."
+        }
+      ],
+      "explain": "Capability scales smoothly with parameters, data and compute (Kaplan). Chinchilla showed many models were under-trained: compute-optimal training uses about 20 tokens per parameter.",
+      "refs": [
+        "https://arxiv.org/abs/2203.15556",
+        "https://arxiv.org/abs/2001.08361"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q14",
+      "domain": "training",
+      "stem": "Your internal eval for a support-answer feature scores 1 for a correct answer and 0 for anything else, including 'I don't know'. A prompt change that lets the model abstain when unsure lowers the score, so the team reverts it. What does research on hallucination suggest?",
+      "options": [
+        {
+          "text": "The eval rewards guessing; score abstentions above confident wrong answers before deciding",
+          "correct": true,
+          "why": "Binary grading makes a guess always worth at least as much as abstaining, which pushes models and teams toward confident errors."
+        },
+        {
+          "text": "Reverting is right, because abstaining means the model is weaker",
+          "correct": false,
+          "why": "Abstaining when unsure is often the correct behaviour; the metric hides that wrong answers cost users more."
+        },
+        {
+          "text": "Abstention should be removed and handled by a lower temperature setting instead",
+          "correct": false,
+          "why": "Temperature is rejected on current Claude models and does not teach the model when to abstain."
+        },
+        {
+          "text": "Hallucination only happens with sampling, so switching the eval to greedy decoding fixes it at the root",
+          "correct": false,
+          "why": "Hallucination is structural; even the most probable continuation can be a confident fabrication."
+        }
+      ],
+      "explain": "Hallucination persists partly because training and evaluation reward guessing over admitting uncertainty. Design evals and prompts so that 'I don't know' beats a wrong answer.",
+      "refs": [
+        "https://arxiv.org/abs/2509.04664"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q15",
+      "domain": "training",
+      "stem": "A training run for a new model logs an initial loss of about 10.8 per token, and an older fine-tune of yours reached 0.357. How do you read those two numbers?",
+      "options": [
+        {
+          "text": "10.8 is about uniform guessing over a ~50k vocabulary; 0.357 means about 0.7 probability on the right token",
+          "correct": true,
+          "why": "ln 50000 ≈ 10.82, so the fresh model is at chance; −ln 0.7 ≈ 0.357, perplexity ≈ 1.43."
+        },
+        {
+          "text": "10.8 means the model is 10.8% accurate; 0.357 means it is 35.7% accurate",
+          "correct": false,
+          "why": "Cross-entropy is −ln p, not a percentage; lower is better."
+        },
+        {
+          "text": "Both are healthy, because loss should start and end near 10",
+          "correct": false,
+          "why": "A loss near ln(vocab) means no learning yet; training aims to push it well below."
+        },
+        {
+          "text": "10.8 points to a corrupt tokenizer, because a correctly configured model would start near 1.0",
+          "correct": false,
+          "why": "Untrained weights give near-uniform predictions, so a start near ln(vocab) is exactly expected."
+        }
+      ],
+      "explain": "Loss is −ln p(correct token) averaged over tokens; perplexity is e^loss. Uniform guessing over V tokens gives ln V, so ~10.8 is the expected start for a 50k vocabulary.",
+      "refs": [
+        "https://github.com/karpathy/makemore",
+        "https://arxiv.org/abs/2001.08361"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q16",
+      "domain": "training",
+      "stem": "You want a model that writes better fixes for failing tests. You can automatically check each attempt by running the test suite. Which post-training signal fits this situation best?",
+      "options": [
+        {
+          "text": "More pretraining on public code, without any reward",
+          "correct": false,
+          "why": "Pretraining improves general prediction but does not target your pass/fail signal."
+        },
+        {
+          "text": "Human raters ranking pairs of fixes to train a reward model",
+          "correct": false,
+          "why": "Preference-based RLHF works, but it is slow and costly when a program can grade the answer directly."
+        },
+        {
+          "text": "Reinforcement learning that rewards attempts whose tests pass",
+          "correct": true,
+          "why": "RL with verifiable rewards uses an automatic checker as the reward, as in recent reasoning-model work."
+        },
+        {
+          "text": "Supervised fine-tuning on chat transcripts about testing, with no signal from actually running any tests",
+          "correct": false,
+          "why": "SFT copies demonstrations; it does not reward the outcome you can measure."
+        }
+      ],
+      "explain": "Post-training turns a text continuer into an assistant: SFT on demonstrations, RLHF or RLAIF from preferences, and RL with verifiable rewards when answers can be checked automatically (tests, math).",
+      "refs": [
+        "https://arxiv.org/abs/2501.12948",
+        "https://arxiv.org/abs/2411.15124"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q17",
+      "domain": "context",
+      "stem": "With adaptive thinking on, the summariser feeds a 900k-token transcript to Sonnet 5.5 and some requests fail or truncate while smaller ones work. A teammate says 'thinking is free and separate from the window'. What is true?",
+      "options": [
+        {
+          "text": "Thinking tokens are free but share the window",
+          "correct": false,
+          "why": "They are not free: thinking tokens bill as output."
+        },
+        {
+          "text": "Thinking tokens bill as output and also count toward the context window",
+          "correct": true,
+          "why": "Both hold: they cost output price and use space in the window during the turn, which a 900k input leaves little room for."
+        },
+        {
+          "text": "Thinking runs in a separate 1M window, so only the transcript counts",
+          "correct": false,
+          "why": "There is no separate thinking window; thinking uses the same window."
+        },
+        {
+          "text": "Thinking is billed as input because the model reads its own reasoning back as it continues generating",
+          "correct": false,
+          "why": "Thinking is generated text and bills at the output rate."
+        }
+      ],
+      "explain": "Plan the window as input plus everything generated in the turn, including thinking. A request close to 1M input leaves little room, and input over the window returns 400 'prompt is too long'.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://platform.claude.com/docs/en/build-with-claude/thinking",
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q18",
+      "domain": "context",
+      "stem": "A chat feature resends the full history each turn. Every turn adds 2,000 tokens (question plus answer), and the system prompt is negligible. Across a 10-turn conversation, roughly how many input tokens are billed in total?",
+      "options": [
+        {
+          "text": "20,000, since each turn's 2k tokens is billed once",
+          "correct": false,
+          "why": "That assumes the API remembers earlier turns; it does not, so earlier turns are resent each time."
+        },
+        {
+          "text": "About 110,000",
+          "correct": true,
+          "why": "Each turn resends everything so far: 2k + 4k + … + 20k = 2k × (1 + … + 10) = 110k."
+        },
+        {
+          "text": "200,000, because each of the 10 turns sends the full 20k-token conversation",
+          "correct": false,
+          "why": "Early turns are shorter; only the last turn carries all 20k."
+        },
+        {
+          "text": "About 10,000, because the API caches the history for free",
+          "correct": false,
+          "why": "Caching must be requested and still bills cache reads; nothing is free by default."
+        }
+      ],
+      "explain": "Statelessness makes chat cost grow roughly with the square of conversation length. Trim or summarise history and cache the stable prefix.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q19",
+      "domain": "context",
+      "stem": "A workload needs 100M input and 10M output tokens a month. You compare Fable 5.1 ($10 / $50 per million) with Sonnet 5.5 ($2 / $10). What are the monthly costs?",
+      "options": [
+        {
+          "text": "Fable $1,500, Sonnet $300",
+          "correct": true,
+          "why": "Fable: 100 × $10 + 10 × $50 = $1,000 + $500. Sonnet: 100 × $2 + 10 × $10 = $200 + $100."
+        },
+        {
+          "text": "Fable $1,100, Sonnet $220, pricing all tokens at the input rate",
+          "correct": false,
+          "why": "That ignores the 5× output price on both models."
+        },
+        {
+          "text": "Fable $600, Sonnet $120, because output is cheaper than input",
+          "correct": false,
+          "why": "Output is the expensive side: 5× input."
+        },
+        {
+          "text": "Both $300, since all current models share one price",
+          "correct": false,
+          "why": "Prices differ per model; Fable 5.1 is five times Sonnet 5.5 on both sides."
+        }
+      ],
+      "explain": "Model choice is a cost decision: identical traffic can differ 5× (or more) in price between models. Measure quality on your own task before paying for the largest one.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing",
+        "https://platform.claude.com/docs/en/models/overview"
+      ]
+    },
+    {
+      "id": "ai-llm-v2-q20",
+      "domain": "context",
+      "stem": "The summariser's bill is too high. You want to cut cost without hurting summary quality. Which two changes fit how LLM APIs work? (Choose two.)",
+      "options": [
+        {
+          "text": "Cache the fixed instruction prefix that every request repeats",
+          "correct": true,
+          "why": "Repeated prefixes are resent on every stateless call; cache reads cost a fraction of input."
+        },
+        {
+          "text": "Send only the ticket fields the summary needs instead of the whole record",
+          "correct": true,
+          "why": "Fewer input tokens cost less, and a smaller, relevant context also avoids context rot."
+        },
+        {
+          "text": "Lower `temperature` so the model writes fewer tokens",
+          "correct": false,
+          "why": "Temperature changes randomness, not length, and returns 400 on current Claude models."
+        },
+        {
+          "text": "Pack every open ticket into one 1M-token request so each is summarised once",
+          "correct": false,
+          "why": "Huge inputs degrade accuracy through context rot, and output limits (128K) cap one response."
+        },
+        {
+          "text": "Ask for longer summaries so fewer follow-up calls are needed",
+          "correct": false,
+          "why": "Output costs 5× input; longer answers are the expensive direction."
+        }
+      ],
+      "explain": "Cost levers follow the mechanics: fewer input tokens, cached repeated prefixes, shorter outputs, and the cheapest model that passes your quality bar. Sampling knobs are not a cost lever, and on current Claude they are rejected.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing",
+        "https://www.trychroma.com/research/context-rot"
+      ]
+    }
+  ]
+}

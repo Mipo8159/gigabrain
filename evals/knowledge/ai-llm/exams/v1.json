@@ -1,0 +1,688 @@
+{
+  "topic": "ai-llm",
+  "variant": 1,
+  "of": 5,
+  "title": "How an LLM works — variant 1",
+  "description": "A Node/TS pull-request review bot on the Claude API: token budgeting, a hand-checked attention head, a rejected temperature, daily cost, invented APIs and stateless follow-ups.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "tokens",
+      "name": "Tokenization and embeddings",
+      "weight": 0.2
+    },
+    {
+      "id": "transformer",
+      "name": "Attention and the transformer block",
+      "weight": 0.2
+    },
+    {
+      "id": "generation",
+      "name": "Sampling, generation, KV cache and cost",
+      "weight": 0.2
+    },
+    {
+      "id": "training",
+      "name": "Training, post-training and hallucination",
+      "weight": 0.2
+    },
+    {
+      "id": "context",
+      "name": "Context window and current Claude facts",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-llm-v1-q01",
+      "domain": "tokens",
+      "stem": "Your Node/TS pull-request review bot estimates each request as `Math.ceil(text.length / 4)` tokens and trims diffs to stay under budget. After moving from an older Claude model to `claude-opus-5-5`, large diffs that the estimator said would fit start failing with 400 \"prompt is too long\". What do you change?",
+      "options": [
+        {
+          "text": "Call the free `count_tokens` endpoint with the target model id and trim against its result",
+          "correct": true,
+          "why": "Token counts depend on the model's tokenizer and on the content, so asking the API for the real count is the only estimate that cannot drift."
+        },
+        {
+          "text": "Change the divisor from 4 to 3 so the estimate leans conservative for code",
+          "correct": false,
+          "why": "A smaller divisor may hide this incident but it is still a guess; the ratio varies with language, content and model, so it will drift again."
+        },
+        {
+          "text": "Raise `max_tokens` so the request has more room for the long diff",
+          "correct": false,
+          "why": "`max_tokens` caps the output; it does not enlarge the context window that the input must fit in."
+        },
+        {
+          "text": "Strip whitespace and comments from the diff before sending, then keep the same characters-divided-by-four estimator in place",
+          "correct": false,
+          "why": "Shrinking input helps a little, but the root cause is a fixed chars-per-token rule that the new tokenizer breaks; the estimator stays wrong."
+        }
+      ],
+      "explain": "Tokens are not characters or words. Anthropic's current tokenizer (Opus 4.7 and later) produces roughly 30% more tokens than earlier Claude tokenizers for the same text, so rules of thumb like '4 characters per token' drift. Measure with `count_tokens`, which is free.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://platform.claude.com/docs/en/models/overview"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q02",
+      "domain": "tokens",
+      "stem": "A reviewer asks the bot how many times the letter `r` appears in the identifier `strawberryRepository`, and it answers wrongly with full confidence. Which explanation fits how the model works?",
+      "options": [
+        {
+          "text": "It never receives the letters: the identifier arrives as a few opaque subword token ids",
+          "correct": true,
+          "why": "The tokenizer turns text into integer ids before the model sees anything, so character counts are not directly in its input."
+        },
+        {
+          "text": "The attention window is too short to hold a 20-character identifier",
+          "correct": false,
+          "why": "The identifier is only a handful of tokens; window size is irrelevant at that scale."
+        },
+        {
+          "text": "A temperature above zero added random noise to an otherwise exact count",
+          "correct": false,
+          "why": "Sampling can change wording, but even the most likely answer is unreliable because the letters were never in the input."
+        },
+        {
+          "text": "Post-training taught the model to avoid answering arithmetic questions directly, so it guessed",
+          "correct": false,
+          "why": "Post-training shapes style and helpfulness; it is not why letter counting fails. The cause sits earlier, in tokenization."
+        }
+      ],
+      "explain": "LLMs see integer token ids, not characters. Spelling, letter-counting and string reversal fail because those facts are not in the input; route such work to code (a tool call) instead of the model's intuition.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://arxiv.org/abs/1508.07909"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q03",
+      "domain": "tokens",
+      "stem": "While debugging an open-weight model you set a breakpoint just after its first layer and see that token id 4821 always produces the exact same 4096-number vector, whatever sentence it appears in. A teammate says this is a bug because 'the meaning should depend on context'. Who is right?",
+      "options": [
+        {
+          "text": "Your teammate: the first layer should already mix in context",
+          "correct": false,
+          "why": "Mixing in context is the job of the attention layers that come after; the first step is position-independent by design."
+        },
+        {
+          "text": "You: the embedding is a row lookup in a learned table, and context is added later by attention",
+          "correct": true,
+          "why": "Each id selects one row of the embedding table, a lookup rather than a computation; the transformer blocks then rewrite that vector using the surrounding tokens."
+        },
+        {
+          "text": "Neither: the vector should be computed fresh from the token's characters each time",
+          "correct": false,
+          "why": "The model never sees the characters of a token; the id indexes a learned row, there is no spelling-based computation."
+        },
+        {
+          "text": "Your teammate: identical vectors mean the tokenizer merged two different words into a single id by accident",
+          "correct": false,
+          "why": "Every occurrence of an id reads the same row, so identical vectors are expected and say nothing about merge errors."
+        }
+      ],
+      "explain": "The embedding table is a learned lookup: id → row. Tokens used in similar ways end up with nearby rows. Context enters only through attention in the stacked blocks that rewrite each position's vector (the residual stream).",
+      "refs": [
+        "https://jalammar.github.io/illustrated-transformer/",
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q04",
+      "domain": "tokens",
+      "stem": "Nothing in the bot's prompts or traffic changed, but after switching the model id from an older Claude to Opus 5.5 the monthly input-token count rises by roughly 30%. What is the most likely cause?",
+      "options": [
+        {
+          "text": "The newer tokenizer cuts the same text into about 30% more tokens",
+          "correct": true,
+          "why": "Anthropic documents that its current tokenizer yields roughly 30% more tokens than earlier Claude tokenizers for identical text."
+        },
+        {
+          "text": "Opus 5.5 silently adds a hidden system prompt to every request",
+          "correct": false,
+          "why": "Nothing in the documentation describes an added hidden prompt; the measured jump matches the documented tokenizer change."
+        },
+        {
+          "text": "The bigger 1M context window is billed even when the request only uses part of it",
+          "correct": false,
+          "why": "Billing is per token actually sent and generated, not per window size."
+        },
+        {
+          "text": "Thinking tokens are counted as input on Opus 5.5",
+          "correct": false,
+          "why": "Thinking tokens bill as output, not input, so they would raise output spend, not the input count."
+        }
+      ],
+      "explain": "Token counts are a property of the model's tokenizer. Re-measure with `count_tokens` whenever you change model families, and budget for the roughly 30% increase on Opus 4.7 and later.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q05",
+      "domain": "transformer",
+      "stem": "You are hand-checking one attention head in a toy model with `d_k = 64`. For the current query, the raw dot products with three earlier keys are `[16, 8, 0]`. What attention weights does the head assign after scaling and softmax?",
+      "options": [
+        {
+          "text": "About [0.665, 0.245, 0.090]",
+          "correct": true,
+          "why": "Divide by √64 = 8 to get [2, 1, 0]; exp gives [7.389, 2.718, 1.000], sum 11.107, so the weights are [0.665, 0.245, 0.090]."
+        },
+        {
+          "text": "[0.667, 0.333, 0.000]",
+          "correct": false,
+          "why": "That is just each score divided by their sum; attention uses softmax, which never gives exactly 0 to an unmasked key."
+        },
+        {
+          "text": "About [1.000, 0.000, 0.000]",
+          "correct": false,
+          "why": "That is softmax of the unscaled scores: exp(16) swamps the rest. The √d_k scaling exists to prevent this saturation."
+        },
+        {
+          "text": "[0.333, 0.333, 0.333] because the head averages all visible keys",
+          "correct": false,
+          "why": "Uniform weights would mean the scores carried no information; softmax over [2, 1, 0] clearly favours the first key."
+        }
+      ],
+      "explain": "Scaled dot-product attention: softmax(QKᵀ/√d_k)·V. Dividing by √d_k keeps scores in a range where softmax still spreads weight; the output is the weighted mix 0.665·v1 + 0.245·v2 + 0.090·v3.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q06",
+      "domain": "transformer",
+      "stem": "A colleague writing a toy decoder implements the causal mask by setting the scores of future positions to `0` before softmax instead of `-Infinity`. Training loss drops suspiciously fast. What went wrong?",
+      "options": [
+        {
+          "text": "Future tokens still get weight exp(0)/sum, so the model peeks at the answer it should predict",
+          "correct": true,
+          "why": "A score of 0 is an ordinary score; softmax gives it a positive weight. Only −∞ becomes exactly 0 after softmax."
+        },
+        {
+          "text": "Nothing: 0 and −∞ are equivalent after softmax",
+          "correct": false,
+          "why": "exp(0) = 1, which is a real share of the weight; exp(−∞) = 0 is what removes a position."
+        },
+        {
+          "text": "The model can no longer see earlier tokens, so it memorises the training data instead",
+          "correct": false,
+          "why": "The mask touches only later positions; earlier tokens remain visible either way."
+        },
+        {
+          "text": "Masking must happen on the values after softmax, so the scores are fine",
+          "correct": false,
+          "why": "Masking after softmax leaves weights that no longer sum to 1; the standard place is the scores, before softmax, with −∞."
+        }
+      ],
+      "explain": "In a decoder each position may attend only to itself and earlier positions. The mask adds −∞ to later positions' scores before softmax so their weight is exactly 0; anything else leaks the future into training and makes loss look better than it is.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://github.com/karpathy/makemore"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q07",
+      "domain": "transformer",
+      "stem": "You read an open-weight model's config: `d_model = 4096`, MLP hidden size `16384`, standard attention with Q, K, V and output projections. You want to know which part of each block holds most of the weights. Which is it?",
+      "options": [
+        {
+          "text": "The attention projections, since attention is the core of the transformer",
+          "correct": false,
+          "why": "Four d_model × d_model matrices is about 4·d², while the MLP's two d_model × 4·d_model matrices are about 8·d²."
+        },
+        {
+          "text": "The MLP, roughly two thirds of each block's weights",
+          "correct": true,
+          "why": "With a hidden size about 4× d_model the MLP has about 8·d² parameters against attention's 4·d², so most parameters live there."
+        },
+        {
+          "text": "The layer norms, because they run on every position",
+          "correct": false,
+          "why": "Norms carry only a few thousand scale and shift values per layer; running often does not make them large."
+        },
+        {
+          "text": "They are equal by design, so the split does not matter",
+          "correct": false,
+          "why": "Nothing forces them equal; the 4× MLP width makes the MLP the larger part."
+        }
+      ],
+      "explain": "A transformer block is attention (mixes information across positions) plus an MLP (processes each position independently). The MLP hidden size is usually about 4× d_model, which puts most parameters in the MLPs.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://transformer-circuits.pub/2021/framework/index.html"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q08",
+      "domain": "transformer",
+      "stem": "To brief a teammate who will debug model behaviour with you, you write down how a decoder-only transformer turns a prompt into the next token. Which statements are accurate? (Choose two.)",
+      "options": [
+        {
+          "text": "Each block adds its result into one vector per position, the residual stream",
+          "correct": true,
+          "why": "Pre-norm blocks compute x = x + Attn(Norm(x)) and x = x + MLP(Norm(x)), so each block adds to the per-position vector."
+        },
+        {
+          "text": "Only the last position's final vector is projected to one logit per vocabulary item for the next token",
+          "correct": true,
+          "why": "That vector is multiplied out to a logit for every vocabulary entry and softmax turns the logits into the next-token distribution."
+        },
+        {
+          "text": "The MLP is the part that moves information between positions",
+          "correct": false,
+          "why": "The MLP works on each position separately; attention is what moves information between positions."
+        },
+        {
+          "text": "Each block replaces the vector entirely, discarding what earlier blocks wrote",
+          "correct": false,
+          "why": "The residual connection keeps earlier information; blocks add rather than overwrite."
+        },
+        {
+          "text": "Attention runs over characters while the MLP runs over tokens",
+          "correct": false,
+          "why": "Both operate on per-token vectors; the model never sees characters."
+        }
+      ],
+      "explain": "Mental model: ids → embedding rows → a stack of identical blocks that each add into the residual stream → the last position's vector → logits → softmax → one sampled token.",
+      "refs": [
+        "https://transformer-circuits.pub/2021/framework/index.html",
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q09",
+      "domain": "generation",
+      "stem": "To make reviews 'deterministic', a teammate's shared API wrapper now sends `temperature: 0` on every call. Since the bot moved to `claude-opus-5-5`, every request fails with HTTP 400. What is the right fix?",
+      "options": [
+        {
+          "text": "Retry the call with `temperature: 0.01` so the value counts as near-zero",
+          "correct": false,
+          "why": "Any non-default `temperature`, `top_p` or `top_k` returns 400 on Opus 4.7+, all 5.x models and Fable, so a small value fails too."
+        },
+        {
+          "text": "Keep the parameter but disable thinking, since temperature is only rejected while thinking is on",
+          "correct": false,
+          "why": "That restriction applied to older models; on current models the 400 comes on every request regardless of thinking."
+        },
+        {
+          "text": "Remove the sampling parameters for current Claude models and steer behaviour with the prompt and `effort`",
+          "correct": true,
+          "why": "Current Claude models reject non-default sampling knobs entirely, so the wrapper must not send them; prompts and `effort` are the supported controls."
+        },
+        {
+          "text": "Switch to `top_k: 1`, which gives greedy decoding without touching temperature",
+          "correct": false,
+          "why": "`top_k` is in the same rejected group as `temperature` and `top_p`."
+        }
+      ],
+      "explain": "Temperature, top-p and top-k are general LLM mechanics worth knowing for open-weight models and other APIs. On current Claude models (Opus 4.7+, 5.x, Fable) any non-default value returns 400, and with API version 2026-10-21 any value returns 400 on every model.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/thinking",
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q10",
+      "domain": "generation",
+      "stem": "The bot reviews 2,000 pull requests a day on Sonnet 5.5 ($2 input / $10 output per million tokens). Each review sends 20,000 input tokens and returns 2,000 output tokens. What is the daily API cost?",
+      "options": [
+        {
+          "text": "$88",
+          "correct": false,
+          "why": "That prices output at the input rate (44M × $2); output costs 5× input on every current model."
+        },
+        {
+          "text": "$120",
+          "correct": true,
+          "why": "Input: 40M tokens × $2 = $80. Output: 4M tokens × $10 = $40. Total $120."
+        },
+        {
+          "text": "$440",
+          "correct": false,
+          "why": "That bills every token at the output rate (44M × $10); input tokens cost a fifth of that."
+        },
+        {
+          "text": "$200, because 2,000 reviews at 10 cents is a flat per-request fee",
+          "correct": false,
+          "why": "The API bills per token, not per request."
+        }
+      ],
+      "explain": "Cost = input tokens × input price + output tokens × output price, and output is 5× input on every current Claude model. For review-style tasks (big input, small output) input usually dominates; for generation-heavy tasks output does.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q11",
+      "domain": "generation",
+      "stem": "In production traces, time-to-first-token grows roughly in line with the size of the diff, but once text starts streaming, tokens arrive at a fairly steady pace regardless of the diff's size. Which explanation matches how inference works?",
+      "options": [
+        {
+          "text": "The API queues large requests behind smaller ones before starting",
+          "correct": false,
+          "why": "Queueing could add delay, but it would not explain why the streaming pace stays steady; the two phases do."
+        },
+        {
+          "text": "The input is processed in one parallel prefill pass, then output comes one token at a time, reusing cached keys and values",
+          "correct": true,
+          "why": "Prefill handles all prompt positions at once (compute-heavy); decode is serial and reuses the KV cache, so per-token pace is roughly stable."
+        },
+        {
+          "text": "The model reads the diff once per output token, so later tokens are slower",
+          "correct": false,
+          "why": "With a KV cache the prompt is not re-read per token; that is exactly what the cache avoids."
+        },
+        {
+          "text": "Streaming hides latency by sending invisible padding tokens until generation actually begins, and padding grows with the size of the prompt",
+          "correct": false,
+          "why": "No padding tokens are streamed; the wait is the prefill pass."
+        }
+      ],
+      "explain": "Generation has two phases: prefill (all input positions in parallel, compute-bound) and decode (one token per step, memory-bandwidth-bound, using the KV cache). Long prompts mostly cost time-to-first-token.",
+      "refs": [
+        "https://arxiv.org/abs/2211.05102"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q12",
+      "domain": "generation",
+      "stem": "You turn on adaptive thinking with `effort: \"high\"` for hard reviews. The final review text is about the same length as before, yet the output-token line on the bill roughly triples. Why?",
+      "options": [
+        {
+          "text": "Thinking tokens are billed as output tokens",
+          "correct": true,
+          "why": "The reasoning the model produces before its answer is billed at the output rate and counts toward the context window."
+        },
+        {
+          "text": "High effort switches the request to a more expensive model tier",
+          "correct": false,
+          "why": "Effort changes how much the same model thinks; it does not change the model or its price per token."
+        },
+        {
+          "text": "Thinking makes the input get billed twice",
+          "correct": false,
+          "why": "Input is billed once; the extra spend is generated thinking, which is output."
+        },
+        {
+          "text": "The bill counts the review twice, once as a draft and once as final text",
+          "correct": false,
+          "why": "There is no hidden draft copy; the extra tokens are the thinking blocks themselves."
+        }
+      ],
+      "explain": "Thinking is generated text: it bills at the output rate (5× input) and uses window space. Raise `effort` where the quality gain pays for it and lower it for routine work.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/thinking",
+        "https://platform.claude.com/docs/en/about-claude/pricing"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q13",
+      "domain": "training",
+      "stem": "The bot tells a developer to replace a loop with `lodash.deepMergeAsync()`, a function that does not exist, and states it with full confidence. Which change most directly reduces this class of error?",
+      "options": [
+        {
+          "text": "Retrain the bot's prompt with a list of every function that does not exist",
+          "correct": false,
+          "why": "You cannot list everything that does not exist; the fix is to supply what does exist and allow abstaining."
+        },
+        {
+          "text": "Give it the installed package's type definitions through a tool, and tell it to say it is unsure when the API is not there",
+          "correct": true,
+          "why": "Grounding in the real API plus explicit permission to say 'I don't know' targets the structural cause: the model completes plausible text."
+        },
+        {
+          "text": "Lower the temperature so it picks only the most probable function name",
+          "correct": false,
+          "why": "A non-default temperature returns 400 on current Claude, and the most probable name can still be invented."
+        },
+        {
+          "text": "Wait for a model update, because hallucination is a bug that will be patched",
+          "correct": false,
+          "why": "Hallucination is structural (probability matching plus evals that reward guessing), so mitigation belongs in your system."
+        }
+      ],
+      "explain": "A language model produces likely continuations, and common evaluations reward a confident guess over 'I don't know'. Mitigate with grounding (tools, retrieved docs) and by explicitly allowing abstention.",
+      "refs": [
+        "https://arxiv.org/abs/2509.04664",
+        "https://www.anthropic.com/research/tracing-thoughts-language-model"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q14",
+      "domain": "training",
+      "stem": "You fine-tune a small open-weight model on your team's review comments. The training log reports a per-token cross-entropy of 2.303 on one example. What probability did the model give to the correct next token there?",
+      "options": [
+        {
+          "text": "0.7",
+          "correct": false,
+          "why": "−ln 0.7 is about 0.357, a much smaller loss."
+        },
+        {
+          "text": "0.01",
+          "correct": false,
+          "why": "−ln 0.01 is about 4.605, twice this loss."
+        },
+        {
+          "text": "0.1",
+          "correct": true,
+          "why": "Cross-entropy for one token is −ln p, and −ln 0.1 = 2.303."
+        },
+        {
+          "text": "0.9, because the loss is 1 − p measured on a log scale",
+          "correct": false,
+          "why": "Loss is −ln p, not a function of 1 − p; p = 0.9 would give about 0.105."
+        }
+      ],
+      "explain": "Pretraining and fine-tuning minimise −ln p(correct next token), averaged over tokens. Confident and right gives near 0; confident and wrong grows without bound. Uniform guessing over a 50k vocabulary is ln 50000 ≈ 10.82.",
+      "refs": [
+        "https://github.com/karpathy/makemore",
+        "https://arxiv.org/abs/2203.02155"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q15",
+      "domain": "training",
+      "stem": "You try a pretrained-only (base) open-weight checkpoint for the bot. Given `Review this diff:` followed by a diff, it writes another diff and then a new unrelated question instead of a review. What explains the difference from the chat model you normally use?",
+      "options": [
+        {
+          "text": "The base checkpoint has a smaller context window, so it lost the instruction",
+          "correct": false,
+          "why": "The prompt is short; the behaviour comes from what the model was trained to do, not from window size."
+        },
+        {
+          "text": "The base model only continues text; post-training such as SFT and RLHF is what makes a model follow instructions",
+          "correct": true,
+          "why": "Pretraining teaches next-token prediction on raw text; supervised fine-tuning and preference-based RL turn that continuer into an assistant."
+        },
+        {
+          "text": "Base models need temperature 0 to answer questions",
+          "correct": false,
+          "why": "Sampling settings change which continuation is drawn, not whether the model has learned to answer."
+        },
+        {
+          "text": "Base checkpoints ship with a tokenizer that cannot parse diff syntax, so the review instruction was split into meaningless fragments",
+          "correct": false,
+          "why": "Byte-level tokenizers can represent any text; the base model reads the diff, it simply continues it."
+        }
+      ],
+      "explain": "Pretraining produces a text continuer. Post-training (supervised fine-tuning, RLHF or RLAIF, and RL with verifiable rewards) shapes it into an assistant that follows instructions and holds a conversation.",
+      "refs": [
+        "https://arxiv.org/abs/2203.02155",
+        "https://arxiv.org/abs/2411.15124"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q16",
+      "domain": "training",
+      "stem": "The bot flags a call to a function introduced in a library release from September 2026 as 'not part of the public API'. The code compiles and the tests pass. What is going on, and what do you change?",
+      "options": [
+        {
+          "text": "The model reads the library's docs at request time and the docs site was down",
+          "correct": false,
+          "why": "The model does not browse unless your app gives it a tool; its knowledge comes from frozen weights."
+        },
+        {
+          "text": "Its knowledge comes from training data up to its cutoff, so give it the current docs or types in the request",
+          "correct": true,
+          "why": "Weights compress training statistics up to the cutoff (June 2026 for current models); newer facts must enter through the context."
+        },
+        {
+          "text": "The model learned the old API from earlier reviews in your repository and will update after more reviews",
+          "correct": false,
+          "why": "Weights are frozen at inference; your past requests do not retrain it."
+        },
+        {
+          "text": "It is context rot, so a shorter diff will fix it",
+          "correct": false,
+          "why": "The fact is missing from its training data, not lost in a long context."
+        }
+      ],
+      "explain": "A model does not look things up; it predicts from what training compressed into its weights. Anything newer than the cutoff, or private to you, must arrive in the context via tools or retrieval.",
+      "refs": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://arxiv.org/abs/2509.04664"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q17",
+      "domain": "context",
+      "stem": "The bot posts a review; the developer replies 'now fix comment 3'. Your handler sends only that reply to the API, and the model answers that it does not know which comment is meant. What is the fix?",
+      "options": [
+        {
+          "text": "Store the conversation in your app and send the full history, including the earlier review, with each request",
+          "correct": true,
+          "why": "Each API call is stateless; the model sees only what that request carries."
+        },
+        {
+          "text": "Pass the previous response's id so the model can reload its memory",
+          "correct": false,
+          "why": "The Messages API keeps no conversation memory to reload; history must be in the request."
+        },
+        {
+          "text": "Raise the effort so the model remembers more of the conversation",
+          "correct": false,
+          "why": "Effort changes how much it thinks about the given input, not what input it has."
+        },
+        {
+          "text": "Use a model with a bigger window, which keeps more of the past chat in memory between separate calls",
+          "correct": false,
+          "why": "The window limits a single request; nothing persists between calls whatever its size."
+        }
+      ],
+      "explain": "LLM APIs are stateless: every request carries the whole conversation. Persisting history, and choosing what to resend, is the application's job; that is also why long chats get more expensive per turn.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q18",
+      "domain": "context",
+      "stem": "To 'give it full context', you change the bot to send the whole repository (about 700k tokens) instead of the 30k tokens of changed and related files. It fits in Opus 5.5's 1M window, but review quality drops and misses rise. Why, and what do you do?",
+      "options": [
+        {
+          "text": "The model truncates silently above 500k tokens, so split the repository in two",
+          "correct": false,
+          "why": "Over-window input returns a 400 error rather than silent truncation, and 700k fits the window anyway."
+        },
+        {
+          "text": "Accuracy and recall degrade as the window fills (context rot), so send only the relevant files",
+          "correct": true,
+          "why": "Bigger windows are not used uniformly; measured recall and accuracy fall with length and position, so curating context helps quality and cost."
+        },
+        {
+          "text": "The model needs a higher temperature to explore a large input",
+          "correct": false,
+          "why": "Sampling knobs return 400 on current Claude and do not fix attention spread over irrelevant tokens."
+        },
+        {
+          "text": "Long inputs are automatically routed to a cheaper, weaker serving mode, so the fix is to request the premium tier for big repositories",
+          "correct": false,
+          "why": "There is no such mode; the drop comes from how models use long contexts."
+        }
+      ],
+      "explain": "Context rot: as input grows, models get worse at finding and using what matters, and information in the middle is used least well. A 1M window is a ceiling, not a target; send the smallest context that contains the answer.",
+      "refs": [
+        "https://www.trychroma.com/research/context-rot",
+        "https://arxiv.org/abs/2307.03172",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q19",
+      "domain": "context",
+      "stem": "A triage step reads 50M input tokens and writes 5M output tokens a day. You compare Haiku 5.5 at its base rate ($0.10 / $0.50 per million) with Opus 5.5 ($4 / $20). What is the daily cost of each?",
+      "options": [
+        {
+          "text": "Haiku about $7.50, Opus about $300",
+          "correct": true,
+          "why": "Haiku: 50 × $0.10 + 5 × $0.50 = $5 + $2.50. Opus: 50 × $4 + 5 × $20 = $200 + $100."
+        },
+        {
+          "text": "Haiku about $5, Opus about $200",
+          "correct": false,
+          "why": "That counts only the input tokens and leaves out the output side, which is priced at five times the input rate."
+        },
+        {
+          "text": "Haiku about $27.50, Opus about $1,100",
+          "correct": false,
+          "why": "That bills all 55M tokens at each model's output rate."
+        },
+        {
+          "text": "Both about the same, because output dominates and output prices are similar",
+          "correct": false,
+          "why": "Output prices differ by 40× ($0.50 vs $20), as do input prices."
+        }
+      ],
+      "explain": "Price per million tokens differs by model, but the 5× output multiplier holds across current Claude models. Route cheap, high-volume steps to smaller models and measure whether quality holds.",
+      "refs": [
+        "https://platform.claude.com/docs/en/about-claude/pricing",
+        "https://platform.claude.com/docs/en/models/overview"
+      ]
+    },
+    {
+      "id": "ai-llm-v1-q20",
+      "domain": "context",
+      "stem": "You are writing the bot's runbook and want to record facts about `claude-opus-5-5` that the code relies on. Which statements are correct today? (Choose two.)",
+      "options": [
+        {
+          "text": "Its context window is 1M tokens and it can emit up to 128K output tokens",
+          "correct": true,
+          "why": "The models overview lists 1M context and 128K max output for Opus 5.5."
+        },
+        {
+          "text": "A non-default `temperature` is accepted as long as thinking is turned off",
+          "correct": false,
+          "why": "That was the rule on older models; on Opus 4.7+ and all 5.x models any non-default value returns 400."
+        },
+        {
+          "text": "Manual `budget_tokens` is the way to cap thinking",
+          "correct": false,
+          "why": "Manual `budget_tokens` returns 400 on 4.7+; current models use adaptive thinking with `effort`."
+        },
+        {
+          "text": "It costs $4 per million input tokens and $20 per million output tokens",
+          "correct": true,
+          "why": "The pricing page lists $4 / $20 per MTok, the usual 5× output multiplier."
+        },
+        {
+          "text": "Its default effort is high, the same as Fable 5.1",
+          "correct": false,
+          "why": "Opus 5.5 defaults to medium effort; Fable 5.1 and Sonnet 5.5 default to high."
+        }
+      ],
+      "explain": "Current Claude facts to keep in code and runbooks: 1M windows, 128K max output, output 5× input, thinking billed as output, no sampling knobs, and `effort` instead of `budget_tokens`. Recheck the models and pricing pages when they change.",
+      "refs": [
+        "https://platform.claude.com/docs/en/models/overview",
+        "https://platform.claude.com/docs/en/about-claude/pricing",
+        "https://platform.claude.com/docs/en/build-with-claude/thinking"
+      ]
+    }
+  ]
+}

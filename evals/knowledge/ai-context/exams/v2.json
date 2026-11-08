@@ -1,0 +1,679 @@
+{
+  "topic": "ai-context",
+  "variant": 2,
+  "of": 5,
+  "title": "Context engineering — variant 2",
+  "description": "Debugging a Claude Code session that forgets or ignores rules: statelessness across sessions, CLAUDE.md hierarchy and on-demand loading, what survives compaction, hooks versus instructions, subagent context, and cache-breaking actions.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "state",
+      "name": "Statelessness and request shape",
+      "weight": 0.15
+    },
+    {
+      "id": "prompting",
+      "name": "Prompting techniques",
+      "weight": 0.15
+    },
+    {
+      "id": "caching",
+      "name": "Prompt caching",
+      "weight": 0.15
+    },
+    {
+      "id": "limits",
+      "name": "Window limits, degradation and compaction",
+      "weight": 0.2
+    },
+    {
+      "id": "claudecode",
+      "name": "What Claude Code loads",
+      "weight": 0.35
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-context-v2-q01",
+      "domain": "state",
+      "stem": "On Friday you and Claude Code agreed on a plan for a large refactor. On Monday you open a fresh session in the same repo and type 'carry on with Friday's plan'. Claude asks what plan you mean. What explains this, and what prevents it next time?",
+      "options": [
+        {
+          "text": "The prompt cache expired over the weekend; had the session used the 1-hour TTL instead, Monday's session would still have the plan",
+          "correct": false,
+          "why": "Caching changes price, not content; a cache never carries a conversation into a new session."
+        },
+        {
+          "text": "Friday's turns are not in Monday's request; write the plan to a file that loads or that you point Claude at",
+          "correct": true,
+          "why": "Each request carries only what the client sends; files such as CLAUDE.md, auto memory or a notes file are how state survives."
+        },
+        {
+          "text": "Friday's session overflowed the window and the plan was evicted",
+          "correct": false,
+          "why": "Even a small Friday session would not be part of a new one."
+        },
+        {
+          "text": "The model was updated over the weekend and lost what it learned",
+          "correct": false,
+          "why": "Models do not learn from your sessions; nothing is stored in the weights."
+        }
+      ],
+      "explain": "The model is stateless: every request is rebuilt from the system prompt, project context and the current conversation. Anything that must outlive a session has to live in a file that gets loaded or read.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching",
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q02",
+      "domain": "state",
+      "stem": "Turn 3 and turn 30 of the same Claude Code session both consist of you typing 'run the tests again'. Turn 30 uses far more input tokens. Why?",
+      "options": [
+        {
+          "text": "Claude Code re-sends the whole context, including every earlier message and tool result, on each request",
+          "correct": true,
+          "why": "The conversation grows, and the full context is sent each time."
+        },
+        {
+          "text": "The model has grown slower and spends more tokens on each step as the session gets older",
+          "correct": false,
+          "why": "There is no such drift; the input size comes from what is resent."
+        },
+        {
+          "text": "CLAUDE.md is reloaded and appended again on every turn",
+          "correct": false,
+          "why": "Project context is loaded once per session; it does not accumulate."
+        },
+        {
+          "text": "Only output is counted, and outputs get longer late in a session",
+          "correct": false,
+          "why": "Input is counted too, and input is what grows here."
+        }
+      ],
+      "explain": "Claude Code sends the system prompt, project context, every prior message and tool result, and your new message on every request. Caching makes the repeated prefix cheap, but it is still read every time.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q03",
+      "domain": "state",
+      "stem": "You type one message ('fix the failing date test') and Claude edits two files and reruns the tests twice. Your usage view shows 9 API requests for that one message. What accounts for this?",
+      "options": [
+        {
+          "text": "Streaming splits each answer into chunks that are billed as separate requests",
+          "correct": false,
+          "why": "Streaming changes delivery, not the number of requests."
+        },
+        {
+          "text": "Each tool call ends a request and its result starts a new one, each resending the cached prefix",
+          "correct": true,
+          "why": "One user turn is commonly 5–15 API requests: tool_use out, tool_result back, repeat."
+        },
+        {
+          "text": "Claude Code retried the same request several times in a row because of transient network errors between it and the API",
+          "correct": false,
+          "why": "Retries are possible but would not explain a steady pattern per tool call."
+        },
+        {
+          "text": "A separate subagent is started for every file edit",
+          "correct": false,
+          "why": "Edits run in the main loop; subagents are started explicitly."
+        }
+      ],
+      "explain": "A 'turn' in Claude Code is many API requests. Every tool call is a `tool_use` going out and a `tool_result` coming back in a new request, and each of those requests re-reads the cached prefix.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching",
+        "https://platform.claude.com/docs/en/api/messages"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q04",
+      "domain": "prompting",
+      "stem": "Your CLAUDE.md shows one example commit message: `feat(auth): add login rate limit (ABC-12)`. Since then Claude writes `auth` as the scope and `ABC-12` as the ticket on unrelated commits. What fixes this most reliably?",
+      "options": [
+        {
+          "text": "Delete the example and describe the commit format only in words",
+          "correct": false,
+          "why": "Examples are one of the most reliable ways to steer format; losing them weakens the guidance."
+        },
+        {
+          "text": "Keep the one example and add a line in capitals saying it is only an illustration and its scope and ticket must not be reused",
+          "correct": false,
+          "why": "It may help a little but leaves a single example whose specifics are still the strongest signal."
+        },
+        {
+          "text": "Show several examples with different scopes and tickets, so only the shape is common",
+          "correct": true,
+          "why": "The model copies incidental details of examples; varied examples leave only the format to copy."
+        },
+        {
+          "text": "Move the example into a skill so it loads only when committing",
+          "correct": false,
+          "why": "Where it loads does not change how a single example gets copied."
+        }
+      ],
+      "explain": "Few-shot examples are strong steering, and the model also copies their incidental details. Use several varied examples so the one thing they share is the pattern you want.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q05",
+      "domain": "prompting",
+      "stem": "Working on a subtle race condition with Opus 5.5 in Claude Code, you find Claude's fixes shallow. A teammate tells you to set a thinking token budget in settings. What is the right lever?",
+      "options": [
+        {
+          "text": "Turn thinking off and ask for step-by-step reasoning in the reply instead",
+          "correct": false,
+          "why": "Thinking can't be turned off on 5.5, and visible reasoning is a different tool."
+        },
+        {
+          "text": "Set `budget_tokens` in settings to a large value",
+          "correct": false,
+          "why": "Manual budgets are deprecated or rejected on current models; effort replaced them."
+        },
+        {
+          "text": "Raise the effort level with `/effort`",
+          "correct": true,
+          "why": "On these models depth of thinking is controlled by effort, not by a budget."
+        },
+        {
+          "text": "Prefill the assistant response with an opening `<thinking>` tag",
+          "correct": false,
+          "why": "Prefill returns 400 from Claude 4.6 on."
+        }
+      ],
+      "explain": "Current models use adaptive thinking controlled by effort. In Claude Code thinking stays on for 5.5 and Fable; use `/effort` to ask for more or less depth.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q06",
+      "domain": "prompting",
+      "stem": "After you raised effort to the maximum for a whole session, `/context` fills up noticeably faster and the bill rises even though your messages are the same length. Why?",
+      "options": [
+        {
+          "text": "Higher effort makes Claude Code load more CLAUDE.md files",
+          "correct": false,
+          "why": "Effort does not change which files load."
+        },
+        {
+          "text": "Thinking blocks are billed as output and count toward the context window",
+          "correct": true,
+          "why": "More effort usually means more thinking, which is output and occupies the window."
+        },
+        {
+          "text": "Higher effort disables prompt caching, so the whole conversation is billed at the full input price",
+          "correct": false,
+          "why": "Changing effort invalidates the cache once, but it does not turn caching off."
+        },
+        {
+          "text": "Effort increases the minimum cacheable length",
+          "correct": false,
+          "why": "The minimum depends on the model, not on effort."
+        }
+      ],
+      "explain": "Extended and adaptive thinking produce `thinking` blocks. They are billed as output tokens and count toward the window, so a higher effort costs both money and room.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q07",
+      "domain": "caching",
+      "stem": "Mid-session you switch from Sonnet to Opus for one hard bug, then back to Sonnet. Both switches are followed by a slow, expensive request. Why?",
+      "options": [
+        {
+          "text": "A different model shares no cache, so the whole context is re-read uncached",
+          "correct": true,
+          "why": "Model switches are a documented cache miss; each model has its own cached prefix."
+        },
+        {
+          "text": "Switching models also drops CLAUDE.md, which then has to be reloaded",
+          "correct": false,
+          "why": "Project context is still sent; the cost is the uncached read, not a reload."
+        },
+        {
+          "text": "The conversation is compacted automatically on every model switch",
+          "correct": false,
+          "why": "Switching does not trigger compaction."
+        },
+        {
+          "text": "Only the first message after the switch is uncached, which is a negligible cost",
+          "correct": false,
+          "why": "The whole prefix is uncached, which at turn 40 can be large."
+        }
+      ],
+      "explain": "Caches are per model. Switching model, fast mode, the MCP server set or running `/compact` forces a full uncached read of the context, so do it at natural breaks rather than casually.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q08",
+      "domain": "caching",
+      "stem": "You are deep into a long Claude Code session and want to avoid an expensive uncached re-read of the whole context. Which two actions would force one? (Choose two.)",
+      "options": [
+        {
+          "text": "Connecting a new MCP server mid-session",
+          "correct": true,
+          "why": "Changing the MCP server set changes the tools, which invalidates the cache."
+        },
+        {
+          "text": "Running `/compact`",
+          "correct": true,
+          "why": "Compaction replaces the conversation with a summary, so the next request has no cached prefix."
+        },
+        {
+          "text": "Invoking a skill",
+          "correct": false,
+          "why": "Skill bodies are appended as messages, which keeps the cached prefix intact."
+        },
+        {
+          "text": "Entering plan mode",
+          "correct": false,
+          "why": "Plan mode is appended as a message and is cache-safe."
+        },
+        {
+          "text": "Changing the output style",
+          "correct": false,
+          "why": "Output style is appended as a message and is cache-safe."
+        }
+      ],
+      "explain": "Claude Code orders the cache as system and tools, then project context, then conversation. Things appended as messages (skills, plan mode, output style) keep the cache; MCP-set changes, model or fast-mode switches and `/compact` do not.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q09",
+      "domain": "caching",
+      "stem": "You use Claude Code with an API key. You step away for twenty minutes, come back and type a short message; that request costs far more than the ones before your break. What happened?",
+      "options": [
+        {
+          "text": "Auto memory and CLAUDE.md were both reloaded from disk after the idle period, adding their tokens to the request again",
+          "correct": false,
+          "why": "Memory loads at session start, not after idle time."
+        },
+        {
+          "text": "With an API key the default cache TTL is 5 minutes, so the cache expired",
+          "correct": true,
+          "why": "On API-key auth the default is 5 minutes; the next request rewrote the cache."
+        },
+        {
+          "text": "The session was compacted while idle",
+          "correct": false,
+          "why": "Compaction happens near the window limit, not on idle time."
+        },
+        {
+          "text": "The tokenizer re-tokenised the conversation after the pause",
+          "correct": false,
+          "why": "Nothing about tokenisation changes with time."
+        }
+      ],
+      "explain": "Claude Code's default cache TTL is 1 hour on the subscription main thread, but 5 minutes with an API key and for subagents and compaction. A break longer than the TTL makes the next request a full write.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q10",
+      "domain": "limits",
+      "stem": "A rule in `packages/api/CLAUDE.md` ('never import from `internal/`') was followed all morning. After an auto-compact, Claude breaks it on the next edit. Why, and what keeps it?",
+      "options": [
+        {
+          "text": "Auto-compact deletes nested CLAUDE.md files; restore them from git",
+          "correct": false,
+          "why": "Nothing is deleted on disk; the issue is what is re-injected."
+        },
+        {
+          "text": "Nested CLAUDE.md files reload only on demand after compaction; put must-keep rules in the root CLAUDE.md",
+          "correct": true,
+          "why": "After compaction the root CLAUDE.md is re-injected, while nested files return only when Claude touches that directory again."
+        },
+        {
+          "text": "The rule is too long; a shorter phrasing would survive compaction",
+          "correct": false,
+          "why": "Length is not what decides whether a file is re-injected."
+        },
+        {
+          "text": "Compaction summarised the rule incorrectly; ask for a bigger summary next time",
+          "correct": false,
+          "why": "Rules are not meant to survive through the summary; root files are re-injected verbatim."
+        }
+      ],
+      "explain": "After `/compact`, Claude Code re-injects the root CLAUDE.md, unscoped rules, auto memory, skill descriptions and the plan. Nested CLAUDE.md files and `paths:` rules only come back on demand.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window",
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q11",
+      "domain": "limits",
+      "stem": "Two hours into a session, `/context` shows most of the window filled by old test logs and abandoned approaches, and Claude is getting sloppier. You want to keep the key decisions and continue. Which step fits best?",
+      "options": [
+        {
+          "text": "Run `/compact` with a focus, for example on the decisions and the failing test names",
+          "correct": true,
+          "why": "Compaction with a focus instruction replaces the noise with a summary of what matters."
+        },
+        {
+          "text": "Run `/clear` and continue from memory",
+          "correct": false,
+          "why": "That throws the decisions away together with the noise."
+        },
+        {
+          "text": "Move to a model with a larger window so the logs fit comfortably",
+          "correct": false,
+          "why": "The logs already fit; the problem is degradation from irrelevant context."
+        },
+        {
+          "text": "Do nothing for now; auto-compact will tidy up the window by itself eventually, and since it happens automatically it costs nothing",
+          "correct": false,
+          "why": "Auto-compact waits until near the limit, and a compact is an uncached re-read, not free."
+        }
+      ],
+      "explain": "`/compact [focus]` summarises the conversation and lets you say what to keep. It costs one uncached read but removes stale context that is degrading answers.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q12",
+      "domain": "limits",
+      "stem": "At about 600k tokens into a session, Claude keeps forgetting a design decision you made early on. You expect the session to run for hours more. What is the most robust move?",
+      "options": [
+        {
+          "text": "Repeat the decision at the top of every message you send from now on, so it is always the most recent thing in the context",
+          "correct": false,
+          "why": "That adds tokens to an already overloaded context and treats the symptom."
+        },
+        {
+          "text": "Turn on the 1-hour cache so the early decision stays fresh",
+          "correct": false,
+          "why": "Caching affects price only, not what the model attends to."
+        },
+        {
+          "text": "Write the decision into a notes file, then `/clear` and start fresh pointing at it",
+          "correct": true,
+          "why": "Structured notes outside the window and a clean context counter context rot."
+        },
+        {
+          "text": "Lower effort so less thinking competes with the decision",
+          "correct": false,
+          "why": "Less thinking does not bring back attention to an early turn."
+        }
+      ],
+      "explain": "As context grows, recall degrades. Durable decisions belong in notes or CLAUDE.md outside the window, and a fresh context with those notes beats dragging a huge history along.",
+      "refs": [
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents",
+        "https://code.claude.com/docs/en/context-window"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q13",
+      "domain": "limits",
+      "stem": "For the last ten turns Claude followed a wrong approach you suggested. You want the conversation back to how it was before that detour, keeping everything earlier. Which command fits?",
+      "options": [
+        {
+          "text": "`/compact`, because it removes the detour from the history",
+          "correct": false,
+          "why": "Compaction summarises the detour; it stays in the summary."
+        },
+        {
+          "text": "`/clear`, then retype what mattered from before",
+          "correct": false,
+          "why": "That throws away the good earlier context too."
+        },
+        {
+          "text": "`/rewind` to the point before the detour",
+          "correct": true,
+          "why": "Rewind returns the conversation to an earlier point."
+        },
+        {
+          "text": "Add 'ignore the last ten turns' to CLAUDE.md",
+          "correct": false,
+          "why": "Those turns are still in the context; an instruction cannot remove them."
+        }
+      ],
+      "explain": "Claude Code gives you several context tools: `/rewind` to go back, `/compact` to summarise, `/clear` to start over and `/context` to see what is using the window.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q14",
+      "domain": "claudecode",
+      "stem": "Your CLAUDE.md says 'run `pnpm lint` before every commit'. Most of the time Claude does; a few times a week it commits without linting. You need it to happen every time. What do you change?",
+      "options": [
+        {
+          "text": "Rewrite the rule in capitals with IMPORTANT in front",
+          "correct": false,
+          "why": "Stronger wording is still context, not enforcement."
+        },
+        {
+          "text": "Copy the rule into every nested CLAUDE.md in the repo",
+          "correct": false,
+          "why": "More copies are more context, and still not a guarantee."
+        },
+        {
+          "text": "Add a PreToolUse hook on `git commit` that runs the linter and blocks on failure",
+          "correct": true,
+          "why": "Hooks are deterministic shell commands; a PreToolUse hook can block the call."
+        },
+        {
+          "text": "Move the rule into a dedicated commit skill so its instructions load fresh, right at the moment Claude is about to commit",
+          "correct": false,
+          "why": "A skill is still instructions the model may or may not follow."
+        }
+      ],
+      "explain": "CLAUDE.md is context, not enforced configuration. When something must happen every time, use a hook or permissions: hooks run as shell commands at lifecycle points and PreToolUse hooks can block or rewrite a call.",
+      "refs": [
+        "https://code.claude.com/docs/en/hooks-guide",
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q15",
+      "domain": "claudecode",
+      "stem": "In a monorepo, `~/work/CLAUDE.md` says 'use npm', the repo root CLAUDE.md says 'use pnpm', and `services/api/CLAUDE.md` says 'use yarn'. You start Claude Code in `services/api`. What reaches the model?",
+      "options": [
+        {
+          "text": "Only `services/api/CLAUDE.md`, since the closest file replaces the others",
+          "correct": false,
+          "why": "Files are concatenated, not replaced."
+        },
+        {
+          "text": "Only the repo root CLAUDE.md, which acts as the project's single source of rules",
+          "correct": false,
+          "why": "Parents of the cwd and the cwd itself all load."
+        },
+        {
+          "text": "All three, concatenated from the top down, so the conflict is sent as-is",
+          "correct": true,
+          "why": "CLAUDE.md files from the cwd and every parent load, root first and closest last."
+        },
+        {
+          "text": "A merged file where duplicate rules are dropped",
+          "correct": false,
+          "why": "No deduplication happens; conflicting text all goes in."
+        }
+      ],
+      "explain": "Claude Code loads CLAUDE.md from the working directory and every parent, concatenated from the root down to the cwd, so the closest file is read last. Conflicts are sent as they are, so resolve them instead of relying on order.",
+      "refs": [
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q16",
+      "domain": "claudecode",
+      "stem": "You start Claude Code at the repo root and ask a design question about `packages/web` before Claude has opened any file there. Its answer ignores a rule that lives in `packages/web/CLAUDE.md`. What is going on?",
+      "options": [
+        {
+          "text": "Subdirectory CLAUDE.md files load only when Claude works with files in that directory",
+          "correct": true,
+          "why": "Nested files load on demand, so that rule is not yet in the context."
+        },
+        {
+          "text": "Nested CLAUDE.md files are only read by subagents",
+          "correct": false,
+          "why": "The main session reads them too, once it touches that directory."
+        },
+        {
+          "text": "CLAUDE.md files deeper than one level are never read",
+          "correct": false,
+          "why": "They are read, just not up front."
+        },
+        {
+          "text": "The rule was dropped because the window had filled up with other project context",
+          "correct": false,
+          "why": "Nothing near the limit is needed to explain this; the file was never loaded."
+        }
+      ],
+      "explain": "CLAUDE.md files in parent directories load at start; files in subdirectories load on demand when Claude touches that directory. Rules that apply everywhere belong at the root.",
+      "refs": [
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q17",
+      "domain": "claudecode",
+      "stem": "Your CLAUDE.md is 900 lines and pulls in three long docs with `@imports`. Claude increasingly skips rules. A teammate argues the imports are free because they are separate files, and suggests hiding older sections inside HTML comments 'so the model still sees them'. Which response is accurate?",
+      "options": [
+        {
+          "text": "Imports are fetched lazily, so only the HTML comment idea is wrong",
+          "correct": false,
+          "why": "Imports expand when CLAUDE.md loads; they are not lazy."
+        },
+        {
+          "text": "Both ideas save tokens, so the file length is not the issue",
+          "correct": false,
+          "why": "Neither saves model attention in the way the teammate thinks."
+        },
+        {
+          "text": "Imports expand at load and cost the same; HTML block comments are stripped, so the model never sees them",
+          "correct": true,
+          "why": "Both claims are wrong, which is why the fix is a shorter file with procedures moved elsewhere."
+        },
+        {
+          "text": "HTML comments are the right way to keep context away from humans while the model reads it",
+          "correct": false,
+          "why": "HTML block comments are stripped before the model sees the file."
+        }
+      ],
+      "explain": "`@imports` expand at load time (up to depth 4) and cost the same as inline text. HTML block comments are stripped. Keep CLAUDE.md under about 200 lines and move procedures into skills that load on demand.",
+      "refs": [
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q18",
+      "domain": "claudecode",
+      "stem": "Auto memory holds your preference 'use vitest, not jest'. The main session respects it, but a subagent you spawn to write tests uses jest. Why?",
+      "options": [
+        {
+          "text": "Auto memory is only read after the first `/compact`",
+          "correct": false,
+          "why": "Auto memory loads at session start for the main session."
+        },
+        {
+          "text": "Subagents load CLAUDE.md but not auto memory",
+          "correct": true,
+          "why": "The preference never reached the subagent's window."
+        },
+        {
+          "text": "Subagents cannot read files outside their own working directory",
+          "correct": false,
+          "why": "Directory access is not the issue; auto memory simply isn't loaded."
+        },
+        {
+          "text": "The subagent ran on a cheaper model that ignores memory and other stored preferences",
+          "correct": false,
+          "why": "No model ignores what it is given; this preference was never given."
+        }
+      ],
+      "explain": "Subagents start with their own window: their system prompt, the delegation prompt and CLAUDE.md (Explore and Plan skip it), but no auto memory. Put rules every agent must follow into CLAUDE.md or the delegation prompt.",
+      "refs": [
+        "https://code.claude.com/docs/en/sub-agents",
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q19",
+      "domain": "claudecode",
+      "stem": "Your custom `release-notes` skill works when you type `/release-notes`, but Claude never uses it on its own, even when you ask 'write release notes for this PR'. Its frontmatter includes `disable-model-invocation: true`. Why?",
+      "options": [
+        {
+          "text": "Skill bodies only load after a restart",
+          "correct": false,
+          "why": "Restart has nothing to do with it; manual invocation already works."
+        },
+        {
+          "text": "The flag hides the skill's description from the model, so it cannot choose it",
+          "correct": true,
+          "why": "Only descriptions are always in context; this flag removes it, leaving manual invocation only."
+        },
+        {
+          "text": "The skill body is too long for the model to load automatically",
+          "correct": false,
+          "why": "Body length does not decide whether the model sees the description."
+        },
+        {
+          "text": "Skills are always manual and Claude never invokes them by itself",
+          "correct": false,
+          "why": "Normally the model can invoke a skill from its description."
+        }
+      ],
+      "explain": "The model can only pick a skill whose description is in context. `disable-model-invocation: true` hides the description, which is what you want for skills with side effects, but it also stops automatic use.",
+      "refs": [
+        "https://code.claude.com/docs/en/skills"
+      ]
+    },
+    {
+      "id": "ai-context-v2-q20",
+      "domain": "claudecode",
+      "stem": "A long session has just been compacted. Which two of these are re-injected automatically, without Claude touching any particular directory? (Choose two.)",
+      "options": [
+        {
+          "text": "The root CLAUDE.md",
+          "correct": true,
+          "why": "The root CLAUDE.md is re-injected after compaction."
+        },
+        {
+          "text": "Auto memory",
+          "correct": true,
+          "why": "Auto memory is re-injected after compaction."
+        },
+        {
+          "text": "`packages/api/CLAUDE.md`, a nested file",
+          "correct": false,
+          "why": "Nested CLAUDE.md files reload only on demand."
+        },
+        {
+          "text": "A rule file scoped with `paths:` frontmatter",
+          "correct": false,
+          "why": "`paths:` rules reload only on demand."
+        },
+        {
+          "text": "The full content of every file read earlier in the session",
+          "correct": false,
+          "why": "Only up to 5 recent files are re-read."
+        }
+      ],
+      "explain": "After `/compact`, Claude Code re-injects the root CLAUDE.md, unscoped rules, auto memory, skill descriptions and the plan, and re-reads up to 5 recent files. Scoped and nested rules wait until they are needed again.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window"
+      ]
+    }
+  ]
+}

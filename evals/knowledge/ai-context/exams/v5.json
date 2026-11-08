@@ -1,0 +1,685 @@
+{
+  "topic": "ai-context",
+  "variant": 5,
+  "of": 5,
+  "title": "Context engineering — variant 5",
+  "description": "Auditing and redesigning a team's Claude Code setup and its API feature: where CLAUDE.md content belongs, skill descriptions and bundled scripts, auto memory limits, subagent prompts and reports, cache-safe actions, and cache-friendly request design.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "state",
+      "name": "Statelessness and request shape",
+      "weight": 0.15
+    },
+    {
+      "id": "prompting",
+      "name": "Prompting techniques",
+      "weight": 0.15
+    },
+    {
+      "id": "caching",
+      "name": "Prompt caching",
+      "weight": 0.2
+    },
+    {
+      "id": "limits",
+      "name": "Window limits, degradation and compaction",
+      "weight": 0.15
+    },
+    {
+      "id": "claudecode",
+      "name": "What Claude Code loads",
+      "weight": 0.35
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-context-v5-q01",
+      "domain": "state",
+      "stem": "You are auditing a teammate's Claude Code usage to decide where trimming would pay off. You look at a typical session at its sixth message: built-in system prompt and tools, MCP tool names, skill descriptions, CLAUDE.md plus memory, and five earlier turns in which Claude read files and ran tests. Going by typical sizes, which part usually takes the biggest share of that request's input?",
+      "options": [
+        {
+          "text": "The earlier turns, including their tool results",
+          "correct": true,
+          "why": "Every prior message and tool result is resent each request; by turn 6 that is typically 25–60k tokens, more than any fixed part."
+        },
+        {
+          "text": "The built-in system prompt and tool definitions",
+          "correct": false,
+          "why": "Large and fixed (roughly 10–15k), so it looks like the obvious target, but the history usually outgrows it within a few turns."
+        },
+        {
+          "text": "The skill descriptions for every installed skill",
+          "correct": false,
+          "why": "Only descriptions are always loaded, typically 1–2k in total; trimming them saves little."
+        },
+        {
+          "text": "CLAUDE.md and auto memory combined, since both load in full every session",
+          "correct": false,
+          "why": "Typically 3–8k; worth keeping lean, but smaller than a few turns of file reads and test output."
+        }
+      ],
+      "explain": "The model is stateless, so each request carries the whole conversation so far. Accumulated tool results usually dominate a working session; that is why just-in-time loading, subagents and compaction matter more than shaving the fixed prefix.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window",
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q02",
+      "domain": "state",
+      "stem": "The team's internal API wrapper runs Claude's tool calls. After a response with a `tool_use` block, it runs the tool and appends the output as a new `assistant` text message, then calls the API again. Claude often asks for the same tool call again as if it never got an answer. What should the wrapper send instead?",
+      "options": [
+        {
+          "text": "A `user` message holding a `tool_result` block with the matching `tool_use_id`",
+          "correct": true,
+          "why": "Results go back in a user turn, linked to the call by `tool_use_id`; that is how the model knows its request was answered."
+        },
+        {
+          "text": "An `assistant` message holding a `tool_result` block, since the assistant made the call",
+          "correct": false,
+          "why": "Tempting because the call came from the assistant, but tool results belong in the user turn."
+        },
+        {
+          "text": "The tool output appended to the system prompt for the next request",
+          "correct": false,
+          "why": "That breaks the link to the call and changes the system prompt, which also invalidates its cache on every step."
+        },
+        {
+          "text": "Nothing extra: the API remembers that the tool ran and fetches its output itself",
+          "correct": false,
+          "why": "The model never executes anything and the API keeps no state; your code must send the result."
+        }
+      ],
+      "explain": "A tool call is two more messages: `tool_use` from the assistant, then a `tool_result` in a user turn with the same `tool_use_id` (and `is_error` on failure). The model only proposes calls; the client runs them and reports back.",
+      "refs": [
+        "https://platform.claude.com/docs/en/api/messages"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q03",
+      "domain": "state",
+      "stem": "For a cost report you trace one teammate message ('fix the flaky retry test'). Claude Code made 8 API requests to handle it, and each request carried a prefix of about 60k tokens before its new content. Roughly how many input tokens did that one message process, and how were most of them billed?",
+      "options": [
+        {
+          "text": "About 60k, since the prefix is sent once per message",
+          "correct": false,
+          "why": "One message triggers many requests, and each request resends the whole prefix."
+        },
+        {
+          "text": "About 480k, mostly billed as cache reads",
+          "correct": true,
+          "why": "8 × 60k is about 480k; the repeated prefix matches the cache, so most of it is billed at the read rate."
+        },
+        {
+          "text": "About 480k, all at full input price because each request is new",
+          "correct": false,
+          "why": "The token count is right, but an identical prefix within the TTL is read from the cache, not billed at full price."
+        },
+        {
+          "text": "About 8k, because only each request's new content is sent",
+          "correct": false,
+          "why": "The API is stateless; only billing is reduced by caching, not what is sent."
+        }
+      ],
+      "explain": "One Claude Code 'turn' is often 5–15 API requests (each tool step is a round trip), and every request re-reads the full prefix. Caching makes those repeats cheap, but they still count as input tokens and still occupy the window.",
+      "refs": [
+        "https://code.claude.com/docs/en/costs",
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q04",
+      "domain": "prompting",
+      "stem": "The team's `security-reviewer` subagent has a system prompt that is only a 15-item checklist. Its reviews keep drifting into naming and formatting nits that another reviewer already covers. What is the cheapest first change to try?",
+      "options": [
+        {
+          "text": "Add 20 full example reviews to its prompt so it learns what a good review looks like",
+          "correct": false,
+          "why": "Examples steer format well, but 20 of them cost a lot of context, and the model copies their incidental features too."
+        },
+        {
+          "text": "Add a one-sentence role to its system prompt",
+          "correct": true,
+          "why": "A role in the system prompt focuses behaviour; Anthropic notes that even a single sentence makes a difference."
+        },
+        {
+          "text": "Raise effort to maximum for the subagent",
+          "correct": false,
+          "why": "More thinking does not change what the reviewer considers in scope; it mostly adds output cost."
+        },
+        {
+          "text": "Copy the checklist into the root CLAUDE.md too",
+          "correct": false,
+          "why": "It adds tokens to every session and repeats the same unfocused list; it gives no role or scope."
+        }
+      ],
+      "explain": "Before adding volume, give the prompt a role. A short role sentence sets what matters and what to ignore, at almost no token cost. Add examples or more rules only if the role is not enough.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+        "https://code.claude.com/docs/en/sub-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q05",
+      "domain": "prompting",
+      "stem": "The team's API feature returns JSON via structured outputs (`output_config.format` with a JSON schema). Product adds an optional field to the schema in most weekly releases. Right after each deploy, cache reads drop to zero for a while and cost jumps, then things recover. What explains the pattern?",
+      "options": [
+        {
+          "text": "Structured outputs are never cached",
+          "correct": false,
+          "why": "If that were true the cache would never recover between deploys."
+        },
+        {
+          "text": "Optional fields are not supported, so requests retry",
+          "correct": false,
+          "why": "Unsupported features are recursive schemas and min/max constraints; optional fields do not cause retries."
+        },
+        {
+          "text": "A changed schema invalidates the cache until rewritten",
+          "correct": true,
+          "why": "The output format is part of what the cache keys on, so each schema change forces fresh cache writes once."
+        },
+        {
+          "text": "Each deploy restarts the server, and the API's cache belongs to your process",
+          "correct": false,
+          "why": "The cache lives on the API side and keys on the request prefix, not on your process."
+        }
+      ],
+      "explain": "Prompt caching needs an exact match on everything it covers, and changing the output format invalidates it. A schema change is a one-off cache rewrite, so batch schema changes rather than changing it per request.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/structured-outputs",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q06",
+      "domain": "prompting",
+      "stem": "Compliance wants the reasoning behind each refund decision stored as plain text next to the decision, in a section your code can parse from the response text. The feature already uses adaptive thinking on a Claude 4.7 model. Which change fits?",
+      "options": [
+        {
+          "text": "Prompt for reasoning in `<reasoning>` tags, then the decision in `<decision>`",
+          "correct": true,
+          "why": "Visible chain-of-thought is reasoning you prompt for; XML tags make both sections easy to extract."
+        },
+        {
+          "text": "Prefill the assistant turn with `<reasoning>` so every response starts in that section",
+          "correct": false,
+          "why": "Prefill returns HTTP 400 from Claude 4.6 on."
+        },
+        {
+          "text": "Set `budget_tokens` high so the reasoning shows up in the text",
+          "correct": false,
+          "why": "Manual `budget_tokens` returns 400 on 4.7+, and a thinking budget does not put reasoning into the text output."
+        },
+        {
+          "text": "Raise effort to maximum so the model explains itself more",
+          "correct": false,
+          "why": "Effort tunes how much the model thinks; it does not create a parseable reasoning section in the answer."
+        }
+      ],
+      "explain": "Chain-of-thought is visible reasoning you ask for in the response; extended or adaptive thinking is a separate `thinking` mechanism. When the reasoning must be part of the output, prompt for it and fence it with XML tags.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices",
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q07",
+      "domain": "caching",
+      "stem": "Assume (illustrative) $10 per million base input tokens on a Fable/Mythos 5.1 model, where cache reads cost 0.025× base and a 1-hour cache write costs 2×. A nightly job sends 21 requests within 50 minutes that share a 40k-token prefix, using the 1-hour TTL. Roughly what does the prefix cost in total?",
+      "options": [
+        {
+          "text": "About $1.00",
+          "correct": true,
+          "why": "One write: 40k × $10/M × 2 = $0.80. Twenty reads: 20 × $0.40 × 0.025 = $0.20. Total about $1.00."
+        },
+        {
+          "text": "About $1.60",
+          "correct": false,
+          "why": "That is what you get with reads at 0.1× (20 × $0.04 = $0.80); this model reads at 0.025×."
+        },
+        {
+          "text": "About $0.20",
+          "correct": false,
+          "why": "That counts the reads only and forgets the 2× write of the first request."
+        },
+        {
+          "text": "About $8.40",
+          "correct": false,
+          "why": "That is 21 × $0.40 with no caching at all."
+        }
+      ],
+      "explain": "Cost with caching = one write (1.25× for 5 minutes, 2× for 1 hour) plus reads at the model's read multiplier. On models with very cheap reads, the write dominates, so the saving grows with each reuse.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q08",
+      "domain": "caching",
+      "stem": "A contract Q&A feature sends 3k tokens of tools, a 5k-token system prompt, then one user message: the customer's question followed by their 50k-token contract. A customer typically asks ten questions about the same contract within minutes. The only `cache_control` breakpoint is at the end of that user message, and cache reads stay at zero. What do you change?",
+      "options": [
+        {
+          "text": "Add a second breakpoint on the system prompt and leave the message as it is",
+          "correct": false,
+          "why": "That caches 8k of tools and system but still resends the 50k contract uncached on every question."
+        },
+        {
+          "text": "Shorten the contract below 512 tokens so it caches",
+          "correct": false,
+          "why": "512 is a minimum, not a maximum; a 50k block is well above it."
+        },
+        {
+          "text": "Switch to the 1-hour TTL so the cached entry survives between a customer's questions",
+          "correct": false,
+          "why": "A longer TTL does not help when the prefix never matches."
+        },
+        {
+          "text": "Put the contract first with the breakpoint on it, and the question after it",
+          "correct": true,
+          "why": "Now the stable part (tools, system, contract) forms the prefix, and only the question changes; it also follows the documents-first guidance."
+        }
+      ],
+      "explain": "Caching matches an exact prefix. Order content from stable to volatile and end the breakpoint on the last stable block. Putting long documents before the query is also what Anthropic recommends for quality.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-caching",
+        "https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q09",
+      "domain": "caching",
+      "stem": "You are writing the team's guide to long Claude Code sessions. One section lists what people can do mid-session without forcing an uncached re-read of the whole context. Which two belong on that list? (Choose two.)",
+      "options": [
+        {
+          "text": "Invoking a skill",
+          "correct": true,
+          "why": "A skill's body is appended as a message, so the cached prefix before it is untouched."
+        },
+        {
+          "text": "Entering plan mode",
+          "correct": true,
+          "why": "Plan mode is appended as a message too, so it is cache-safe."
+        },
+        {
+          "text": "Connecting one more MCP server",
+          "correct": false,
+          "why": "Changing the MCP set changes the tool definitions near the start of the prefix, which misses the cache."
+        },
+        {
+          "text": "Switching on fast mode",
+          "correct": false,
+          "why": "A different speed is a different cache; the next request re-reads everything."
+        },
+        {
+          "text": "Running `/compact` to tidy the conversation",
+          "correct": false,
+          "why": "It feels like housekeeping, but compaction rewrites the conversation, so the next request misses."
+        }
+      ],
+      "explain": "Claude Code orders the prefix as system and tools, then project context, then conversation. Anything appended as a message (skills, plan mode, output style) keeps the cache; anything that changes an earlier level (MCP set, model, fast mode, /compact) does not.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q10",
+      "domain": "caching",
+      "stem": "A teammate on a subscription plan notices something odd in usage data. After a 10-minute coffee break, the main session's next request is cheap, but each subagent started right after the break pays full cache writes for its prefix. Why the difference?",
+      "options": [
+        {
+          "text": "Subagents are never cached",
+          "correct": false,
+          "why": "Subagents use caching too; their entries just expire sooner."
+        },
+        {
+          "text": "Subagents default to a 5-minute TTL",
+          "correct": true,
+          "why": "On a subscription the main thread defaults to a 1-hour TTL; subagents and compaction use 5 minutes."
+        },
+        {
+          "text": "The break cleared the main session's cache too, but the main thread's prefix is smaller",
+          "correct": false,
+          "why": "The main prefix is usually larger; it stayed cached because of its 1-hour TTL."
+        },
+        {
+          "text": "Subagents share the parent's cache entry, which only the parent can read",
+          "correct": false,
+          "why": "A subagent has its own window and system prompt, so its prefix is different; there is no shared entry to read."
+        }
+      ],
+      "explain": "Claude Code's default TTL is 1 hour on the subscription main thread, and 5 minutes with an API key, for subagents and for compaction. Short, separated bursts of subagent work pay the write each time.",
+      "refs": [
+        "https://code.claude.com/docs/en/prompt-caching"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q11",
+      "domain": "limits",
+      "stem": "A draft of the team's Claude Code guidelines says: 'Anthropic documents a lost-in-the-middle effect, so keep CLAUDE.md short.' The advice is fine, but you want the citation to be accurate before it is shared. How do you correct it?",
+      "options": [
+        {
+          "text": "Leave it: lost in the middle is Anthropic's term for context rot",
+          "correct": false,
+          "why": "The two are often mixed up, but Anthropic's sources do not use that term for it."
+        },
+        {
+          "text": "Cite it as research (Liu 2023); Anthropic calls it context rot",
+          "correct": true,
+          "why": "Lost in the middle is an academic finding; Anthropic describes accuracy and recall degrading as tokens grow, with a finite attention budget."
+        },
+        {
+          "text": "Delete the claim: long context does not degrade on 1M-token models",
+          "correct": false,
+          "why": "Anthropic says accuracy and recall degrade as token count grows, whatever the window size."
+        },
+        {
+          "text": "Replace it with 'Claude ignores anything past 200k tokens'",
+          "correct": false,
+          "why": "There is no such cut-off; degradation is gradual and the window is 1M on current models."
+        }
+      ],
+      "explain": "Context rot is Anthropic's term: more tokens give diminishing returns and worse recall. Lost in the middle (Liu et al., 2023) is research, not an Anthropic doc. Cite each to its own source.",
+      "refs": [
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q12",
+      "domain": "limits",
+      "stem": "Two hours into a session, half the window is noisy debugging output mixed in among real decisions, the key one being the agreed database migration order and the reasons for it. You want to keep working in the same session with less noise. Which step fits best?",
+      "options": [
+        {
+          "text": "`/clear`, then retype the migration order from your own notes",
+          "correct": false,
+          "why": "It works, but drops every other decision too and makes you rebuild context by hand."
+        },
+        {
+          "text": "`/rewind` to the point just before the debugging detour started",
+          "correct": false,
+          "why": "The decisions are mixed in with the noise, so rewinding also throws them away."
+        },
+        {
+          "text": "`/compact` focused on 'keep the migration order and reasons'",
+          "correct": true,
+          "why": "Compaction summarises the history, and the focus tells it what must survive."
+        },
+        {
+          "text": "Wait for auto-compact, since it keeps everything important",
+          "correct": false,
+          "why": "It only fires near the limit and you do not choose what it keeps."
+        }
+      ],
+      "explain": "`/compact [focus]` replaces history with a summary steered by your focus text. Pick `/rewind` when the detour is a clean tail, `/clear` for a fresh task, and `/compact` with a focus when the noise and the decisions are interleaved.",
+      "refs": [
+        "https://code.claude.com/docs/en/context-window",
+        "https://code.claude.com/docs/en/costs"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q13",
+      "domain": "limits",
+      "stem": "A batch job sends a fixed reference corpus that measured about 700k tokens on a Claude 4.6 model, with `max_tokens: 128000`. The team moves it to a Claude 4.7 model with the same 1M window and assumes nothing changes. What should they expect?",
+      "options": [
+        {
+          "text": "It still fits: 700k plus 128k is 828k, under 1M",
+          "correct": false,
+          "why": "That uses the old count; the newer tokenizer turns the same text into more tokens."
+        },
+        {
+          "text": "Every request fails with HTTP 400 because the input exceeds 1M",
+          "correct": false,
+          "why": "At about 910k the input itself still fits; it is input plus `max_tokens` that exceeds the window."
+        },
+        {
+          "text": "About 910k input; with 128k `max_tokens` a response can stop with `model_context_window_exceeded`",
+          "correct": true,
+          "why": "Roughly 30% more tokens gives about 910k, and 910k + 128k > 1M; on 4.5+ that shows up as that stop reason."
+        },
+        {
+          "text": "Fewer tokens than before, since the newer tokenizer is more efficient",
+          "correct": false,
+          "why": "The opposite: Claude 4.7+ uses about 30% more tokens for the same text."
+        }
+      ],
+      "explain": "Recount after a model change: the 4.7+ tokenizer yields about 30% more tokens. Input above the window gives a 400; on 4.5+ input plus `max_tokens` above it ends with `model_context_window_exceeded`. Trim the corpus or retrieve just in time.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows",
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q14",
+      "domain": "claudecode",
+      "stem": "The team's root CLAUDE.md holds a 300-line release runbook that is used about once a week. Claude should still follow it whenever someone asks it to cut a release. Where should the runbook live?",
+      "options": [
+        {
+          "text": "In a separate file pulled in with an `@import` from CLAUDE.md",
+          "correct": false,
+          "why": "Imports expand at load time, so the runbook still costs the same tokens every session."
+        },
+        {
+          "text": "In a skill whose description says it handles releases",
+          "correct": true,
+          "why": "Only the description is always in context; the body loads when the skill is invoked."
+        },
+        {
+          "text": "In a skill with `disable-model-invocation: true` to keep it out of context",
+          "correct": false,
+          "why": "That hides the description too, so Claude will not pick it up when someone asks for a release."
+        },
+        {
+          "text": "In auto memory, where Claude stores what it should remember",
+          "correct": false,
+          "why": "Auto memory also loads every session and only its first 200 lines; a 300-line runbook would be cut off."
+        }
+      ],
+      "explain": "Rarely used procedures belong in skills: a short description stays in context so Claude knows when to use it, and the body arrives only on invocation. CLAUDE.md is for what every session needs.",
+      "refs": [
+        "https://code.claude.com/docs/en/skills",
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q15",
+      "domain": "claudecode",
+      "stem": "A teammate's `db-migrate` skill puts its whole 4,000-character procedure in the `description` field 'so Claude always knows the steps'. In practice Claude follows only the first part of the procedure. What do you recommend?",
+      "options": [
+        {
+          "text": "Keep the description a short trigger; move the steps into the skill body",
+          "correct": true,
+          "why": "Description plus `when_to_use` is capped at 1,536 characters; the body is where full instructions load on invoke."
+        },
+        {
+          "text": "Split it across `description` and `when_to_use` so both fields hold half",
+          "correct": false,
+          "why": "The 1,536-character cap applies to the two fields together, so this still truncates."
+        },
+        {
+          "text": "Move the procedure into CLAUDE.md so it is always loaded in full",
+          "correct": false,
+          "why": "That loads it into every session, including ones that never migrate a database."
+        },
+        {
+          "text": "Leave it: the description is just a longer form of the body",
+          "correct": false,
+          "why": "They play different roles: the description decides when, the body says how."
+        }
+      ],
+      "explain": "Skill descriptions are always in context, so they are capped and meant to say when to use the skill. Put the how in the body (and long references in supporting files), which load only when needed.",
+      "refs": [
+        "https://code.claude.com/docs/en/skills"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q16",
+      "domain": "claudecode",
+      "stem": "The team's auto memory index `MEMORY.md` has grown to 400 lines, with new entries appended at the bottom. Claude reliably uses older entries but seems unaware of anything added in the last month. What explains it, and what is the fix?",
+      "options": [
+        {
+          "text": "Auto memory reloads only after `/clear`, so restart every session",
+          "correct": false,
+          "why": "Auto memory is loaded at the start of each session; restarting does not reach the lower lines."
+        },
+        {
+          "text": "Newer entries are cached and older ones are not",
+          "correct": false,
+          "why": "Caching changes price, never what the model sees."
+        },
+        {
+          "text": "Auto memory is read only after compaction, so run `/compact` more often",
+          "correct": false,
+          "why": "It loads at session start; compaction re-injects it but does not lift the size limit."
+        },
+        {
+          "text": "Only the first 200 lines (or 25 KB) load; keep the index short and move details into topic files",
+          "correct": true,
+          "why": "Lines past the limit never reach the model, so an index that grows at the bottom hides its newest entries."
+        }
+      ],
+      "explain": "Claude Code loads the first 200 lines or 25 KB of auto memory each session. Keep the index as one line per entry and put details in separate files that Claude reads on demand.",
+      "refs": [
+        "https://code.claude.com/docs/en/memory"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q17",
+      "domain": "claudecode",
+      "stem": "The team's CLAUDE.md says 'never search `vendor/` or `dist/`'. The main session obeys, but when it delegates a codebase search to the built-in Explore subagent, that subagent spends most of its window grepping `vendor/`. What is happening, and what helps?",
+      "options": [
+        {
+          "text": "Subagents never load CLAUDE.md; move the rule to auto memory",
+          "correct": false,
+          "why": "Custom subagents do load CLAUDE.md, and no subagent loads auto memory, so this fixes nothing."
+        },
+        {
+          "text": "Explore skips CLAUDE.md; put the exclusion in the delegation prompt",
+          "correct": true,
+          "why": "Explore and Plan skip CLAUDE.md, so the subagent only knows what the delegation prompt tells it."
+        },
+        {
+          "text": "The subagent read the rule but the parent's later messages overrode it",
+          "correct": false,
+          "why": "A subagent sees none of the parent conversation, so nothing there can override it."
+        },
+        {
+          "text": "The rule needs to be repeated in a nested CLAUDE.md inside `vendor/`",
+          "correct": false,
+          "why": "Explore skips CLAUDE.md files, nested ones included, and that one would load only once `vendor/` is touched."
+        }
+      ],
+      "explain": "Subagents start with a clean window: their own system prompt, tools and the delegation prompt. Custom ones load CLAUDE.md; Explore and Plan skip it. Rules a subagent must follow belong in what you pass it, or in a hook if they must be enforced.",
+      "refs": [
+        "https://code.claude.com/docs/en/sub-agents"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q18",
+      "domain": "claudecode",
+      "stem": "A team skill has a 40-line SKILL.md and bundles a 3,000-line `migrate.py` that the instructions tell Claude to run. In a cost review, someone wants to delete the skill because 'the script costs thousands of tokens every turn'. What do you tell them?",
+      "options": [
+        {
+          "text": "They are right; supporting files load with the description",
+          "correct": false,
+          "why": "Only the description is always in context; supporting files load on demand."
+        },
+        {
+          "text": "Inline the script into SKILL.md so it is at least loaded once",
+          "correct": false,
+          "why": "That would put 3,000 lines into context on every invoke, which is the cost they fear."
+        },
+        {
+          "text": "The script is executed, not loaded; only its output enters context",
+          "correct": true,
+          "why": "Bundled scripts run as commands, so their source never reaches the model unless Claude chooses to read it."
+        },
+        {
+          "text": "It is cached after the first turn, so the cost is close to zero",
+          "correct": false,
+          "why": "Cached tokens are cheaper but still occupy the window; and the script is not in the window anyway."
+        }
+      ],
+      "explain": "Skills load in layers: description always, body on invoke, supporting files on demand, scripts executed. Pushing deterministic work into a bundled script is one of the cheapest ways to keep context small.",
+      "refs": [
+        "https://code.claude.com/docs/en/skills"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q19",
+      "domain": "claudecode",
+      "stem": "The team's root CLAUDE.md is 700 lines: shared rules, a payments-package section, a weekly deploy procedure and long maintainer notes meant for humans. You want to cut what it costs in context every session without losing anything. Which three changes actually do that? (Choose three.)",
+      "options": [
+        {
+          "text": "Move the deploy procedure into a skill",
+          "correct": true,
+          "why": "Only the skill's short description stays in context; the procedure loads when invoked."
+        },
+        {
+          "text": "Wrap the maintainer notes in HTML block comments",
+          "correct": true,
+          "why": "HTML block comments are stripped before CLAUDE.md reaches the model, so humans still see them for free."
+        },
+        {
+          "text": "Move the payments section to `packages/payments/CLAUDE.md`",
+          "correct": true,
+          "why": "Subdirectory CLAUDE.md files load on demand, only when Claude touches that directory."
+        },
+        {
+          "text": "Split the sections into files pulled in with `@imports`",
+          "correct": false,
+          "why": "Imports expand at load time, so the token cost stays the same."
+        },
+        {
+          "text": "Move the shared rules into auto memory instead",
+          "correct": false,
+          "why": "Auto memory also loads every session, is capped at 200 lines, and subagents do not see it."
+        },
+        {
+          "text": "Mark the less important sections as low priority",
+          "correct": false,
+          "why": "A label does not stop text from loading; it costs the same tokens."
+        }
+      ],
+      "explain": "What loads at session start is CLAUDE.md from cwd and parents, imports expanded, with HTML comments removed. To shrink it, move content somewhere that loads later: skills on invoke, nested CLAUDE.md on demand. Keep the root under about 200 lines.",
+      "refs": [
+        "https://code.claude.com/docs/en/memory",
+        "https://code.claude.com/docs/en/skills"
+      ]
+    },
+    {
+      "id": "ai-context-v5-q20",
+      "domain": "claudecode",
+      "stem": "The team's `researcher` subagent prompt ends with 'return the full contents of every file you read'. After three delegations, the main session's window has grown by about 150k tokens, and the main thread is getting less precise. What change keeps the benefit of delegating?",
+      "options": [
+        {
+          "text": "None needed: subagent output is cached, so it is free",
+          "correct": false,
+          "why": "Cached tokens still occupy the window, and the extra context is what hurts precision."
+        },
+        {
+          "text": "Run the three delegations in parallel so their output overlaps",
+          "correct": false,
+          "why": "Each report still lands in the main window in full; parallelism changes timing, not size."
+        },
+        {
+          "text": "Ask for a short distilled report with file paths and line numbers",
+          "correct": true,
+          "why": "Only the final report returns, so a 0.5–2k summary with pointers keeps the main window small and lets Claude read details on demand."
+        },
+        {
+          "text": "Stop using a subagent and run the research in the main session",
+          "correct": false,
+          "why": "That puts every file read into the main window, which is worse than a long report."
+        }
+      ],
+      "explain": "A subagent's value is its clean window plus a distilled answer. Only its final report enters the parent, so the delegation prompt should ask for a summary and identifiers (paths, ids) for just-in-time retrieval, not raw dumps.",
+      "refs": [
+        "https://code.claude.com/docs/en/sub-agents",
+        "https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents"
+      ]
+    }
+  ]
+}

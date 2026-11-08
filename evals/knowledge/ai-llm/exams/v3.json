@@ -1,0 +1,678 @@
+{
+  "topic": "ai-llm",
+  "variant": 3,
+  "of": 5,
+  "title": "How an LLM works — variant 3",
+  "description": "A help desk for teammates' strange model behaviour: letter counting, truncated output, nondeterminism, rejected sampling knobs, invented flags, unfaithful explanations and long-session decay.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "tokens",
+      "name": "Tokenization and embeddings",
+      "weight": 0.2
+    },
+    {
+      "id": "transformer",
+      "name": "Attention and the transformer block",
+      "weight": 0.2
+    },
+    {
+      "id": "generation",
+      "name": "Sampling, generation, KV cache and cost",
+      "weight": 0.2
+    },
+    {
+      "id": "training",
+      "name": "Training, post-training and hallucination",
+      "weight": 0.2
+    },
+    {
+      "id": "context",
+      "name": "Context window and current Claude facts",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "ai-llm-v3-q01",
+      "domain": "tokens",
+      "stem": "A teammate using Claude Code asks it to check that every generated slug has exactly 12 characters. Its answers about which slugs pass are often wrong, though its code suggestions are fine. What do you advise?",
+      "options": [
+        {
+          "text": "Ask it to write and run a small script that measures the lengths",
+          "correct": true,
+          "why": "Character counts are not in the model's input, which is token ids; code run through a tool measures characters exactly."
+        },
+        {
+          "text": "Rephrase the request more politely and add 'think carefully about each character'",
+          "correct": false,
+          "why": "More thought cannot recover information the input does not contain; the letters are hidden inside opaque tokens."
+        },
+        {
+          "text": "Split each slug with spaces so every character becomes its own word, then ask the model to count again",
+          "correct": false,
+          "why": "This can help a little, but it is still a guess by a predictor; running code is exact and cheaper to trust."
+        },
+        {
+          "text": "Switch to a model with a larger context window",
+          "correct": false,
+          "why": "Window size is not the issue; a slug is only a few tokens."
+        }
+      ],
+      "explain": "Models read token ids, not characters. For anything that depends on exact characters (lengths, counts, reversals, hashes), have the model write code and run it.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://arxiv.org/abs/1508.07909"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q02",
+      "domain": "tokens",
+      "stem": "A teammate sets `max_tokens: 500` because the spec says 'summaries of at most 500 words'. Many responses stop mid-sentence with `stop_reason: \"max_tokens\"`. What is going on?",
+      "options": [
+        {
+          "text": "The model ignores the word limit in the prompt and pads its answers",
+          "correct": false,
+          "why": "The prompt asked for 500 words; the cut comes from a token cap that is smaller than 500 words."
+        },
+        {
+          "text": "500 tokens is far fewer than 500 words, so the cap cuts off text the model was still producing",
+          "correct": true,
+          "why": "On the current tokenizer 1M tokens ≈ 555k words, so 500 tokens is only about 280 English words."
+        },
+        {
+          "text": "`max_tokens` counts characters, so 500 is only about 100 words of output",
+          "correct": false,
+          "why": "It counts tokens, not characters."
+        },
+        {
+          "text": "Streaming responses always stop at the first sentence boundary after 500 tokens, so the cut-off point drifts from run to run",
+          "correct": false,
+          "why": "Generation stops at the end token or the limit, wherever that falls, not at a sentence boundary."
+        }
+      ],
+      "explain": "Generation is a loop that stops at an end token or at the token limit. Tokens are not words: set `max_tokens` with headroom over the expected output in tokens, and treat `stop_reason: \"max_tokens\"` as truncation.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/token-counting",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q03",
+      "domain": "tokens",
+      "stem": "Before running a support-ticket batch that mixes emoji, Georgian and Japanese text, a teammate worries that the model will hit 'unknown token' errors and fail on characters outside its vocabulary. What do you tell them?",
+      "options": [
+        {
+          "text": "They are right; strip non-ASCII characters before sending",
+          "correct": false,
+          "why": "That throws away content for no reason; the tokenizer can encode any text."
+        },
+        {
+          "text": "Byte-level BPE can encode any text, so there are no unknown tokens, though such text uses more tokens",
+          "correct": true,
+          "why": "Production tokenizers fall back to bytes, so nothing is unrepresentable; rarer scripts just split into more pieces."
+        },
+        {
+          "text": "Unknown characters are replaced with a single placeholder token, so meaning is lost but nothing fails",
+          "correct": false,
+          "why": "Byte-level tokenizers do not need a placeholder; every byte has a representation."
+        },
+        {
+          "text": "Each Unicode character always maps to exactly one token, so cost and coverage are the same as for English",
+          "correct": false,
+          "why": "Token counts vary by script and frequency; rare characters can take several byte tokens."
+        }
+      ],
+      "explain": "Byte-level BPE starts from the 256 byte values and merges frequent pairs, so it can encode any input. The trade-off is cost: text unlike the tokenizer's training data takes more tokens.",
+      "refs": [
+        "https://arxiv.org/abs/1508.07909",
+        "https://github.com/karpathy/minbpe"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q04",
+      "domain": "tokens",
+      "stem": "A teammate notices that Claude treats `colour` and `color`, or `rm` and `delete`, as nearly interchangeable when reading code reviews, even though the strings share few characters. Which part of the mechanism best accounts for that?",
+      "options": [
+        {
+          "text": "The model runs a spell-checker before the transformer",
+          "correct": false,
+          "why": "There is no spell-checking stage; the model only sees ids and learned vectors."
+        },
+        {
+          "text": "A hard-coded synonym list ships with the tokenizer",
+          "correct": false,
+          "why": "Tokenizers split text; they hold no synonym knowledge."
+        },
+        {
+          "text": "Tokens used in similar contexts end up with nearby learned vectors, so the model treats them alike",
+          "correct": true,
+          "why": "Embeddings are learned from usage, and the layers above build on them; similar usage leads to nearby representations."
+        },
+        {
+          "text": "Both strings tokenize to the same id, so the model literally cannot tell them apart in any context at all",
+          "correct": false,
+          "why": "They are different ids; similarity comes from learned vectors, not identical ids."
+        }
+      ],
+      "explain": "Embedding rows are learned: tokens that appear in similar contexts get nearby vectors. That, not spelling, is why the model generalises across synonyms and spelling variants.",
+      "refs": [
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q05",
+      "domain": "transformer",
+      "stem": "You open an attention visualisation for one head of an open-weight model (`d_k = 64`). For the current query, the raw scores against three earlier keys are `[8, 8, 0]`. What weights should the visualiser show?",
+      "options": [
+        {
+          "text": "About [0.5, 0.5, 0.0]",
+          "correct": false,
+          "why": "The third key still gets weight: softmax gives exactly 0 only to masked (−∞) scores."
+        },
+        {
+          "text": "About [0.422, 0.422, 0.155]",
+          "correct": true,
+          "why": "Scale by 1/8 to get [1, 1, 0]; exp gives [2.718, 2.718, 1.000], sum 6.437."
+        },
+        {
+          "text": "About [0.665, 0.245, 0.090], since the first key always wins ties",
+          "correct": false,
+          "why": "Those are the weights for scaled scores [2, 1, 0]; equal scores get equal weight."
+        },
+        {
+          "text": "About [0.333, 0.333, 0.333], because scaling by √64 = 8 flattens every set of scores to a uniform split",
+          "correct": false,
+          "why": "Scaling shrinks the gap but does not remove it; [1, 1, 0] is still uneven after softmax."
+        }
+      ],
+      "explain": "Attention weights = softmax(QKᵀ/√d_k). Equal scores share weight equally; lower scores get less but never exactly zero unless masked with −∞.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://jalammar.github.io/illustrated-transformer/"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q06",
+      "domain": "transformer",
+      "stem": "A teammate puts a 200k-token log first and their question last, then worries: 'the log tokens were processed before the question, and the causal mask stops them from seeing it, so the model can't use the log to answer.' What is the accurate picture?",
+      "options": [
+        {
+          "text": "They are right; put the question first so every log token can attend to it",
+          "correct": false,
+          "why": "Putting it first helps the log tokens see it, but the answer is generated after both anyway; the worry misreads where the answer comes from."
+        },
+        {
+          "text": "The worry is unfounded: the answer is generated after both, and each new token attends to the log and the question",
+          "correct": true,
+          "why": "Causal masking stops earlier positions from seeing later ones, but every generated position comes last and attends to all of the prompt."
+        },
+        {
+          "text": "The causal mask is only used in training, so at inference every token sees every other token",
+          "correct": false,
+          "why": "Decoders apply the causal mask at inference too; later positions just happen to see everything earlier."
+        },
+        {
+          "text": "The model reads the prompt right to left, so the question is in fact processed first",
+          "correct": false,
+          "why": "Decoder-only models process positions left to right; nothing reverses the order."
+        }
+      ],
+      "explain": "In a decoder, position i attends to positions ≤ i. The answer's tokens come after the whole prompt, so they can draw on all of it; what matters more for long inputs is context rot, not masking.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://www.trychroma.com/research/context-rot"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q07",
+      "domain": "transformer",
+      "stem": "A teammate building a toy transformer asks why the model uses 8 heads of size 64 instead of one head of size 512 with the same total width. What is the best answer?",
+      "options": [
+        {
+          "text": "Several heads let different heads attend to different relations at the same time, each over its own subspace",
+          "correct": true,
+          "why": "Multi-head attention runs independent attention patterns in parallel, so one head can track one relation while another tracks something else."
+        },
+        {
+          "text": "Eight heads make the model eight times larger, which improves quality",
+          "correct": false,
+          "why": "The total width stays 512; splitting into heads does not multiply parameters."
+        },
+        {
+          "text": "One head of 512 cannot be computed on a GPU",
+          "correct": false,
+          "why": "A single wide head is computable; it simply forces one attention pattern per position."
+        },
+        {
+          "text": "Heads exist so each one can read a different fixed window of the text, the first head seeing the first 64 tokens and so on",
+          "correct": false,
+          "why": "Heads split the vector dimensions, not the sequence; every head can attend to every earlier position."
+        }
+      ],
+      "explain": "Multi-head attention splits d_model into h heads (for example 8 × 64 = 512). Each computes its own softmax pattern, and their outputs are concatenated and projected back into the residual stream.",
+      "refs": [
+        "https://arxiv.org/abs/1706.03762",
+        "https://transformer-circuits.pub/2021/framework/index.html"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q08",
+      "domain": "transformer",
+      "stem": "A toy model trains badly after a refactor. The block now reads `x = attn(norm(x)); x = mlp(norm(x));` where it used to read `x = x + attn(norm(x)); x = x + mlp(norm(x));`. What did the refactor break?",
+      "options": [
+        {
+          "text": "Layer norm is now applied twice, which cancels out",
+          "correct": false,
+          "why": "Norm was applied twice before too; the change is the missing addition."
+        },
+        {
+          "text": "Attention can now see future tokens, because dropping the addition also removed the causal mask from the scores",
+          "correct": false,
+          "why": "Masking is untouched; the refactor removed the residual connections."
+        },
+        {
+          "text": "The residual connections: each block should add to x, keeping earlier information and a direct gradient path",
+          "correct": true,
+          "why": "Without `x +`, each block overwrites the stream, losing earlier information and making deep stacks hard to train."
+        },
+        {
+          "text": "The MLP now runs before attention",
+          "correct": false,
+          "why": "The order is unchanged: attention, then MLP."
+        }
+      ],
+      "explain": "Pre-norm transformer blocks compute x = x + Attn(Norm(x)) and x = x + MLP(Norm(x)). The running x is the residual stream; blocks read from it and add to it.",
+      "refs": [
+        "https://transformer-circuits.pub/2021/framework/index.html",
+        "https://arxiv.org/abs/1706.03762"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q09",
+      "domain": "generation",
+      "stem": "On an open-weight model served by a teammate, greedy decoding (temperature 0) gives slightly different outputs for the same prompt on different runs. They assumed temperature 0 means fully deterministic. What is the likely explanation?",
+      "options": [
+        {
+          "text": "Temperature 0 still samples from the top two tokens",
+          "correct": false,
+          "why": "Greedy decoding takes the single most probable token; there is no hidden top-2 sampling."
+        },
+        {
+          "text": "The model updates its weights after each request",
+          "correct": false,
+          "why": "Weights are frozen at inference; nothing learns between requests."
+        },
+        {
+          "text": "The logits can differ slightly between runs because batching changes the floating-point reduction order",
+          "correct": true,
+          "why": "Greedy picks the argmax, but tiny numeric differences from batching can flip near-ties; this is the commonly reported cause."
+        },
+        {
+          "text": "Temperature 0 divides the logits by zero, which produces random values",
+          "correct": false,
+          "why": "Implementations treat T = 0 as argmax rather than dividing by zero."
+        }
+      ],
+      "explain": "Temperature 0 means 'take the argmax', but the logits themselves can vary across runs with batching and floating-point order. On current Claude models temperature cannot be set at all, so design for variation.",
+      "refs": [
+        "https://arxiv.org/abs/1904.09751",
+        "https://platform.claude.com/docs/en/build-with-claude/thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q10",
+      "domain": "generation",
+      "stem": "On an open-weight model, a teammate's next-token probabilities are `[0.563, 0.207, 0.126, 0.076, 0.028]` for `[the, a, cat, dog, ran]`. They enable top-p (nucleus) sampling with p = 0.9. Which tokens remain candidates?",
+      "options": [
+        {
+          "text": "the, a, cat",
+          "correct": false,
+          "why": "Their cumulative mass is 0.896, just below 0.9, so one more token is needed."
+        },
+        {
+          "text": "the, a, cat, dog",
+          "correct": true,
+          "why": "Cumulative mass: 0.563, 0.770, 0.896, 0.972. The smallest set reaching 0.9 includes dog, and ran is dropped."
+        },
+        {
+          "text": "the, a",
+          "correct": false,
+          "why": "That is a top-k = 2 cut, not top-p = 0.9."
+        },
+        {
+          "text": "Every token whose own probability is at least 0.1",
+          "correct": false,
+          "why": "Top-p keeps the smallest set whose cumulative probability reaches p, not tokens above a fixed threshold."
+        }
+      ],
+      "explain": "Top-p keeps the smallest set of most-likely tokens whose probabilities add up to at least p, then renormalises. It adapts the candidate count to how confident the model is.",
+      "refs": [
+        "https://arxiv.org/abs/1904.09751"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q11",
+      "domain": "generation",
+      "stem": "A wrapper sends `top_p: 0.95` by default. It worked for months with an older Claude model whenever thinking was off. After switching the model id to `claude-sonnet-5-5`, every call returns 400. Why the change?",
+      "options": [
+        {
+          "text": "Sonnet 5.5 requires `top_p` to be set together with `top_k`",
+          "correct": false,
+          "why": "Setting more knobs does not help; non-default sampling parameters are rejected on current models."
+        },
+        {
+          "text": "Older models rejected sampling knobs only while thinking was on; current models reject non-default values on every request",
+          "correct": true,
+          "why": "On Opus 4.7+, all 5.x and Fable, a non-default `temperature`, `top_p` or `top_k` returns 400 always."
+        },
+        {
+          "text": "Sonnet 5.5 accepts only `top_p` values under 0.9",
+          "correct": false,
+          "why": "There is no accepted range; any non-default value returns 400."
+        },
+        {
+          "text": "The call is rejected because thinking is always forced on for Sonnet 5.5, and thinking forbids sampling knobs",
+          "correct": false,
+          "why": "The 400 does not depend on thinking on current models; the knobs are rejected outright."
+        }
+      ],
+      "explain": "On current Claude models, steer with prompts and `effort`, not sampling knobs. With API version 2026-10-21 any value of these parameters returns 400 on every model, so strip them from shared wrappers.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/thinking",
+        "https://platform.claude.com/docs/en/build-with-claude/extended-thinking"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q12",
+      "domain": "generation",
+      "stem": "A teammate's open-weight chatbot uses greedy decoding and often falls into repeating the same sentence over and over. Which change targets that failure?",
+      "options": [
+        {
+          "text": "Switch to nucleus (top-p) sampling so it draws from the probable set instead of always taking the top token",
+          "correct": true,
+          "why": "Greedy and beam decoding are known to produce repetitive, degenerate text; nucleus sampling was proposed to fix it."
+        },
+        {
+          "text": "Raise `max_tokens` so the repetition has room to resolve",
+          "correct": false,
+          "why": "More room produces more repetition; the loop comes from always picking the argmax."
+        },
+        {
+          "text": "Shorten the prompt so the model has fewer earlier sentences available to copy back into its output",
+          "correct": false,
+          "why": "Prompt length is not what causes greedy repetition loops."
+        },
+        {
+          "text": "Lower the temperature further below its current setting",
+          "correct": false,
+          "why": "Greedy is already the lowest; lowering temperature only sharpens toward the same argmax."
+        }
+      ],
+      "explain": "Always taking the most probable token tends to produce bland, repetitive text. Sampling with temperature and top-p trades a little probability for diversity, on models that allow those knobs.",
+      "refs": [
+        "https://arxiv.org/abs/1904.09751"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q13",
+      "domain": "training",
+      "stem": "Asked about your internal deploy CLI, Claude Code confidently recommends a `--dry-run-all` flag that the CLI does not have. A teammate wants to report it as a bug to be patched. What is a better response?",
+      "options": [
+        {
+          "text": "Report it as a model bug and wait for a release that patches this specific flag out of the model",
+          "correct": false,
+          "why": "Fabrication is not a single bug; it comes from how models are trained and evaluated."
+        },
+        {
+          "text": "Have it read the CLI's `--help` or source through a tool and say when a flag is not documented",
+          "correct": true,
+          "why": "Grounding in the real interface plus permission to say 'not found' addresses the structural cause."
+        },
+        {
+          "text": "Set a lower temperature in Claude Code so it picks the safest flag",
+          "correct": false,
+          "why": "Sampling knobs are rejected on current models, and the most probable flag can still be invented."
+        },
+        {
+          "text": "Give it more examples of other CLIs' flags so it generalises better",
+          "correct": false,
+          "why": "More look-alike flags make plausible inventions more likely, not less."
+        }
+      ],
+      "explain": "Models generate likely text. For anything private or newer than training, give the source of truth through tools and explicitly allow 'I don't know'.",
+      "refs": [
+        "https://arxiv.org/abs/2509.04664"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q14",
+      "domain": "training",
+      "stem": "Claude explains a multi-digit addition step by step using carrying, and a teammate takes that explanation as a trace of what the model did internally. What does Anthropic's interpretability research suggest?",
+      "options": [
+        {
+          "text": "The explanation is a faithful trace of the computation",
+          "correct": false,
+          "why": "Interpretability work found the stated method and the internal one can differ."
+        },
+        {
+          "text": "Models cannot do arithmetic at all; the explanation is invented and so is the answer",
+          "correct": false,
+          "why": "The research found real internal arithmetic paths; the issue is that the explanation does not describe them."
+        },
+        {
+          "text": "The model can describe schoolbook carrying while internally combining a rough-magnitude path with an exact last-digit path",
+          "correct": true,
+          "why": "Anthropic's 'Tracing the thoughts' work found parallel approximate and last-digit pathways that differ from the explanation given."
+        },
+        {
+          "text": "Explanations are faithful only when temperature is 0",
+          "correct": false,
+          "why": "Faithfulness is not a sampling setting; the explanation is generated text like any other."
+        }
+      ],
+      "explain": "A model's account of its own reasoning is generated text, not a trace. Verify answers by checking them, not by trusting the explanation.",
+      "refs": [
+        "https://www.anthropic.com/research/tracing-thoughts-language-model"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q15",
+      "domain": "training",
+      "stem": "A teammate asks how a model learns to decline harmful requests without humans labelling every possible case. Which post-training approach fits that description?",
+      "options": [
+        {
+          "text": "Pretraining on more web text until refusals appear",
+          "correct": false,
+          "why": "Pretraining teaches continuation of text, not a policy of when to decline."
+        },
+        {
+          "text": "A filter list of banned words applied to the output",
+          "correct": false,
+          "why": "Word filters are not training; they are brittle and do not teach the model."
+        },
+        {
+          "text": "AI feedback against a written set of principles, as in Constitutional AI and RLAIF",
+          "correct": true,
+          "why": "A model critiques and ranks outputs against principles, replacing much of the human labelling in preference training."
+        },
+        {
+          "text": "Lowering the sampling temperature so the model only ever produces the single safest continuation",
+          "correct": false,
+          "why": "Sampling changes which continuation is drawn, not what the model has learned is acceptable."
+        }
+      ],
+      "explain": "Post-training shapes behaviour after pretraining: supervised fine-tuning, RLHF from human preferences, RLAIF and Constitutional AI from AI feedback against principles, and RL with verifiable rewards.",
+      "refs": [
+        "https://arxiv.org/abs/2212.08073",
+        "https://arxiv.org/abs/2309.00267"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q16",
+      "domain": "training",
+      "stem": "Teammates notice the model sounds equally confident when it is right and when it is wrong, and ask why years of training have not removed confident wrong answers. Which explanation fits current research?",
+      "options": [
+        {
+          "text": "Confidence is set by the temperature, which is too low",
+          "correct": false,
+          "why": "Tone is not a sampling setting, and temperature cannot be changed on current Claude models anyway."
+        },
+        {
+          "text": "Training matches probabilities of text, and common benchmarks reward a guess over 'I don't know', so guessing is reinforced",
+          "correct": true,
+          "why": "Research on hallucination argues that binary-graded evaluations make guessing the score-maximising strategy."
+        },
+        {
+          "text": "The model is unaware of its own uncertainty because it has no probabilities internally",
+          "correct": false,
+          "why": "It computes a probability for every next token; the problem is how training and evals reward expressing it."
+        },
+        {
+          "text": "Confident errors only occur on topics after the knowledge cutoff, so they will disappear as models get retrained more often",
+          "correct": false,
+          "why": "Fabrication also happens on old, well-covered topics; it is structural, not only a cutoff issue."
+        }
+      ],
+      "explain": "Hallucination is structural: probability matching plus evaluations that reward guessing. Mitigate with grounding, scoring that rewards abstention, and prompts that allow uncertainty.",
+      "refs": [
+        "https://arxiv.org/abs/2509.04664",
+        "https://www.anthropic.com/research/tracing-thoughts-language-model"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q17",
+      "domain": "context",
+      "stem": "A teammate pastes a 300k-token log with one critical instruction buried around the middle. The model follows it reliably when it sits at the very start or end, but often ignores it in the middle. What explains this?",
+      "options": [
+        {
+          "text": "Models use information in long inputs unevenly, and the middle is used least well",
+          "correct": true,
+          "why": "Long-context studies found recall drops for information in the middle of long inputs, and accuracy degrades as inputs grow."
+        },
+        {
+          "text": "The middle of the input was silently truncated",
+          "correct": false,
+          "why": "Over-window input returns 400; nothing is silently dropped from the middle."
+        },
+        {
+          "text": "The causal mask hides the middle of the prompt from the answer",
+          "correct": false,
+          "why": "The answer attends to all earlier positions; the mask hides only later ones."
+        },
+        {
+          "text": "The tokenizer merges the middle of very long inputs into summary tokens to save space before the model reads them",
+          "correct": false,
+          "why": "Tokenizers map text to ids; they do not summarise."
+        }
+      ],
+      "explain": "Context rot: accuracy and recall degrade with input length, and position matters. Keep long inputs focused and put critical instructions where they are used well, or extract the relevant part first.",
+      "refs": [
+        "https://arxiv.org/abs/2307.03172",
+        "https://www.trychroma.com/research/context-rot",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q18",
+      "domain": "context",
+      "stem": "A teammate says 'Claude remembers our project between sessions because it knows our conventions on day two.' They use Claude Code with a CLAUDE.md and memory files. What is actually happening?",
+      "options": [
+        {
+          "text": "Claude fine-tunes a private copy of itself on each project",
+          "correct": false,
+          "why": "Weights are frozen at inference; there is no per-project training."
+        },
+        {
+          "text": "The model is stateless; Claude Code re-sends CLAUDE.md and memory files as context on each session",
+          "correct": true,
+          "why": "Persistence lives in the app: it loads files into each request, and the model reads them fresh."
+        },
+        {
+          "text": "Anthropic's servers keep a summary of each conversation and inject it into the next one",
+          "correct": false,
+          "why": "The API is stateless; any memory has to be sent in the request by the client."
+        },
+        {
+          "text": "The conventions are in the model's training data because the project is on GitHub",
+          "correct": false,
+          "why": "That might be true for public code, but here it is the loaded files that carry the conventions."
+        }
+      ],
+      "explain": "Every API call carries the whole context. 'Memory' in tools like Claude Code is files the app re-sends; to change what the model knows next time, change those files.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q19",
+      "domain": "context",
+      "stem": "A teammate's agent loop keeps appending tool results until a request fails with 400 'prompt is too long' on Sonnet 5.5. Which response deals with the cause?",
+      "options": [
+        {
+          "text": "Retry the same request; the error is transient",
+          "correct": false,
+          "why": "The input exceeds the window; resending it fails again."
+        },
+        {
+          "text": "Lower `max_tokens` so the input has more room",
+          "correct": false,
+          "why": "Shrinking output does not help when the input alone is over the window."
+        },
+        {
+          "text": "Trim, summarise or compact older turns and tool results so the input fits",
+          "correct": true,
+          "why": "Input over the window returns 400; reduce what is sent, by hand or with server-side compaction (beta)."
+        },
+        {
+          "text": "Switch to a model with a larger window; one bigger than 1M will hold the full history",
+          "correct": false,
+          "why": "Current Claude models top out at 1M, and filling it worsens context rot anyway."
+        }
+      ],
+      "explain": "Input above the window returns 400 'prompt is too long'. Agent loops need a strategy for old turns: drop, summarise or compact them. Smaller contexts also work better.",
+      "refs": [
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    },
+    {
+      "id": "ai-llm-v3-q20",
+      "domain": "context",
+      "stem": "After four hours in one Claude Code session, a teammate sees it repeat old mistakes and miss instructions given early on. Which explanations and fixes are sound? (Choose two.)",
+      "options": [
+        {
+          "text": "Quality degrades as the window fills (context rot), so long sessions get less reliable",
+          "correct": true,
+          "why": "Accuracy and recall fall as context grows, and early instructions end up far back in a long input."
+        },
+        {
+          "text": "Start a fresh session or compact with a short summary of decisions, and keep durable rules in CLAUDE.md",
+          "correct": true,
+          "why": "A smaller, curated context restores focus; durable rules are re-sent from files each session."
+        },
+        {
+          "text": "The model's weights tire after many tokens and need a cool-down",
+          "correct": false,
+          "why": "Weights do not change at inference; there is nothing to tire."
+        },
+        {
+          "text": "The KV cache overflows and corrupts older tokens",
+          "correct": false,
+          "why": "A cache is an optimisation; if input exceeds the window the request fails with 400 rather than corrupting."
+        },
+        {
+          "text": "Raise the temperature so it explores away from the old mistakes",
+          "correct": false,
+          "why": "Sampling knobs return 400 on current models and do not address an overloaded context."
+        }
+      ],
+      "explain": "Long sessions accumulate irrelevant context, which degrades results. Curate: compact or restart, and keep lasting rules in files the tool re-sends.",
+      "refs": [
+        "https://www.trychroma.com/research/context-rot",
+        "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+      ]
+    }
+  ]
+}

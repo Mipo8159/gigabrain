@@ -11,6 +11,7 @@
 | clasico | `sweeft/clasico` | **client** | paid work: `core` (NestJS/Nx: domain modules, advertisements), `admin` (React), `push` (Python FCM job). Onboarded 2026-10-02: local CLAUDE.md per repo + guard hook | **local only**, shared by all 3 repos: `~/.claude/projects/-home-mip-Desktop-workdir-sweeft-clasico/memory` |
 | lutecia | `sweeft/lutecia` | **client** | remote-only: live Bitrix server over SSH as root, no local code. Onboarded 2026-10-02: CLAUDE.md + guard hook (secrets deny, ssh ask) | **local only**: `~/.claude/projects/-home-mip-Desktop-workdir-sweeft-lutecia/memory` |
 | work (employer) | listed in `kit/projects.local.json` (gitignored) | **client** (employer) | Employer workspace and team repos. Onboarded 2026-10-19/20 with local CLAUDE.md files and ask rules. Its facts live only in local files | **local only** |
+| toy-llm | `~/projects/labs/toy-llm` | lab | lesson `ai-llm` hands-on: char tokenizer, byte BPE, bigram, NLL, sampler (TS, node:test, 0 deps); tutor mode, Giga writes every TODO. Proven 2026-11-07: reference 25/25, stubs 0/25 | none |
 
 Client rows: lessons may be generalised into `brain/`; facts, code and data
 never leave the machine.
