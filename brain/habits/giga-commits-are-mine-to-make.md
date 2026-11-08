@@ -38,4 +38,12 @@ upstream exists).
   they belong to *before* the first push (6 commits squashed to 3 after the fact cost
   a backup branch, a force-push and a CI rerun).
 
+**Gigabrain itself (2026-11-08):** `/retro` commits only `brain/ me/ ai-craft/`, so
+gigabrain tooling built in a session (a hook in `global/hooks/`, eval briefs/exams,
+`labs.md`) stayed uncommitted though already live, until Giga asked "commit and push all
+the coaching stuff … so that on session reload it is all applied". **Next time:** at the
+end of a retro, list gigabrain files changed *outside* those three dirs this session and
+offer one line: "also commit X, Y? (live but uncommitted)". Commit only the session's own
+files; unrelated pending edits are named, never swept in, unless Giga says "the rest too".
+
 Related: [[working-style-interview-then-autonomous-loop]], [[pr-body-sized-to-the-diff]].
