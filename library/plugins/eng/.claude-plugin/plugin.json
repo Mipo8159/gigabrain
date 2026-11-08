@@ -1,0 +1,5 @@
+{
+  "name": "eng",
+  "description": "Engineering practice skills that never fired in 35 days as globals (moved 2026-11-06): ADRs, contract-first, hexagonal architecture, legacy style rules, loop design check, production audit, search-first, secure coding, verification loop. Enabled by kit for the nest stack; elsewhere: claude plugin install eng@gigabrain --scope local.",
+  "version": "1.0.0"
+}

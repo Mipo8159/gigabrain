@@ -41,6 +41,7 @@ SUSPECT = re.compile(r"\becc\b|everything-claude|homunculus|instinct|/ecc:|CLAUD
 def resolve_local(key, src):
     """sources.json 'local' is per machine; fall back to $GIGABRAIN_UPSTREAM/<key>
     (default ~/.cache/gigabrain/upstream/<key>) when that path is absent here."""
+    src["local"] = str(pathlib.Path(src["local"]).expanduser())
     if not pathlib.Path(src["local"]).is_dir():
         base = os.environ.get("GIGABRAIN_UPSTREAM", str(pathlib.Path.home() / ".cache/gigabrain/upstream"))
         src["local"] = str(pathlib.Path(base) / key)

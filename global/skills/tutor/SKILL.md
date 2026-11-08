@@ -17,6 +17,12 @@ Before anything, state the split in two lines:
 - **Giga writes:** the 10–60 lines that *are* the concept (the outbox relay
   loop, the idempotency check, the compensation step…). Mark each spot with
   `// TODO(giga): <what this must do>` in the code.
+- **Keep the stub off shared paths.** Only Giga's own spec tests may reach a
+  TODO stub: with it in place, exactly those tests are red and everything else is
+  green (2026-10-06: a stubbed field in every response turned 22 unrelated tests
+  red). Prove the scaffold by swapping in a reference implementation from the
+  scratchpad, running the full suite, then restoring the stub (never leave the
+  solution in `src/`).
 
 ## The loop
 

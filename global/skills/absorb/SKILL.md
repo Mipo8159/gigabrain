@@ -16,6 +16,10 @@ evidence for it. Read `G/library/README.md` first; it is the contract.
 Modes: `/absorb <source>` (first import or add items), `/absorb <source> --update`
 (refresh to upstream HEAD), `/absorb <git-url>` (new source).
 
+Clones live in `~/.cache/gigabrain/upstream/<key>` (the scripts' fallback), never in
+`~/projects`. A clone read only for comparison and not registered in `sources.json`
+is deleted before the session ends (2026-11-06: two such clones, 330 MB, lingered).
+
 ## 1. Stack filter (what is worth reading at all)
 
 Giga's stack: Node/TypeScript (Nest), React, Python (FastAPI), Go, Postgres,
@@ -30,6 +34,9 @@ own tooling) and anything an installed plugin already covers officially.
 - **New source:** clone it read-only next to gigabrain
   (`~/projects/<name>`) and check the licence. If there is none, or it isn't
   permissive, stop and tell Giga. Otherwise add an entry to `library/sources.json`.
+  Take stars, last push and `license.spdx_id` from the GitHub API
+  (`gh api repos/<o>/<r>`), not search snippets; on `NOASSERTION` read the LICENSE
+  file itself (an MIT-0 samples repo reported NOASSERTION, 2026-10-05).
 - **`--update`:** `git -C <local> fetch`, then `bin/check-library.py --drift`.
   For each commit touching absorbed paths, read the diff
   (`git -C <local> diff <pin>..origin/<branch> -- <path>`) and classify:

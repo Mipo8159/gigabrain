@@ -237,18 +237,19 @@ def kit_cases():
     local.write_text(json.dumps(s))
     kit("apply", str(repo))
     s = json.loads(local.read_text())
-    check("plugins: user's false for a stack plugin is kept", s["enabledPlugins"] == {"mine@x": True, "deploy@gigabrain": False})
+    check("plugins: user's false for a stack plugin is kept", {k: v for k, v in s["enabledPlugins"].items() if k != "eng@gigabrain"} == {"mine@x": True, "deploy@gigabrain": False})  # nest fixture also enables eng
     s["enabledPlugins"].pop("deploy@gigabrain")
     local.write_text(json.dumps(s))
     kit("apply", str(repo))
     s = json.loads(local.read_text())
+    check("plugins: nest stack enables eng@gigabrain (2026-11-06)", s["enabledPlugins"].get("eng@gigabrain") is True)
     check("plugins: docker stack enables deploy@gigabrain", s["enabledPlugins"].get("deploy@gigabrain") is True
           and s["enabledPlugins"].get("mine@x") is True)
     req["exclude_stacks"] = ["docker"]
     (repo / ".claude/gigabrain.json").write_text(json.dumps(req))
     kit("apply", str(repo))
     s = json.loads(local.read_text())
-    check("plugins: excluded stack drops only kit's plugin", s["enabledPlugins"] == {"mine@x": True})
+    check("plugins: excluded stack drops only kit's plugin", {k: v for k, v in s["enabledPlugins"].items() if k != "eng@gigabrain"} == {"mine@x": True})
     req["exclude_stacks"] = []
     (repo / ".claude/gigabrain.json").write_text(json.dumps(req))
     kit("apply", str(repo))

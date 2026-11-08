@@ -40,7 +40,7 @@ Examples:
 | --- | --- |
 | Verifying whether output is correct | the `verifier` agent |
 | Breaking a feature into implementation steps | plan mode or `build-loop` |
-| Designing system architecture | plan mode, then an ADR (`architecture-decision-records`) |
+| Designing system architecture | plan mode, then an ADR (`eng:architecture-decision-records`) |
 | Reviewing code for bugs or security | the `reviewer` agent |
 | Straight factual questions | just answer directly |
 | Obvious execution tasks | just do the task |
@@ -161,7 +161,7 @@ Keep it scannable on a phone screen.
 Do **not** write ad-hoc notes to `~/.claude/notes` or other shadow paths from this skill.
 
 If the council materially changes the recommendation:
-- record it as an ADR (`architecture-decision-records`) if it becomes long-lived system policy
+- record it as an ADR (`eng:architecture-decision-records`) if it becomes long-lived system policy
 - or let `/retro` capture the lesson at session end
 - or update the relevant issue directly if the decision changes active execution truth
 
@@ -186,7 +186,7 @@ If the user wants another round:
 
 ## Related Skills
 
-- Skills: `architecture-decision-records`, `search-first`
+- Skills: `eng:architecture-decision-records`, `eng:search-first`
 
 ## Example
 

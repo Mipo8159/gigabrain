@@ -74,4 +74,4 @@ type system or by hope).
 - Language-specific safety (`any` leaks in general, floating promises):
   `typescript.md`, `python.md`, `go.md`.
 - Schema and migration correctness: `database.md`. API contract drift between
-  services: the `contract-first` skill.
+  services: the `eng:contract-first` skill (opt-in plugin `eng`).

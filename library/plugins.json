@@ -1,37 +1,6 @@
 {
   "about": "Opt-in library skills, grouped into plugins of the local 'gigabrain' marketplace (library/.claude-plugin/marketplace.json). A skill listed here is written by bin/absorb-adapt.py to library/plugins/<plugin>/skills/<name>/ instead of library/skills/<name>/, so it loads only in projects that enable the plugin: claude plugin install <plugin>@gigabrain --scope local. Skills not listed stay global (symlinked into ~/.claude/skills by bin/install.sh). Plugin skills are invoked as /<plugin>:<skill>. Decided 2026-10-12 (roadmap phase 1).",
   "plugins": {
-    "homelab": {
-      "description": "Home network and network-device skills: Cisco IOS, Netmiko, BGP, interface health, config validation, VLANs, Pi-hole, WireGuard.",
-      "skills": [
-        "cisco-ios-patterns",
-        "netmiko-ssh-automation",
-        "network-bgp-diagnostics",
-        "network-config-validation",
-        "network-interface-health",
-        "homelab-network-readiness",
-        "homelab-network-setup",
-        "homelab-pihole-dns",
-        "homelab-vlan-segmentation",
-        "homelab-wireguard-vpn"
-      ]
-    },
-    "media": {
-      "description": "Generated media: Manim explainer animations and fal.ai image/video/audio generation.",
-      "skills": [
-        "manim-video",
-        "fal-ai-media"
-      ]
-    },
-    "content": {
-      "description": "Marketing and outreach: content engine, brand voice, email ops, SEO.",
-      "skills": [
-        "content-engine",
-        "brand-voice",
-        "email-ops",
-        "seo"
-      ]
-    },
     "knowledge": {
       "description": "Backend stack knowledge with no measured lift over vanilla Claude (opt-in, no stack enables it): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14.",
       "skills": [
@@ -84,19 +53,18 @@
         "mcp-server-patterns"
       ]
     },
-    "video": {
-      "description": "Video: Remotion, editing workflows, VideoDB, Playwright UI demo recordings. Enabled by kit for the remotion stack.",
+    "eng": {
+      "description": "Engineering practice skills that never fired in 35 days as globals (moved 2026-11-06): ADRs, contract-first, hexagonal architecture, legacy style rules, loop design check, production audit, search-first, secure coding, verification loop. Enabled by kit for the nest stack; elsewhere: claude plugin install eng@gigabrain --scope local.",
       "skills": [
-        "remotion-video-creation",
-        "video-editing",
-        "videodb",
-        "ui-demo"
-      ]
-    },
-    "email": {
-      "description": "Transactional email via Mailtrap. Enabled by kit for the email stack.",
-      "skills": [
-        "mailtrap-email-integration"
+        "architecture-decision-records",
+        "contract-first",
+        "hexagonal-architecture",
+        "inherit-legacy-style",
+        "loop-design-check",
+        "production-audit",
+        "search-first",
+        "secure-coding",
+        "verification-loop"
       ]
     }
   }

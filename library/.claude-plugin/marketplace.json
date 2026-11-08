@@ -8,21 +8,6 @@
   },
   "plugins": [
     {
-      "name": "homelab",
-      "source": "./plugins/homelab",
-      "description": "Home network and network-device skills: Cisco IOS, Netmiko, BGP, interface health, config validation, VLANs, Pi-hole, WireGuard."
-    },
-    {
-      "name": "media",
-      "source": "./plugins/media",
-      "description": "Generated media: Manim explainer animations and fal.ai image/video/audio generation."
-    },
-    {
-      "name": "content",
-      "source": "./plugins/content",
-      "description": "Marketing and outreach: content engine, brand voice, email ops, SEO."
-    },
-    {
       "name": "knowledge",
       "source": "./plugins/knowledge",
       "description": "Backend stack knowledge with no measured lift over vanilla Claude (opt-in, no stack enables it): Postgres, Redis, NestJS, Node backend, migrations, REST API design, error handling. Retired from global 2026-10-14."
@@ -53,14 +38,9 @@
       "description": "Building MCP servers. Enabled by kit for the mcp stack."
     },
     {
-      "name": "video",
-      "source": "./plugins/video",
-      "description": "Video: Remotion, editing workflows, VideoDB, Playwright UI demo recordings. Enabled by kit for the remotion stack."
-    },
-    {
-      "name": "email",
-      "source": "./plugins/email",
-      "description": "Transactional email via Mailtrap. Enabled by kit for the email stack."
+      "name": "eng",
+      "source": "./plugins/eng",
+      "description": "Engineering practice skills that never fired in 35 days as globals (moved 2026-11-06): ADRs, contract-first, hexagonal architecture, legacy style rules, loop design check, production audit, search-first, secure coding, verification loop. Enabled by kit for the nest stack; elsewhere: claude plugin install eng@gigabrain --scope local."
     }
   ]
 }

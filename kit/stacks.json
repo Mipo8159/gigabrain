@@ -8,9 +8,7 @@
           "file": "package.json"
         }
       ],
-      "skills": [
-        "verification-loop"
-      ],
+      "skills": [],
       "checklists": [
         "typescript",
         "silent-failures"
@@ -48,12 +46,12 @@
           "file": "nest-cli.json"
         }
       ],
-      "skills": [
-        "hexagonal-architecture",
-        "contract-first"
-      ],
+      "skills": [],
       "checklists": [
         "typescript"
+      ],
+      "plugins": [
+        "eng"
       ]
     },
     "react": {
@@ -63,9 +61,7 @@
           "contains": "\"react\""
         }
       ],
-      "skills": [
-        "contract-first"
-      ],
+      "skills": [],
       "checklists": [
         "react"
       ],
@@ -113,9 +109,7 @@
           "contains": "fastapi"
         }
       ],
-      "skills": [
-        "contract-first"
-      ],
+      "skills": [],
       "checklists": [
         "python"
       ],
@@ -268,9 +262,7 @@
           "contains": "kafka"
         }
       ],
-      "skills": [
-        "contract-first"
-      ],
+      "skills": [],
       "checklists": [
         "silent-failures"
       ],
@@ -297,9 +289,7 @@
           "file": "compose.yaml"
         }
       ],
-      "skills": [
-        "production-audit"
-      ],
+      "skills": [],
       "checklists": [
         "security"
       ],
@@ -335,9 +325,7 @@
           "contains": "apiVersion:"
         }
       ],
-      "skills": [
-        "production-audit"
-      ],
+      "skills": [],
       "checklists": [
         "security"
       ],
@@ -387,9 +375,7 @@
           "file": "*/serverless.yml"
         }
       ],
-      "skills": [
-        "production-audit"
-      ],
+      "skills": [],
       "checklists": [
         "security"
       ],
@@ -421,9 +407,7 @@
           "file": "*/*.tf"
         }
       ],
-      "skills": [
-        "production-audit"
-      ],
+      "skills": [],
       "checklists": [
         "security"
       ],
@@ -457,25 +441,6 @@
         "mcp"
       ]
     },
-    "remotion": {
-      "indicators": [
-        {
-          "file": "package.json",
-          "contains": "\"remotion\""
-        },
-        {
-          "file": "package.json",
-          "contains": "@remotion/"
-        }
-      ],
-      "skills": [],
-      "checklists": [
-        "react"
-      ],
-      "plugins": [
-        "video"
-      ]
-    },
     "email": {
       "indicators": [
         {
@@ -498,20 +463,12 @@
       "skills": [],
       "checklists": [
         "security"
-      ],
-      "plugins": [
-        "email"
       ]
     }
   },
   "always": {
     "skills": [
-      "search-first",
-      "secure-coding",
-      "architecture-decision-records",
-      "council",
-      "loop-design-check",
-      "inherit-legacy-style"
+      "council"
     ],
     "checklists": [
       "silent-failures",

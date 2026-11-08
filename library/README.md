@@ -10,7 +10,7 @@ becomes knowledge once a real session shows it working.
 |---|---|---|
 | `sources.json` | each source: repo, local clone, licence, pinned commit, which items map where, the edit rules, skip reasons | `/absorb` |
 | `skills/<name>/SKILL.md` | adapted skills, installed globally by `bin/install.sh` | `bin/absorb-adapt.py` only |
-| `plugins.json` | opt-in bundles (`homelab`, `media`, `content`): which skills leave the global set | `/absorb`, `/curate` |
+| `plugins.json` | opt-in bundles (`eng`, `knowledge`, per-stack `frontend`, `python`, `go`, `deploy`, `mcp`): which skills leave the global set | `/absorb`, `/curate` |
 | `plugins/<p>/skills/<name>/` | opt-in skills, loaded only where enabled: `claude plugin install <p>@gigabrain --scope local`; invoked as `/<p>:<name>` | `bin/absorb-adapt.py` only |
 | `.claude-plugin/marketplace.json`, `plugins/<p>/.claude-plugin/plugin.json` | local marketplace `gigabrain`, registered by `bin/install.sh`; must mirror `plugins.json` | hand, checked by `check-library` |
 | `checklists/<lang>.md` | review checklists the `reviewer` agent loads per diff | `/absorb` (hand-written synthesis) |

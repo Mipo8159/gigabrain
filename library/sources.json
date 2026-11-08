@@ -1,7 +1,7 @@
 {
   "ecc": {
     "repo": "https://github.com/affaan-m/ECC",
-    "local": "/home/mip/Desktop/workdir/sweeft/ECC",
+    "local": "~/.cache/gigabrain/upstream/ecc",
     "branch": "main",
     "license": "MIT, Copyright (c) 2026 Affaan Mustafa",
     "pinned_sha": "ef648e01899ba3e8dc6371642deaaf64b4477775",
@@ -38,28 +38,7 @@
       "e2e-testing": "skills/e2e-testing",
       "inherit-legacy-style": "skills/inherit-legacy-style",
       "accessibility": "skills/accessibility",
-      "make-interfaces-feel-better": "skills/make-interfaces-feel-better",
-      "cisco-ios-patterns": "skills/cisco-ios-patterns",
-      "netmiko-ssh-automation": "skills/netmiko-ssh-automation",
-      "network-bgp-diagnostics": "skills/network-bgp-diagnostics",
-      "network-config-validation": "skills/network-config-validation",
-      "network-interface-health": "skills/network-interface-health",
-      "homelab-network-readiness": "skills/homelab-network-readiness",
-      "homelab-network-setup": "skills/homelab-network-setup",
-      "homelab-pihole-dns": "skills/homelab-pihole-dns",
-      "homelab-vlan-segmentation": "skills/homelab-vlan-segmentation",
-      "homelab-wireguard-vpn": "skills/homelab-wireguard-vpn",
-      "seo": "skills/seo",
-      "manim-video": "skills/manim-video",
-      "remotion-video-creation": "skills/remotion-video-creation",
-      "video-editing": "skills/video-editing",
-      "videodb": "skills/videodb",
-      "fal-ai-media": "skills/fal-ai-media",
-      "ui-demo": "skills/ui-demo",
-      "content-engine": "skills/content-engine",
-      "email-ops": "skills/email-ops",
-      "mailtrap-email-integration": "skills/mailtrap-email-integration",
-      "brand-voice": "skills/brand-voice"
+      "make-interfaces-feel-better": "skills/make-interfaces-feel-better"
     },
     "edits": {
       "docker-patterns": {
@@ -136,74 +115,6 @@
             "> Mechanism layer (how to wire the loop architecture): see `build-loop` and `/loop`. This skill"
           ]
         ]
-      },
-      "remotion-video-creation": {
-        "extras": [
-          "rules/assets/charts-bar-chart.tsx",
-          "rules/assets/text-animations-typewriter.tsx",
-          "rules/assets/text-animations-word-highlight.tsx"
-        ]
-      },
-      "videodb": {
-        "extras": [
-          "scripts/ws_listener.py"
-        ]
-      },
-      "video-editing": {
-        "exclude_extras": [
-          "assets/fusion/*"
-        ],
-        "drop_sections": [
-          "Native Fusion Presets"
-        ],
-        "replace": [
-          [
-            "For measured reference-driven work, chain `taste-distillation` into\n`taste-application`, then return here for the editor and final-output review.\nThe standalone taste skills can use existing footage; generation is optional.\n",
-            ""
-          ]
-        ]
-      },
-      "manim-video": {
-        "description": "Build reusable Manim explainers for technical concepts, graphs, system diagrams, and product walkthroughs; pair with remotion-video-creation or video-editing for the final cut. Use when the user wants a clean animated explainer rather than a generic talking-head script."
-      },
-      "email-ops": {
-        "description": "Evidence-first mailbox triage, drafting, send verification, and sent-mail-safe follow-up workflow. Use when the user wants to organize email, draft or send through the real mail surface, or prove what landed in Sent.",
-        "drop_sections": [
-          "Skill Stack"
-        ],
-        "replace": [
-          [
-            "- if the task is really DM or iMessage work, hand off to `messages-ops`\n",
-            ""
-          ]
-        ]
-      },
-      "content-engine": {
-        "replace": [
-          [
-            "If the user wants Affaan / ECC voice specifically, still treat `brand-voice` as the source of truth and feed it the best live or source-derived material available.\n",
-            ""
-          ]
-        ]
-      },
-      "brand-voice": {
-        "drop_sections": [
-          "Affaan / ECC Defaults"
-        ],
-        "replace": [
-          [
-            "5. If site copy matters, include the current ECC landing page and repo/plugin framing.\n",
-            "5. If site copy matters, include the current landing page and product framing.\n"
-          ],
-          [
-            "4. If live X access is available, use `x-api` to pull recent original posts before drafting.\n",
-            "4. If live X access is available, pull recent original posts before drafting.\n"
-          ],
-          [
-            "- `crosspost`\n- `lead-intelligence`\n",
-            "- `email-ops`\n"
-          ]
-        ]
       }
     },
     "checklists": {
@@ -262,12 +173,33 @@
       "network-architect / network-troubleshooter / network-config-reviewer / homelab-architect agents": "covered by the absorbed network-* and homelab-* skills",
       "seo-specialist agent": "covered by the seo skill",
       "video-editing assets/fusion (ITO presets)": "sponsor-specific DaVinci presets",
-      "manim-video assets/network_graph_scene.py": "ECC promo example"
+      "manim-video assets/network_graph_scene.py": "ECC promo example",
+      "cisco-ios-patterns": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "netmiko-ssh-automation": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "network-bgp-diagnostics": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "network-config-validation": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "network-interface-health": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "homelab-network-readiness": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "homelab-network-setup": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "homelab-pihole-dns": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "homelab-vlan-segmentation": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "homelab-wireguard-vpn": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "content-engine": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "brand-voice": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "email-ops": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "seo": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "manim-video": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "fal-ai-media": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "remotion-video-creation": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "video-editing": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "videodb": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "ui-demo": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)",
+      "mailtrap-email-integration": "retired 2026-11-06: no evidence, no project uses it (brain/library-ledger.md)"
     }
   },
   "visual-explainer": {
     "repo": "https://github.com/nicobailon/visual-explainer",
-    "local": "/home/mip/Desktop/workdir/sweeft/visual-explainer",
+    "local": "~/.cache/gigabrain/upstream/visual-explainer",
     "branch": "main",
     "license": "MIT, Copyright (c) 2025 Nico Bailon",
     "pinned_sha": "5846f5aef34a23c8fea389d2f23ce56224cbf840",
@@ -328,7 +260,7 @@
   },
   "openai-skills": {
     "repo": "https://github.com/openai/skills",
-    "local": "/Users/g.kvachakhia/projects/openai-skills",
+    "local": "~/.cache/gigabrain/upstream/openai-skills",
     "branch": "main",
     "license": "Apache-2.0 (per-skill LICENSE.txt), Copyright OpenAI",
     "pinned_sha": "49f948faa9258a0c61caceaf225e179651397431",

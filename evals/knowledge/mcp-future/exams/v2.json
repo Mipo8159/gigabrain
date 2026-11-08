@@ -1,0 +1,670 @@
+{
+  "topic": "mcp-future",
+  "variant": 2,
+  "of": 5,
+  "title": "MCP in depth — variant 2",
+  "description": "A build-upload service and a support desk go agent-facing: one client per server, resources versus prompts, handles and tasks, list caching and headers, endpoint-to-tool design, audience-bound tokens and code execution.",
+  "minutes": 30,
+  "pass": 0.7,
+  "scaled": false,
+  "domains": [
+    {
+      "id": "model",
+      "name": "Architecture and primitives",
+      "weight": 0.2
+    },
+    {
+      "id": "protocol",
+      "name": "Wire format, transports and the stateless lifecycle",
+      "weight": 0.2
+    },
+    {
+      "id": "apis",
+      "name": "MCP versus static APIs and tool design",
+      "weight": 0.2
+    },
+    {
+      "id": "security",
+      "name": "Security and trust boundaries",
+      "weight": 0.2
+    },
+    {
+      "id": "scale",
+      "name": "Context cost, scaling and when not to use MCP",
+      "weight": 0.2
+    }
+  ],
+  "questions": [
+    {
+      "id": "mcp-future-v2-q01",
+      "domain": "model",
+      "stem": "A desktop AI app is set up with three MCP servers: a local file server over stdio, a remote issue-tracker server and a remote build server. A new teammate draws the architecture for the design doc. Which drawing is correct?",
+      "options": [
+        {
+          "text": "One MCP client inside the app multiplexes all three servers over a shared connection",
+          "correct": false,
+          "why": "Tempting because it looks tidier, but the spec has the host run a separate client for each server connection."
+        },
+        {
+          "text": "The host runs three clients, one per server connection",
+          "correct": true,
+          "why": "Host, client and server are distinct roles: the host (the AI app) owns one client per server it connects to."
+        },
+        {
+          "text": "The three servers form a mesh and call each other's tools when the model needs data from more than one",
+          "correct": false,
+          "why": "Servers don't talk to each other in MCP; the host and its model combine results from separate connections."
+        },
+        {
+          "text": "The model connects directly to each server, and the app only displays the conversation",
+          "correct": false,
+          "why": "The model never holds connections; the host application does, and it passes tool definitions and results to the model."
+        }
+      ],
+      "explain": "MCP has three roles: the host (the AI app), one client per connection inside it, and the servers. Keeping connections separate per server is what lets the host control what each server sees.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q02",
+      "domain": "model",
+      "stem": "An agent calls a `get_api_style_guide` tool at the start of almost every turn. The guide is a static 12-page document that changes twice a year, and the host already lets users pin documents to a conversation. How should the server offer the guide instead?",
+      "options": [
+        {
+          "text": "As a prompt, so it appears in the slash-command menu",
+          "correct": false,
+          "why": "Prompts are templates the user runs, not reference documents to keep in context; it would still need a user action per use."
+        },
+        {
+          "text": "Keep the tool, but cache its result in the server for six months",
+          "correct": false,
+          "why": "Server caching makes the call cheap, but the model still spends a round trip and tokens deciding to call it every turn."
+        },
+        {
+          "text": "As a resource with a stable URI that the app can attach",
+          "correct": true,
+          "why": "Resources are application-controlled data addressed by URI, which fits a static document the app pins rather than one the model fetches."
+        },
+        {
+          "text": "Paste the whole guide into every tool's description so the model always has it",
+          "correct": false,
+          "why": "Every tool definition costs context on every turn; copying 12 pages into many descriptions multiplies that cost."
+        }
+      ],
+      "explain": "Pick the primitive by who decides to use it. Data the application should include is a resource; actions the model chooses are tools.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q03",
+      "domain": "model",
+      "stem": "A server author adds a `release-checklist` prompt with a `version` argument. In testing, the model never uses it on its own, even when the user says 'let's cut the 4.2 release'. What explains this?",
+      "options": [
+        {
+          "text": "A server bug: prompts must be listed in `tools/list` to be visible to the model",
+          "correct": false,
+          "why": "Prompts are their own primitive with their own listing; putting them among tools would make them tools."
+        },
+        {
+          "text": "Prompts are user-controlled templates, often slash commands; if the model should choose it, make it a tool",
+          "correct": true,
+          "why": "The three primitives differ by who triggers them, and prompts are meant to be picked by the user."
+        },
+        {
+          "text": "Prompts need a `ui://` resource before the model can see them",
+          "correct": false,
+          "why": "`ui://` resources belong to the MCP Apps extension for interactive UI and have nothing to do with prompts."
+        },
+        {
+          "text": "The system prompt has to tell the model to call `prompts/get` whenever a release is mentioned",
+          "correct": false,
+          "why": "Possible as a hack, but it fights the design: prompts are surfaced to users, not chosen by the model."
+        }
+      ],
+      "explain": "Tools are model-controlled, resources app-controlled and prompts user-controlled. When the model never picks a prompt, that is the design working.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q04",
+      "domain": "model",
+      "stem": "Procurement asks the architecture group which MCP vendor the company should sign with, and where 'the MCP service' is hosted, so they can run a vendor risk review. What is the accurate answer?",
+      "options": [
+        {
+          "text": "The model provider runs MCP centrally, so the review is of that provider",
+          "correct": false,
+          "why": "No central MCP service sits in the request path; hosts talk to servers directly."
+        },
+        {
+          "text": "Each AI app vendor runs its own MCP service that your servers must register with",
+          "correct": false,
+          "why": "Hosts connect to servers you run or choose; there is no per-vendor service your servers register with."
+        },
+        {
+          "text": "A registry run by the foundation brokers every connection and needs a contract",
+          "correct": false,
+          "why": "Registries list servers for discovery; they don't sit between a client and a server at run time."
+        },
+        {
+          "text": "It's an open protocol, not a service: review each server you run or connect",
+          "correct": true,
+          "why": "MCP defines how hosts and servers talk. Its governance moved to a Linux Foundation fund, and the risk lives in each server you trust."
+        }
+      ],
+      "explain": "MCP is a protocol, like HTTP or LSP, not a hosted product. The vendor-risk questions belong to each server and host you adopt.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25",
+        "https://www.anthropic.com/news/donating-the-model-context-protocol-and-establishing-of-the-agentic-ai-foundation"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q05",
+      "domain": "protocol",
+      "stem": "A 'draft release notes' flow uses three tools: `start_draft`, `add_section` and `publish_draft`. The old server kept the draft in memory keyed by the protocol session. You are porting it to the stateless 2026-07-28 core. Where does the draft's identity live now?",
+      "options": [
+        {
+          "text": "In `Mcp-Session-Id`, which the client still sends on each HTTP request",
+          "correct": false,
+          "why": "The current core has removed protocol sessions, so there is no session id to key state on."
+        },
+        {
+          "text": "In `_meta`, which the client should fill with the full draft text every time",
+          "correct": false,
+          "why": "`_meta` carries protocol version and capabilities; sending all application state in it would bloat every request."
+        },
+        {
+          "text": "A `draft_id` from `start_draft`, passed as a normal argument to later tools",
+          "correct": true,
+          "why": "Cross-call state is a server-minted handle that travels as a normal tool argument, with the data in the server's own store."
+        },
+        {
+          "text": "Nowhere: the model remembers the draft in its conversation and resends it each time",
+          "correct": false,
+          "why": "Burns context on every call, and the server can no longer validate or own the draft."
+        }
+      ],
+      "explain": "With no protocol session, state that spans calls becomes explicit: a handle minted by the server and passed like any other argument. That also makes the flow work across any replica.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q06",
+      "domain": "protocol",
+      "stem": "A `generate_device_report` tool runs a 30-minute test sweep. The calling client advertises support for the `io.modelcontextprotocol/tasks` extension. How should the server handle this call?",
+      "options": [
+        {
+          "text": "Hold the HTTP response open for 30 minutes and stream partial results",
+          "correct": false,
+          "why": "Ties half an hour of work to one fragile connection; a broken stream loses the request with no resumption."
+        },
+        {
+          "text": "Run it as a task; the client polls its status with `tasks/get`",
+          "correct": true,
+          "why": "Tasks are the extension for long-running work: the call returns a task, and the client checks it until it completes."
+        },
+        {
+          "text": "Use sampling to have the host's model wait and summarise when it is done",
+          "correct": false,
+          "why": "Sampling asks the host's model to generate text and is deprecated; it does nothing for long-running work."
+        },
+        {
+          "text": "Send progress through MCP logging notifications until the report is ready",
+          "correct": false,
+          "why": "Logging is deprecated in the current revision, and log lines don't give the client a result to fetch later."
+        }
+      ],
+      "explain": "Long-running work is the tasks extension's job (`tasks/get` to poll), or a job id plus status tool for clients without it. Don't hold the call open.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog",
+        "https://modelcontextprotocol.io/specification/2025-11-25/changelog"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q07",
+      "domain": "protocol",
+      "stem": "The server filters `tools/list` by the caller's role and returns the result with `cacheScope: \"public\"` and `ttlMs` of one hour. A shared caching gateway sits in front of it. What goes wrong?",
+      "options": [
+        {
+          "text": "The gateway may serve one user's filtered list to other users for an hour",
+          "correct": true,
+          "why": "Public means any caller may reuse the result. A list filtered per caller must be marked private so a shared cache never reuses it."
+        },
+        {
+          "text": "Nothing: `cacheScope` only affects clients, never gateways",
+          "correct": false,
+          "why": "Gateways and other shared caches are exactly who `cacheScope` is meant for; the value tells them whether sharing is allowed."
+        },
+        {
+          "text": "The model will cache stale tool descriptions inside its own weights for an hour",
+          "correct": false,
+          "why": "Models don't learn from tool lists at run time; the risk is in HTTP caches, not the model."
+        },
+        {
+          "text": "`ttlMs` is ignored when `cacheScope` is set, so the list is never cached at all",
+          "correct": false,
+          "why": "They work together: `ttlMs` says how long, `cacheScope` says who may share the cached copy."
+        }
+      ],
+      "explain": "List results carry `ttlMs` (how long to reuse) and `cacheScope` (public or private). Anything that varies by caller must be private, or a shared cache will hand it to the wrong caller.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q08",
+      "domain": "protocol",
+      "stem": "The platform team wants its API gateway to rate-limit `tools/call` for the expensive `bulk_import_test_cases` tool more tightly than other tools, without parsing every JSON-RPC body at the edge. Which current Streamable HTTP feature makes this possible?",
+      "options": [
+        {
+          "text": "Give each tool its own URL path so the gateway can match on the path",
+          "correct": false,
+          "why": "Streamable HTTP uses one endpoint for all messages; per-tool URLs would not be MCP."
+        },
+        {
+          "text": "Key the limit on `Mcp-Session-Id`, which identifies the calling agent",
+          "correct": false,
+          "why": "There is no protocol session in the current core, and a session id would not name the tool anyway."
+        },
+        {
+          "text": "Match on the `Mcp-Method` and `Mcp-Name` headers that POSTs now carry",
+          "correct": true,
+          "why": "The headers expose the method and the tool name, so routers and limiters can act on them without reading the body."
+        },
+        {
+          "text": "Have the gateway parse every body; MCP has no standard way to expose the method",
+          "correct": false,
+          "why": "Works, but it is costly at the edge, and the current revision added headers precisely to avoid it."
+        }
+      ],
+      "explain": "The 2026-07-28 revision makes MCP traffic routable like ordinary HTTP: method and name in headers, stateless requests, cacheable list results.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q09",
+      "domain": "apis",
+      "stem": "Your team exposes its build-upload service to agents. The REST API has 14 endpoints: start multipart upload, upload part, complete upload, abort, list builds, get build, resign build, get resign status and so on. Builds are 200 MB to 2 GB. How do you shape the MCP tools?",
+      "options": [
+        {
+          "text": "One tool per endpoint, so agents get the full power of the API",
+          "correct": false,
+          "why": "Mirrors the API, but the model must learn a 14-step protocol, and multipart parts would pass through its context."
+        },
+        {
+          "text": "A single `call_api(method, path, body)` tool that covers all 14 endpoints",
+          "correct": false,
+          "why": "Few definitions, but the model must guess paths and payloads with no task guidance, and per-tool checks disappear."
+        },
+        {
+          "text": "A few task tools: get an upload URL, check build status, list builds",
+          "correct": true,
+          "why": "The bytes go straight to storage through the URL, and the model only handles small, task-shaped calls."
+        },
+        {
+          "text": "An `upload_build` tool that takes the build as a base64 string argument",
+          "correct": false,
+          "why": "One call looks simple, but a 2 GB file in a tool argument cannot fit through the model's context."
+        }
+      ],
+      "explain": "Design tools around what an agent is trying to do, not around endpoints. Keep large payloads out of the model's path: hand back a URL or handle and let a program move the bytes.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25/server/tools"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q10",
+      "domain": "apis",
+      "stem": "An `update_test_case` tool has an `estimated_duration` field. Agents fill it with '5 minutes', '300000' or their own forecast of how long a run will take, and reports come out wrong. The backend stores whole seconds of a person's manual estimate. What fixes this at the source?",
+      "options": [
+        {
+          "text": "Parse any free-text duration on the server so whatever the model sends works",
+          "correct": false,
+          "why": "Makes bad input survive but doesn't fix meaning: a forecast parsed correctly is still the wrong number."
+        },
+        {
+          "text": "Make it an integer field and state the unit and meaning in the description",
+          "correct": true,
+          "why": "The model reads the schema and description as instructions; 'a person's estimate in seconds, not a forecast' removes both ambiguities."
+        },
+        {
+          "text": "Rename the parameter `seconds` and leave the description as it is",
+          "correct": false,
+          "why": "Helps with units, but says nothing about whose estimate it is, so forecasts still arrive."
+        },
+        {
+          "text": "Return a validation error and let the model guess again",
+          "correct": false,
+          "why": "Feedback helps, but without a clear contract the model may loop between wrong guesses."
+        }
+      ],
+      "explain": "A tool description is a prompt. Units, formats and meaning belong in the schema and description, or the model will fill the gap with plausible guesses.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25/server/tools"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q11",
+      "domain": "apis",
+      "stem": "When an agent passes a date like '03/04' to `list_runs`, the server throws, and the client receives a generic JSON-RPC 'invalid params' error. The agent then gives up and tells the user the tool is broken. What change helps the model recover on its own?",
+      "options": [
+        {
+          "text": "Retry the same call automatically in the client until it succeeds",
+          "correct": false,
+          "why": "Retrying identical bad input just repeats the failure."
+        },
+        {
+          "text": "Hide `list_runs` after the first failure so the model stops trying it",
+          "correct": false,
+          "why": "Removes a working tool because of one fixable input mistake."
+        },
+        {
+          "text": "Make the date field optional so invalid values are ignored",
+          "correct": false,
+          "why": "Silently dropping the filter returns the wrong runs instead of an error the model can act on."
+        },
+        {
+          "text": "Return `isError: true` in the tool result, naming the expected format",
+          "correct": true,
+          "why": "Tool execution errors belong in the result, where the model can read them, correct the argument and call again."
+        }
+      ],
+      "explain": "Report tool execution errors inside the tool result (`isError`) with an actionable message; keep JSON-RPC errors for protocol problems. Error text is a prompt too.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25/server/tools"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q12",
+      "domain": "apis",
+      "stem": "The team adds the rule 'a test case must have at least one step' in the MCP server's `create_test_case` handler, because the agent kept creating empty cases. A month later the web UI and the public REST API are still creating empty cases. What was the design mistake?",
+      "options": [
+        {
+          "text": "The rule should also have gone into the tool description",
+          "correct": false,
+          "why": "Describing the rule helps the model, but descriptions don't enforce anything for non-model callers."
+        },
+        {
+          "text": "Business rules belong in the service, with the MCP server a thin client of its API",
+          "correct": true,
+          "why": "Every caller (UI, REST, MCP) then gets the same validation, and the MCP server stays an adapter."
+        },
+        {
+          "text": "The web UI should be rebuilt to go through the MCP server",
+          "correct": false,
+          "why": "That puts a model-facing adapter in front of a deterministic UI, which is the wrong way round."
+        },
+        {
+          "text": "Empty test cases should be blocked by a host-side confirmation dialog",
+          "correct": false,
+          "why": "Confirmation is for risky actions, not data validation, and the UI and REST paths have no host at all."
+        }
+      ],
+      "explain": "MCP usually wraps an existing API. Put rules where every caller passes through: the service.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q13",
+      "domain": "security",
+      "stem": "A remote MCP server accepts any JWT signed by the company identity provider, including tokens that were issued for the HR service. A token stolen from an HR integration therefore also works against the MCP server. What does the spec require?",
+      "options": [
+        {
+          "text": "Accept only tokens whose audience is this MCP server, using resource indicators",
+          "correct": true,
+          "why": "The spec says MCP servers must not accept tokens that were not explicitly issued for them; audience binding makes a token useless elsewhere."
+        },
+        {
+          "text": "Nothing more: a valid signature from the company IdP is enough",
+          "correct": false,
+          "why": "A signature proves who issued the token, not who it was meant for."
+        },
+        {
+          "text": "Require mutual TLS instead of OAuth for every client, so stolen bearer tokens stop mattering",
+          "correct": false,
+          "why": "mTLS can add assurance, but it doesn't replace audience checks, and remote MCP auth is specified on OAuth 2.1."
+        },
+        {
+          "text": "Accept any token, then pass it on so upstream services can decide",
+          "correct": false,
+          "why": "Accepting foreign tokens and passing them through are both explicitly forbidden."
+        }
+      ],
+      "explain": "A remote MCP server is an OAuth resource server. It checks that the token was issued for it (audience-bound, RFC 8707), and nothing else gets in.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization",
+        "https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q14",
+      "domain": "security",
+      "stem": "An MCP server calls the tracker API with a single admin service account for every request. A user with viewer rights asks the agent to delete another team's test suite, and it works. What is the core problem?",
+      "options": [
+        {
+          "text": "The model should have refused because the user only had viewer rights",
+          "correct": false,
+          "why": "The model may not know the user's rights, and model judgement is not an authorization layer."
+        },
+        {
+          "text": "Admin rights are fine as long as the service account's password is rotated monthly",
+          "correct": false,
+          "why": "Rotation limits stolen-credential lifetime but does nothing about every user acting as admin."
+        },
+        {
+          "text": "A confused deputy: the server acts with its own power instead of the caller's",
+          "correct": true,
+          "why": "Authorize each call as the calling user, with upstream tokens or scopes limited to that user's rights."
+        },
+        {
+          "text": "The tracker API should have rate-limited the delete calls",
+          "correct": false,
+          "why": "Rate limits slow abuse but still allow a single unauthorized delete."
+        }
+      ],
+      "explain": "Confused deputy: a privileged component acting for a less privileged caller without checking that caller's rights. MCP servers must act with the caller's authority, not their own.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2025-11-25/basic/security_best_practices",
+        "https://modelcontextprotocol.io/specification/2026-07-28/basic/security_best_practices"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q15",
+      "domain": "security",
+      "stem": "An agent browses public web pages to research bugs and also has tools that push commits and open pull requests in your repositories. Which controls reduce the blast radius of prompt injection from those pages? (Choose three.)",
+      "options": [
+        {
+          "text": "Run browsing in an agent without write tools, and hand results to the writer as data",
+          "correct": true,
+          "why": "Separating read-from-untrusted-sources and write capabilities means injected text cannot reach a write tool directly."
+        },
+        {
+          "text": "Require human confirmation before pushes or opening pull requests",
+          "correct": true,
+          "why": "A person approving outward or destructive calls stops the injected action even when the model is fooled."
+        },
+        {
+          "text": "Give the agent's token only the repository scopes the task needs",
+          "correct": true,
+          "why": "Narrow scopes cap what a fooled agent can do."
+        },
+        {
+          "text": "Trust the fetch tool's `readOnlyHint` to keep page content harmless",
+          "correct": false,
+          "why": "The hint describes the fetch itself; it says nothing about whether the content it returns is safe."
+        },
+        {
+          "text": "Tell the model in the system prompt to ignore instructions it reads on web pages",
+          "correct": false,
+          "why": "Useful as a nudge, but it is not a boundary; injected text can still persuade the model."
+        }
+      ],
+      "explain": "Treat tool results as data. The controls that hold are structural: split read and write, confirm risky calls with a human, and keep scopes small.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/basic/security_best_practices",
+        "https://modelcontextprotocol.io/specification/2025-11-25/server/tools"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q16",
+      "domain": "security",
+      "stem": "Your MCP server ships an MCP App: a `ui://` resource that renders an editable results grid. A developer asks why the host shows it in a sandboxed iframe instead of letting it read the host's cookies and call the host's own APIs, which would be easier. What is the reason?",
+      "options": [
+        {
+          "text": "Sandboxing is only there for styling, so the grid's CSS doesn't clash with the host's",
+          "correct": false,
+          "why": "Style isolation is a side effect; the main point is security isolation."
+        },
+        {
+          "text": "Iframes render faster than inline HTML for interactive grids",
+          "correct": false,
+          "why": "Performance is not why the extension uses a sandbox."
+        },
+        {
+          "text": "The UI is code supplied by a server, which the host must not trust with its session",
+          "correct": true,
+          "why": "A sandbox keeps server-supplied HTML and scripts from reading host state or acting as the user in the host."
+        },
+        {
+          "text": "It is temporary until the extension is finalised, after which UIs run inline",
+          "correct": false,
+          "why": "The isolation is the design, not a stopgap."
+        }
+      ],
+      "explain": "MCP Apps lets servers bring their own UI, which means bringing their own code. The host renders it in a sandboxed iframe so that code is contained.",
+      "refs": [
+        "https://modelcontextprotocol.io/extensions/apps/overview"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q17",
+      "domain": "scale",
+      "stem": "An agent must find failing tests among 20,000 results and summarise the top ten causes. Each `list_results` call returns 500 rows into context, so one run burns about 150,000 tokens. Which approach cuts this the most?",
+      "options": [
+        {
+          "text": "Return 2,000 rows per page so the agent needs fewer calls",
+          "correct": false,
+          "why": "Fewer round trips, but the same rows still pass through the context."
+        },
+        {
+          "text": "Code execution with MCP: the model writes code that calls the tools and filters in a sandbox",
+          "correct": true,
+          "why": "Intermediate rows stay in the execution environment and only the summary reaches the model."
+        },
+        {
+          "text": "Summarise each page with a cheaper model before passing it on",
+          "correct": false,
+          "why": "Cuts some tokens but adds a lossy step and still pays for every page."
+        },
+        {
+          "text": "Cache `list_results` responses so repeated runs are cheaper",
+          "correct": false,
+          "why": "Helps repeat runs but not the first one, and the context still fills with rows."
+        }
+      ],
+      "explain": "Code execution with MCP lets intermediate results skip the context. Anthropic reported one workflow dropping from about 150,000 to about 2,000 tokens this way. The cost is a secure sandbox to run model-written code.",
+      "refs": [
+        "https://www.anthropic.com/engineering/code-execution-with-mcp"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q18",
+      "domain": "scale",
+      "stem": "Two years ago the team rejected running its MCP server on a serverless function platform, because of protocol sessions and long-lived SSE streams. Under the 2026-07-28 core, what is the honest assessment now?",
+      "options": [
+        {
+          "text": "Still infeasible: MCP needs a persistent connection per client",
+          "correct": false,
+          "why": "That was the stateful lifecycle; the current core needs no session and no persistent connection."
+        },
+        {
+          "text": "Feasible without changes, because long work can now run inside one invocation",
+          "correct": false,
+          "why": "Function time limits still apply; long work needs tasks or job handles, not a longer call."
+        },
+        {
+          "text": "Feasible only over stdio, since HTTP still needs sticky routing",
+          "correct": false,
+          "why": "stdio is a local subprocess transport; it is the remote HTTP case that became stateless."
+        },
+        {
+          "text": "Feasible: requests describe themselves, but cross-call state must live in a shared store",
+          "correct": true,
+          "why": "Any instance can serve any request, as long as handles and job state live in a database, not the function's memory."
+        }
+      ],
+      "explain": "Stateless requests let MCP servers scale like any HTTP API, including on serverless platforms. What you still own is application state and long-running work.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog",
+        "https://blog.modelcontextprotocol.io/posts/2026-07-28/"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q19",
+      "domain": "scale",
+      "stem": "Thousands of agents re-fetch `tools/list` from your server every few seconds, and the tool list changes only when you deploy. The list is the same for every caller. Which change cuts this load with the least risk?",
+      "options": [
+        {
+          "text": "Return the list with a `ttlMs` and `cacheScope: \"public\"` so clients and gateways reuse it",
+          "correct": true,
+          "why": "Clients and shared caches may keep the result for the TTL, and since it is the same for everyone, sharing it is safe."
+        },
+        {
+          "text": "Send a session-scoped list once at `initialize` and never again",
+          "correct": false,
+          "why": "The current core has no handshake or session to hang a one-time list on."
+        },
+        {
+          "text": "Rate-limit `tools/list` to one call per minute per client and reject the rest",
+          "correct": false,
+          "why": "Cuts load but breaks well-behaved clients when they need the list, instead of letting them cache it."
+        },
+        {
+          "text": "Stop serving `tools/list` and publish the tools in a static JSON file",
+          "correct": false,
+          "why": "Takes discovery out of the protocol, so standard clients no longer see the tools."
+        }
+      ],
+      "explain": "The current revision makes list results cacheable: `ttlMs` says for how long, `cacheScope` says who may share. Use public only for results that are the same for everyone.",
+      "refs": [
+        "https://modelcontextprotocol.io/specification/2026-07-28/changelog"
+      ]
+    },
+    {
+      "id": "mcp-future-v2-q20",
+      "domain": "scale",
+      "stem": "The team turns on tool search over 200 tools, and the definitions in context drop sharply. But some tools are now never used, even for tasks that clearly need them. What is the most likely cause?",
+      "options": [
+        {
+          "text": "Tool search loads every definition anyway, so nothing really changed",
+          "correct": false,
+          "why": "If that were true, context would not have dropped; the change is that definitions load on demand."
+        },
+        {
+          "text": "The tools aren't sorted, so search returns them in a random order",
+          "correct": false,
+          "why": "Order matters for prompt caching, not for whether search can match a tool."
+        },
+        {
+          "text": "Their names and descriptions don't match how tasks are phrased, so search misses them",
+          "correct": true,
+          "why": "Tool search finds tools by name and description, so vague or jargon-only descriptions stay hidden."
+        },
+        {
+          "text": "Deferred tools have to be marked `cacheScope: \"public\"` to be searchable",
+          "correct": false,
+          "why": "`cacheScope` governs caching of list results, not searchability."
+        }
+      ],
+      "explain": "Tool search trades a smaller context for one more step and a dependency on descriptions. Write descriptions in the words users and models will use for the task.",
+      "refs": [
+        "https://www.anthropic.com/engineering/advanced-tool-use"
+      ]
+    }
+  ]
+}

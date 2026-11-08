@@ -750,4 +750,4 @@ spec:
 
 ## Related Skills
 
-- Skills: `deployment-patterns`, `docker-patterns`, `secure-coding`
+- Skills: `deployment-patterns`, `docker-patterns`, `eng:secure-coding`
