@@ -65,3 +65,8 @@ route around it (another reader, a script, base64): tell Giga what you needed an
 let them decide.
 
 **Evidence (2026-11-02):** a `cat .env | cut -d= -f1` was tacked onto an unrelated grep "in case"; the guard blocked it, and the key-names-only `cut` was then denied too, because that repo's CLAUDE.md bans reading `.env` at all. The env keys weren't needed for the question. Don't bundle a sensitive read into another command; ask first whether the answer needs it, and where a repo bans the file, key names are off too.
+
+**Screenshots carry secrets too (2026-11-07).** A screenshot of a key-creation page showed the
+full new key in its "copy it now" banner, so the key reached the transcript. Ask for the
+banner to be closed before any screenshot of a key, token or credential page; if one slips,
+say so at once and ask for a rotation, then carry on (the leak is already done).

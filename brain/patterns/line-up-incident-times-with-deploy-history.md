@@ -64,3 +64,10 @@ Four questions in time order, one place each:
 The log search box can turn free text into a broken field filter (0 rows); use the
 query console with `LIKE`. Hand the steps over as a checklist with the click path,
 one action per step.
+
+**"What is live" = the latest `success` status time, not the newest record (2026-11-07).**
+Deployment records are listed by creation time. A run created at 09:51 but approved at
+18:01 sits below newer, never-approved records and is still the one live. Reading the
+first `success` from the top reported the wrong branch, twice (the second time a
+`per_page=15` window had cut the record off). Rank by the success status's
+`created_at`, over a window wide enough to reach the oldest pending run.

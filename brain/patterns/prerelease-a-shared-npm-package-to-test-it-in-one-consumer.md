@@ -61,3 +61,9 @@ publish → exact pin in the consumer → before/after → swap after the real
 release → diff release vs beta → staging again if they differ.
 
 Related: [[outward-claims-carry-their-proof]], [[local-only-edits-get-a-commit-guard]], [[prove-integration-without-real-target]]
+
+**Installing a private package for a scratch test (2026-11-08).** The leak guard blocks writing
+any `.npmrc`, even with only a `${NPM_TOKEN}` placeholder; don't work around it. Instead add a
+`git worktree` of a consumer repo at the branch you want, which already has the repo's own
+`.npmrc`, and run `npm ci` through the password-manager runner (`op run --env-file … --`).
+You get the exact lockfile tree the service runs. Remove the worktree when done.

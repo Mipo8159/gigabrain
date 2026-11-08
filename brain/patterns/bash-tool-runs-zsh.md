@@ -34,6 +34,10 @@ doesn't stop the `=` slip when composing long one-liners fast. **Open fix:** a
 PreToolUse check in `global/hooks/guard.py` that denies a bare word starting with
 `=` ("use echo '---'"), not another reminder.
 
+**2026-11-06/08 (again):** `gh api repos/…/statuses?per_page=1` unquoted → `no matches found`
+(the `?` is a glob); `echo ====` once more aborted a whole read command. Quote every API path
+that holds `?`/`&`.
+
 **Signal:** a for-loop over a variable, `set --`, `--include=`, `*` in an argument,
 a word starting with `=`, `$VAR:` followed by a letter.
 **Next time:** quote the glob, inline the list and brace the variable before

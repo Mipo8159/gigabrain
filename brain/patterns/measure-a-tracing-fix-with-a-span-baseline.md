@@ -64,3 +64,8 @@ metric store, e.g.
 and state the window actually covered. Log retention (often ~30 days) caps log checks
 the same way. Billboard charts hide small facets: switch to a table before saying
 "only these". Signal: "N days of zero traffic", "nobody calls this", a deprecation gate.
+
+**Hit again 2026-11-08:** baselines from 1–3 weeks back came back half-empty
+with no error, because spans only go back 8 days. The rule above was known
+but not applied. Check `min(timestamp)` per event type first, then pick the
+event type that matches the window.
