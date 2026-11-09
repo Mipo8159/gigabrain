@@ -50,6 +50,11 @@ Rules:
   test scripts, which use fixed docker names (`db`, `lint-target`); two deleted each
   other's containers and one ran `docker volume prune -f`. Each brief must say: unique
   container/volume names (suffix the task), never prune or remove what you didn't create.
+- **Have agents write the report to a file.** 2026-11-09: 5 of 8 background reviewers'
+  results were cut off mid-findings in the idle notification (even at a 40-line cap), costing a
+  resend round each. Put `write your final report to <scratch>/<name>.md, reply with the path`
+  in the brief. And verify before relaying: 2 of ~20 agent claims were wrong (a key-prefix
+  guess, a DB-scheduled-job guess), both caught by a one-line code check.
 - **Pick the smallest tool:** default to a subagent; move up to a worktree only when
   **files collide**, and to an agent team only when the **parts must disagree**
   (how-to and costs: [[worktrees-and-agent-teams]]). Giga launches worktrees; Claude

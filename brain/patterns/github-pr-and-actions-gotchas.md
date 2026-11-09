@@ -55,6 +55,13 @@ one's run (`statuses[].log_url`) and check its job names (`deploy-staging (<app>
 only a later success of *your* app's job replaces you. Approved-later records can sort
 below yours by `created_at`, so page past the first screen.
 
+**Syncing a PR resets its "deployed" badge (2026-11-09):** GitHub ties "This branch was
+successfully deployed" to the head commit. Merging main into a PR that reviewers already saw
+deployed + tested creates a new head with a *waiting* deploy, so the PR looks untested even
+though staging still runs the tested build. Before syncing a staging-verified PR, say so and
+offer: skip it, or sync then redeploy that one commit. `gh pr checks --watch` never exits
+while a gated deploy check waits; poll and ignore `deploy-staging` instead.
+
 **Signal:** two or more "Deploy / <app> (staging) … Waiting" checks plus "which one?",
 or "where is rerun?". **Next time:** PR files + detect log before answering; give the
 cancel-then-rerun path in the first answer.
