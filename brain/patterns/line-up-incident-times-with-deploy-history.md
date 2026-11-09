@@ -39,6 +39,8 @@ timestamps, a suggestion to scale up.
 **Next time:** first tool call is the deployments + statuses lookup, then the
 time table, then the reply.
 
+**Recurrence 2026-11-09:** the same `per_page=15` cut-off hid a live deployment again (a repo with ~20 newer waiting/error records from one feature branch); the entry existed but the script was written from memory. Default to `per_page=60`+ and say how many records were scanned.
+
 Related: [[read-the-gate-before-guessing]], [[outward-claims-carry-their-proof]].
 
 **Evidence (the reverse case, 2026-11-02):** right after a prod deploy, a consumer

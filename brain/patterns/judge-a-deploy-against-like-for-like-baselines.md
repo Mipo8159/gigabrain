@@ -49,6 +49,8 @@ fuzz that compared old and new output (0 diffs), then re-benchmarked
 7. Compute epoch cut-offs, don't type them (one was a year off and put every
    span in "after").
 
+**Load-day example (2026-11-09):** one route doubled (p50 17→32 ms) on a weekday when staging traffic was 3–20× the week before. Every child span under it (DB selects, outbound GETs, TCP connects) was +20–45%, and an unchanged service on the old version was +37% the same day: environment, not the change. Facet the child spans before blaming the parent.
+
 **Signal:** "check the metrics after the deploy", a % change on a quiet
 staging, a shared library bump, "is it stable / ready for prod".
 **Next time:** set the baseline windows, controls and pass bands before the
