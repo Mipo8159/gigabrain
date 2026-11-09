@@ -27,6 +27,10 @@ runs if the glob has no match in cwd.
 - **Never name a variable `path` (or `cdpath`, `fpath`, `manpath`):** zsh ties the
   lowercase array to `PATH`, so `for path in a b` wipes PATH and the next command
   fails with `command not found` (2026-11-09, `curl`). Use `ep`, `p`, `f`.
+- **No `node` on PATH:** the tool's shell doesn't always load nvm from `.zshrc`, so a
+  Node-backed script (`bin/check-lesson`) dies with `env: node: No such file or directory`
+  (2026-11-09). Prefix the call with
+  `export PATH="$HOME/.nvm/versions/node/$(ls ~/.nvm/versions/node | tail -1)/bin:$PATH";`.
 - **Giga's own terminal is zsh too:** the `! <cmd>` prefix works only in the Claude
   prompt. In that terminal a leading `!` is history expansion, so give the command
   without `!`.
