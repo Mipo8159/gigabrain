@@ -24,6 +24,9 @@ runs if the glob has no match in cwd.
   inside quotes too: `git show $B:path` became `origin/masterpplication/...`, and
   `"$b:tests/test.sh"` read `$b` with `:t`. Always brace: `"${B}:path"`,
   `"${a}:test"`, in every `git show`/`git cat-file` ref and image tag.
+- **Never name a variable `path` (or `cdpath`, `fpath`, `manpath`):** zsh ties the
+  lowercase array to `PATH`, so `for path in a b` wipes PATH and the next command
+  fails with `command not found` (2026-11-09, `curl`). Use `ep`, `p`, `f`.
 - **Giga's own terminal is zsh too:** the `! <cmd>` prefix works only in the Claude
   prompt. In that terminal a leading `!` is history expansion, so give the command
   without `!`.

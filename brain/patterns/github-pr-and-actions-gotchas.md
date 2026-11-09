@@ -48,6 +48,13 @@ workflow → open the job → Re-run jobs ▾ → Re-run this job. A reusable de
 comes back *skipped* with every upstream green: trigger it via `workflow_dispatch`
 on the branch instead of burning rounds.
 
+**What's live on a monorepo env (2026-11-09):** every app deploys into the same
+environment, so the newest deployment record there is usually *another* app's. For
+"is my build still live?", list the env's deployments created after yours, open each
+one's run (`statuses[].log_url`) and check its job names (`deploy-staging (<app>)`):
+only a later success of *your* app's job replaces you. Approved-later records can sort
+below yours by `created_at`, so page past the first screen.
+
 **Signal:** two or more "Deploy / <app> (staging) … Waiting" checks plus "which one?",
 or "where is rerun?". **Next time:** PR files + detect log before answering; give the
 cancel-then-rerun path in the first answer.

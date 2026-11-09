@@ -46,6 +46,10 @@ Rules:
   (caught and removed by the agent; the repo stayed clean). 2026-10-15: 14 exam
   writers shared one scratchpad and one overwrote another's `patch.py`. The rule
   existed but was not in the prompts, so put the dir in each prompt.
+  The same goes for shared host state: 2026-11-09, 8 sync agents ran the repos' stock
+  test scripts, which use fixed docker names (`db`, `lint-target`); two deleted each
+  other's containers and one ran `docker volume prune -f`. Each brief must say: unique
+  container/volume names (suffix the task), never prune or remove what you didn't create.
 - **Pick the smallest tool:** default to a subagent; move up to a worktree only when
   **files collide**, and to an agent team only when the **parts must disagree**
   (how-to and costs: [[worktrees-and-agent-teams]]). Giga launches worktrees; Claude

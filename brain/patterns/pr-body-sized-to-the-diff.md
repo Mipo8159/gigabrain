@@ -25,6 +25,12 @@ and write it short the first time.
   AI-shaped text reads as low effort. Attribution lines that a system reminder added
   cost an amend + force-push each time.
 
+- 2026-11-09: a staging-verification comment for a ticket came out as a ~25-line
+  per-PR matrix, then a ~20-line list; Giga: "I do not want to be too verbose … is
+  this professional?" The posted one was 5 lines: what was deployed, two run results
+  vs baseline, "no new failures". Verification comments: scope line + one line per
+  proof; details live in the runs and PRs.
+
 **How to apply:**
 - PRs: list the team's last 10–15 merged PRs and read the bodies of 3–5 of similar
   size (`gh pr list --state merged`, `gh pr view N --json body`). Note length, tables,
