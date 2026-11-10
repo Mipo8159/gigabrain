@@ -29,6 +29,10 @@ creating a ticket which does not match reality" (Giga, 2026-10-22). Hits since:
 - 2026-11-05/06 (state words): "completed and rolled back" when only the tracker row
   was gone (a teammate's project creation broke next day); "merged" for a PR whose
   `gh` state was `CLOSED`.
+- 2026-11-10 (ticket text as proof): an onboarding lesson marked "tables owned by the
+  new stack" as done from a commit message + the ticket's own words; Giga's "are you
+  confident … not hallucination?" downgraded it to "likely". Same session: "you already
+  have something done" was hearsay; the PRs showed a teammate did that work.
 Each correction cost a round and some trust; measuring was cheap every time.
 
 **How to apply:**
@@ -38,6 +42,8 @@ Each correction cost a round and some trust; measuring was cheap every time.
 - A precedent is only a precedent after opening the ticket or PR itself, not its title.
 - Counts come from a command, never from memory ("~30").
 - A past finding quoted as fact is re-checked or carries its "assuming …" along.
+- A ticket's description is a claim about the world, not proof of it. Label it
+  "per ticket" until checked; for "already done" work, name who did it and the PR.
 - Shortening merges sources: run the claims pass again on the *final* text (for each
   "X did/flagged/said Y", name where it came from), and show the draft in chat before
   writing into someone else's ticket.

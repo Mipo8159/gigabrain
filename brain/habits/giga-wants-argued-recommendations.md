@@ -45,6 +45,13 @@ lockouts.
   doesn't mean asking again louder: say the fact you know, then do what they
   choose.
 
+**Argue against the team's order only after you can state its reason.**
+2026-11-10: asked which of two tickets to start, Claude recommended the smaller
+one by size. The lead had ranked the other higher, and its infra half was already
+done, which made it the stepping stone. Giga's "why was I told to start from X?"
+flipped the verdict. When someone with context set an order (rank, assigner,
+sprint), first reconstruct why; put "the lead's reason" in "what would change my mind".
+
 Giga also uses the "clarify" option in `AskUserQuestion` rather than pick a
 weak option. Treat a rejected question batch as "the framing is wrong", not
 "ask again louder". Goes with [[working-style-interview-then-autonomous-loop]].
