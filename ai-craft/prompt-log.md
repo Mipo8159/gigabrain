@@ -315,3 +315,9 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Squash-merge the 6 PRs. Before merging, tell me which repos deploy to prod on merge. Abort if 5xx >1% or <service> p95 > <cap> for 10 min, or any service stops sending spans/logs; prove the alarm fires first. Watch until 00:00 UTC; rollback is my call."
 - **Why:** "anomaly", the watch length and who aborts were left open, so Claude invented the limits after seeing the data and only tested the alarm at the end. The merge ask didn't know merge = prod deploy for 5 of 6 (no gate); Claude's check surfaced it, Giga then chose "all at once" knowingly.
 - **Good:** "how would you rate this approach … on which rung" turned the run into a self-review that produced the reusable, self-tested tool.
+
+## 2026-11-10 · compare public explainer repos with our lesson skills (rung 1)
+- **Before:** "are there of some value for us? … done when you investigate these public repos and compare it to our learning approaches. absorb if something beneficial can be added on top of it"
+- **After:** "Compare <repos> with skills teach/visual-explainer. Output: one table, repo × (best idea · we have · gap · adopt/skip). Absorb ≤3 rules into teach, uncommitted, HTML-only (no video toolchain). Done when one existing lesson passes check-lesson with the new rules and I see before/after figures."
+- **Why:** "done when you investigate" is finished the moment reading starts; "absorb" had no cap or boundary (video deps?). The gate asked 3 questions that the after-version answers in one line.
+- **Good:** pasting the search result as source material let both researchers start from named repos instead of searching blind.
