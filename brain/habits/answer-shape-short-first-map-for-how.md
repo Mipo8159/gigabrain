@@ -35,6 +35,14 @@ questions with one table plus an honest list of gaps.
 back (2026-10-01, 10-19 "simple steps" asked twice). A map without gaps hides the
 difference between "only instructed" and "actually enforced or proven".
 
+**Plain words before mechanism names (2026-11-10):** "cancel the stuck staging
+run so the queue frees up" took three follow-ups ("why staging? didn't I ask
+for prod?", "what do staging and prod have in common?"). What landed: one
+concrete picture first ("one merge starts ONE run that holds both the prod and
+the staging jobs; the run only ends when both end; only one run at a time"),
+then the fix. When a CI/infra term (queue, concurrency group, environment gate)
+is about to carry the explanation, say the picture in everyday words first.
+
 **Signal:** a long first answer forming, a report about to open with a table or
 internal names, Giga asking "where are we?".
 

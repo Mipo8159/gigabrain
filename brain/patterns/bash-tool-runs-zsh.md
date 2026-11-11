@@ -37,7 +37,7 @@ runs if the glob has no match in cwd.
   prompt. In that terminal a leading `!` is history expansion, so give the command
   without `!`.
 
-**Hits:** 15+ between 2026-10-20 and 11-06 (globs ×5, `=`-words ×8 (latest: `echo =====` as a separator, 11-06 cleanup), `:`-modifiers
+**Hits:** 17+ (2026-11-10/11: `"$B:terraform/…"` read as the `:t` modifier → bad git path, fix `${B}:`; `echo ======` again, mid-retro), between 2026-10-20 and 11-06 (globs ×5, `=`-words ×8 (latest: `echo =====` as a separator, 11-06 cleanup), `:`-modifiers
 ×4; the 4th, 11-06: `$base:apps/...` became an absolute path via `:a`), most of them after this entry and its CORE line existed. Reading the rule
 doesn't stop the `=` slip when composing long one-liners fast. **Open fix:** a
 PreToolUse check in `global/hooks/guard.py` that denies a bare word starting with

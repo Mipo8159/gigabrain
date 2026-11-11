@@ -32,6 +32,14 @@ and write it short the first time.
   proof; details live in the runs and PRs.
 
 **How to apply:**
+- 2026-11-11: a teardown ticket for the platform team came out at 38 lines
+  (resource-by-resource runbook, line numbers, verify commands, retention days)
+  and aimed at our own board. Their own teardown tickets: 2–3 lines of context +
+  ~5 checklist items, in *their* project, named their way ("Decommission and
+  archive <service>"). I had read three of them and still overdrafted. Rule for
+  a ticket another team executes: their board, their naming, their size, plain
+  link to ours; add only what they can't know (start gate, a live look-alike not
+  to touch); leave the how (backups, retention, order) to them.
 - PRs: list the team's last 10–15 merged PRs and read the bodies of 3–5 of similar
   size (`gh pr list --state merged`, `gh pr view N --json body`). Note length, tables,
   screenshots, how staging is recorded.

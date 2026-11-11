@@ -41,6 +41,18 @@ with limits chosen by eye.
    migration playbook described the staging gate in the wrong order. Staging
    proof then has to happen on the PR, before the merge.
 
+6. Read the deploy workflow's `concurrency:` block too. 2026-11-10, a monorepo
+   whose main-branch runs queue (`cancel-in-progress: false` on push, by design):
+   an older run had finished prod but sat 9 h waiting for a staging approval, so
+   the next merge's prod deploy would queue behind it indefinitely, and a third
+   push would silently replace the pending run (whose affected set came from
+   `github.event.before`, so the change would never deploy). Fix: settle the
+   stuck run first (cancel it or approve it) and, after the merge, confirm the
+   prod job for *your* change actually ran. Also leave your own run's staging job
+   settled, or you recreate the block for the next person. Repos differ: in the
+   same rollout one repo auto-deployed prod on merge, another gated both
+   environments behind a reviewer, so merge alone touched nothing there.
+
 **Signal:** "merge them", "squash and merge all", "ship it", a PR set whose
 CI has a `deploy-production` job, "monitor and abort on anomalies".
 **Next time:** environments check + abort table + alarm selftest in the

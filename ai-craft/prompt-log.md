@@ -321,3 +321,9 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Compare <repos> with skills teach/visual-explainer. Output: one table, repo × (best idea · we have · gap · adopt/skip). Absorb ≤3 rules into teach, uncommitted, HTML-only (no video toolchain). Done when one existing lesson passes check-lesson with the new rules and I see before/after figures."
 - **Why:** "done when you investigate" is finished the moment reading starts; "absorb" had no cap or boundary (video deps?). The gate asked 3 questions that the after-version answers in one line.
 - **Good:** pasting the search result as source material let both researchers start from named repos instead of searching blind.
+
+## 2026-11-11 · draft a ticket for another team (rung 1)
+- **Before:** "help me create the devops ticket. analyze deeply the infrastructure … craft a ticket for devops to tear down the infrastructure so … there is no trace for it remaining"
+- **After:** "Draft an OPS-board ticket for the platform team to decommission <service>, in their usual shape (like <their ticket key>): 2–3 lines of context + ≤6 DoD items, their naming, link ours. Only add the start gate and the live look-alike they mustn't touch. Keep the deep inventory in my notes, not in the ticket. Draft only."
+- **Why:** "analyze deeply" + "no trace" read as "put the whole inventory in the ticket"; it took two corrections (board/naming/size, then backup details) to reach the team's 6-line shape.
+- **Good:** pasting their board screenshot and naming who owns the how ("devopses know what and how") gave the exact size rule in one line.
