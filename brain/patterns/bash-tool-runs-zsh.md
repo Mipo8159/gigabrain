@@ -31,6 +31,8 @@ runs if the glob has no match in cwd.
   Node-backed script (`bin/check-lesson`) dies with `env: node: No such file or directory`
   (2026-11-09). Prefix the call with
   `export PATH="$HOME/.nvm/versions/node/$(ls ~/.nvm/versions/node | tail -1)/bin:$PATH";`.
+  Same root cause, 2026-11-10: an MCP server launched with `npx` failed to connect
+  (`Executable not found in $PATH: npx`). Tell Giga it's PATH, not a missing tool.
 - **Giga's own terminal is zsh too:** the `! <cmd>` prefix works only in the Claude
   prompt. In that terminal a leading `!` is history expansion, so give the command
   without `!`.

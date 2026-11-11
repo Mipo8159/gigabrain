@@ -34,6 +34,12 @@ with limits chosen by eye.
    it. Find the rollback run for each service before you need it.
 4. Prefer one service at a time with a short gate; if the human picks
    "all at once", note that a breach can't be pinned to one service.
+5. Read the live workflow's `needs:` graph, not the repo's docs about it.
+   2026-11-10, a monorepo whose shared deploy workflow ran
+   `changeset-production` with `needs: ci` only: a merge to main deployed
+   prod while the staging deploy still waited for approval, and the
+   migration playbook described the staging gate in the wrong order. Staging
+   proof then has to happen on the PR, before the merge.
 
 **Signal:** "merge them", "squash and merge all", "ship it", a PR set whose
 CI has a `deploy-production` job, "monitor and abort on anomalies".
