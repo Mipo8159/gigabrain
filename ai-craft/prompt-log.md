@@ -327,3 +327,9 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Draft an OPS-board ticket for the platform team to decommission <service>, in their usual shape (like <their ticket key>): 2–3 lines of context + ≤6 DoD items, their naming, link ours. Only add the start gate and the live look-alike they mustn't touch. Keep the deep inventory in my notes, not in the ticket. Draft only."
 - **Why:** "analyze deeply" + "no trace" read as "put the whole inventory in the ticket"; it took two corrections (board/naming/size, then backup details) to reach the team's 6-line shape.
 - **Good:** pasting their board screenshot and naming who owns the how ("devopses know what and how") gave the exact size rule in one line.
+
+## 2026-11-12 · post-rollout health check (rung 2, good)
+- **Before (as typed):** "check the status for sdk deprecations. is everything merged and deployed? baseline to what it looked like before we started deploying to prod/staging. done when you check the NR and metrics to prove that they are plus or minus within "normal" threshhold (choose a number to associate with normal)."
+- **After (rung 3):** same, plus "read-only; save the checks as rerunnable scripts; output = one table per part + a gaps list; anything off-band gets a cause or 'not ours' with evidence".
+- **Why it worked:** a named baseline (before the first deploy) and a done-line a script can check; delegating the threshold ("choose a number") was fine because it asked for one number up front, not after the data. Result: 2 scripts, 13 PRs × envs verified, 16 service rows, 5 off-band rows each explained.
+- **Contrast, same session:** "update the branch if needed and prepare for deployment" (rung 0) needed the done-line supplied by Claude.

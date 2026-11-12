@@ -32,6 +32,11 @@ with limits chosen by eye.
    agreed with the decider before merging.
 3. Prove the alarm fires once (force a limit to 0 and see `ALERT`), then arm
    it. Find the rollback run for each service before you need it.
+3b. Re-measure the go criterion in the minutes before the click and quote it
+   "as of HH:MM". A monitor's last reading expires when the monitor stops.
+   2026-11-12: "zero since 19:39" was repeated for 5 hours after the watcher
+   ended; the pre-merge check found 52 hits, the last 7 minutes earlier, and
+   stopped a merge Giga had already said go to.
 4. Prefer one service at a time with a short gate; if the human picks
    "all at once", note that a breach can't be pinned to one service.
 5. Read the live workflow's `needs:` graph, not the repo's docs about it.

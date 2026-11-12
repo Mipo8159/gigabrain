@@ -40,6 +40,17 @@ and write it short the first time.
   a ticket another team executes: their board, their naming, their size, plain
   link to ours; add only what they can't know (start gate, a live look-alike not
   to touch); leave the how (backups, retention, order) to them.
+- 2026-11-12 (second time, same root cause): the next teardown ticket again
+  opened with deletion order, file:line ranges and a step checklist. Giga:
+  "too directive, they work on their autonomy". The shape that landed in four
+  short rounds: **Background** (one paragraph) · **Completed** (what our side
+  shipped) · **Backups** (one line: where they're attached) · **Next Steps
+  (<team>)** (neutral "decommission following your standard process; scope
+  includes …" list of resources, no verbs of how). Also cut: side notes that
+  aren't theirs to care about, and any claim not re-verified that day.
+  Rated against their 6 latest decommission tickets it was top-tier; the two
+  gaps vs the best peers were an explicit end state and naming the one
+  irreversible item (the DB backup).
 - PRs: list the team's last 10–15 merged PRs and read the bodies of 3–5 of similar
   size (`gh pr list --state merged`, `gh pr view N --json body`). Note length, tables,
   screenshots, how staging is recorded.
