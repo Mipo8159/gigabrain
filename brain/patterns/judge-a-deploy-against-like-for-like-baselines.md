@@ -51,6 +51,8 @@ fuzz that compared old and new output (0 diffs), then re-benchmarked
 
 **Load-day example (2026-11-09):** one route doubled (p50 17→32 ms) on a weekday when staging traffic was 3–20× the week before. Every child span under it (DB selects, outbound GETs, TCP connects) was +20–45%, and an unchanged service on the old version was +37% the same day: environment, not the change. Facet the child spans before blaming the parent.
 
+**Repeat (2026-11-12):** a rerunnable impact script used only "1 week ago" as its baseline, and its one FAIL (log volume −40%) came from that week being high: 2 and 3 weeks back matched the "after" window. The epoch cut-off was typed in local time again and landed a year off. Build the 2–3-week comparison into the script, not the follow-up, and compute epochs with `TZ=UTC date`.
+
 **Signal:** "check the metrics after the deploy", a % change on a quiet
 staging, a shared library bump, "is it stable / ready for prod".
 **Next time:** set the baseline windows, controls and pass bands before the

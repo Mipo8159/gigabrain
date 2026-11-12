@@ -47,6 +47,17 @@ who message each other. The picking rule (smallest that fits) is in
   proven 13-line fix vanished that way (2026-10-22). Before the session ends, run
   `git diff > <project memory dir>/<name>.patch` and name the patch in the handoff,
   or ask Giga to commit locally to the worktree branch (no push).
+- **Clean up at merge, and check PRs, not commits (2026-11-12).** Two parallel
+  tickets left 13 sibling worktrees, ~60 stale `/tmp` entries and 45 local branches
+  in a multi-repo root. `rev-list --branches --not --remotes` reported 20 repos with
+  "unpushed" commits, but squash-merge plus deleted remote branches makes every
+  merged branch look like that. Ask GitHub instead
+  (`gh pr list --head <branch> --state all`): all 38 were MERGED. Clear the rest by
+  content (`git cat-file -e origin/main:<file>`). Order: `worktree remove`, then
+  `worktree prune`, check out the default branch, `merge --ff-only`, delete the other
+  branches, and keep a check script that exits 1 on leftovers. When local edits are
+  kept through a fast-forward (stash, ff, pop), a file the remote deleted conflicts
+  as modify/delete. Let the deletion win.
 - **Leave the reason behind (2026-10-27).** When creating a worktree, put one line in
   the project handoff ("worktree <path>: <why>, remove after <event>") and tell the
   user then. Before calling an artifact's origin unknown, grep `me/scorecard.md`, the
