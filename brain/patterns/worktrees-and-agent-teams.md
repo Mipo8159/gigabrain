@@ -57,7 +57,10 @@ who message each other. The picking rule (smallest that fits) is in
   `worktree prune`, check out the default branch, `merge --ff-only`, delete the other
   branches, and keep a check script that exits 1 on leftovers. When local edits are
   kept through a fast-forward (stash, ff, pop), a file the remote deleted conflicts
-  as modify/delete. Let the deletion win.
+  as modify/delete. Let the deletion win. "Level with origin" is only true as of
+  the last fetch: a serial `--fetch` recheck of 75 repos took over 10 min, found 5
+  repos behind (49 new upstream commits) and lost 1 SSH fetch. Fetch in parallel
+  with a retry, and put the fetch time in the verdict.
 - **Leave the reason behind (2026-10-27).** When creating a worktree, put one line in
   the project handoff ("worktree <path>: <why>, remove after <event>") and tell the
   user then. Before calling an artifact's origin unknown, grep `me/scorecard.md`, the
