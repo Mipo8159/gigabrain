@@ -56,3 +56,7 @@ SELECT on that table fails until the migration runs. For any migration in the di
 check whether CI/CD runs it. If not, ship in two steps (migrate the env, then push),
 and make the deploy order the first line of the handover: the migration, the env,
 who runs it (an env write is ask-first), and any post-deploy data step.
+Second hit, same repo (2026-11-13/14): a nullable FK column on a lookup table that the main feed queries include.
+The entry existed, but the first handover still buried the order; the background reviewer raised it as the only
+blocker. The next day the dev server, pointed at a remote unmigrated DB, 500'd on exactly those reads (see
+[[check-dev-server-datasource-before-writes]]).
