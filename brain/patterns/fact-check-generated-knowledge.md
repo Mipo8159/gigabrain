@@ -25,7 +25,14 @@ code first. A random sample comes second; a full pass catches what no author dou
 - 2026-11-02, two research agents on an internal platform: each had one confident
   wrong claim (a tool count; a ticket title read as what its diff did).
 
+- 2026-11-13, a lesson step said "add X to the workspace config", but X had been
+  there since the first scaffold commit. An absence claim was made from memory and
+  never grepped. Found only when a later video re-checked the same fact.
+
 **How to apply:**
+- Absence claims ("the repo lacks X", "nothing does Y") cite the grep or `git show`
+  that found nothing. Presence is easier to verify than absence, so absence is
+  where confident errors hide.
 - In the author brief, require a hand-back list: facts not in the source brief, and
   the 3 items it is least sure of. Authors drop, not key, anything they are unsure
   is still available.

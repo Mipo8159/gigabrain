@@ -23,6 +23,13 @@ with more than ~6 boxes or with motion, load `visual-explainer` (or `teach` for 
 whole subject) and build the HTML page; work content stays a local file
 ([[nothing-leaks]]).
 
+**Video medium (2026-11-13):** for onboarding to a complex system, narrated
+multi-part videos worked; see [[narrated-explainer-video-from-html-scenes]]. Deliver
+what Giga will watch as plain files where Giga browses (`~/Downloads/<topic>1.mp4`,
+`<topic>2.mp4`, …). Burying them in a cache with retrieval steps, memory pointers
+and a rebuild script was "too much hassle" (Giga, 2026-11-14). Watch-once media is
+a deliverable, not knowledge to store.
+
 **Why:** Giga said so directly (2026-10-29: "I am visual learner"), and the
 `teach`/`learn` lessons with diagrams and steppers are the ones they use.
 

@@ -333,3 +333,9 @@ The goal is to *see* your own patterns change over the months.
 - **After (rung 3):** same, plus "read-only; save the checks as rerunnable scripts; output = one table per part + a gaps list; anything off-band gets a cause or 'not ours' with evidence".
 - **Why it worked:** a named baseline (before the first deploy) and a done-line a script can check; delegating the threshold ("choose a number") was fine because it asked for one number up front, not after the data. Result: 2 scripts, 13 PRs × envs verified, 16 service rows, 5 off-band rows each explained.
 - **Contrast, same session:** "update the branch if needed and prepare for deployment" (rung 0) needed the done-line supplied by Claude.
+
+## 2026-11-13 · learning video, slow cut (rung 1)
+- **Before:** "create another similar cut. but slow down, keep all the details but explained in adequate and non tangled way. done when you relocclet the whole role and aspect of <service> and reasons why would it need to be migrated to monorepo"
+- **After:** "Remake the video slower: 4 parts × ~5–6 min, one idea per scene, recap per part. Done when, after watching, I can (a) draw a review's trip from store to client report from memory and (b) give 3 sourced reasons for the move; end with a 5-question quiz that tests exactly those. Hand me the mp4s in ~/Downloads as <topic>1..N."
+- **Why:** "done when you recollect" grades Claude's recall, not Giga's understanding; the length, split and delivery place came from the gate, and the delivery place still needed a later correction ("too much hassle").
+- **Good:** "this was better, but the system is so complex" was precise feedback on the first cut: it named what worked and what didn't, so the second cut changed pace, not content.
