@@ -46,3 +46,10 @@ background jobs so that one waits for another.
 killed the tool's own shell (exit 144). The cleanup lines after it (test-row deletes) never ran, so the test
 data stayed behind until a rerun with `ss -ltnp` → `kill <pid>`. The entry is known and still loses to habit,
 so treat a `pkill -f` you are about to type as the signal itself.
+
+**Fifth and sixth hits, same day (2026-11-16, work repo).** `pkill -f 'node dist/main.js'` to stop a local e2e server,
+twice in one session, each time exit 144 (the second time it also swallowed a secrets scan chained after it, which had
+to be rerun). The server was started with `( … nohup node dist/main.js & )`, so no PID was saved. Six hits with this
+entry loaded means the text does not change the habit: the fix is mechanical. Proposed to Giga: a PreToolUse Bash
+hook in gigabrain's global hooks that denies `pkill -f` / `pgrep -f` with the message "save $! to a pidfile, kill that".
+Until then: whenever a background server is started, the same command writes `echo $! > <scratch>/server.pid`.
