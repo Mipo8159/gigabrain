@@ -33,11 +33,16 @@ runs if the glob has no match in cwd.
   `export PATH="$HOME/.nvm/versions/node/$(ls ~/.nvm/versions/node | tail -1)/bin:$PATH";`.
   Same root cause, 2026-11-10: an MCP server launched with `npx` failed to connect
   (`Executable not found in $PATH: npx`). Tell Giga it's PATH, not a missing tool.
+- **`echo` interprets backslashes:** zsh `echo "$rows"` turned a `\n` inside a stored perl
+  expression into a real newline, splitting a data row (2026-11-16). Write data with
+  `print -r --`, `printf %s`, or straight `grep` into the file, never `echo`.
+- **`${(M)arr:#pat}` matched nothing** where `${arr[(I)pat]}` worked (2026-11-16), so a
+  check could never pass. Prefer the `(I)` subscript and prove the check on a planted case.
 - **Giga's own terminal is zsh too:** the `! <cmd>` prefix works only in the Claude
   prompt. In that terminal a leading `!` is history expansion, so give the command
   without `!`.
 
-**Hits:** 17+ (2026-11-10/11: `"$B:terraform/…"` read as the `:t` modifier → bad git path, fix `${B}:`; `echo ======` again, mid-retro), between 2026-10-20 and 11-06 (globs ×5, `=`-words ×8 (latest: `echo =====` as a separator, 11-06 cleanup), `:`-modifiers
+**Hits:** 19+ (2026-11-16: `echo ======` mid-retro again; echo-escape data corruption; 2026-11-10/11: `"$B:terraform/…"` read as the `:t` modifier → bad git path, fix `${B}:`; `echo ======` again, mid-retro), between 2026-10-20 and 11-06 (globs ×5, `=`-words ×8 (latest: `echo =====` as a separator, 11-06 cleanup), `:`-modifiers
 ×4; the 4th, 11-06: `$base:apps/...` became an absolute path via `:a`), most of them after this entry and its CORE line existed. Reading the rule
 doesn't stop the `=` slip when composing long one-liners fast. **Open fix:** a
 PreToolUse check in `global/hooks/guard.py` that denies a bare word starting with

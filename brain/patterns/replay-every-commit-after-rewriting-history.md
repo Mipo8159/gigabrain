@@ -23,3 +23,12 @@ saying the series is clean. Compare `git rev-parse HEAD^{tree}` before and after
 **Signal:** a fixup, autosquash, split or reorder in a series meant to be reviewed commit by commit.
 
 **Next time:** `git status` → fixup → autosquash → replay → tree-hash compare.
+
+**Same root, other shapes (2026-11-16):** (1) parallel agents in one tree staged `git mv`
+renames; a plain `git commit` of 3 files took 87. Commit with `git commit --only <paths>`
+while anyone else edits the tree. (2) Listing a batch's paths from `git diff --cached`
+without `--no-renames` shows renames by the new name only, so the deletions were left out.
+(3) A replay that symlinks today's `node_modules` into each old snapshot lies both ways
+(old commits went red once a dependency was removed; the pre-workspace import "passed"
+on borrowed deps). Each snapshot installs from its own lockfile (`pnpm install --offline
+--frozen-lockfile`) and builds its own workspace packages in dependency order.

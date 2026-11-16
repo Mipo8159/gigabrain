@@ -58,3 +58,12 @@ the new files aside, print the resolved path, then run. Same day, a "no .js besi
 in any commit" check printed nothing because macOS `sed` silently ignores `\|`, so the
 clean result was vacuous. Redone with `grep -E`, and proven by feeding it a planted pair
 first. Rule for any negative check ("nothing found"): show it finding a planted positive.
+
+**Runner migrations (2026-11-16, work repo, tape → Vitest, 85 files):** equal per-file
+assertion counts did NOT prove equal strength. `try { await x; expect.fail() } catch (e) { expect(e.message).toBeTruthy() }`
+passes when `x` resolves: Vitest's `expect.fail` throws and the test's own catch swallows it
+(tape's `t.fail` only recorded). Two converted tests could no longer fail; an independent
+reviewer found them by mutating the source and running old vs new suites side by side.
+Rule: in a runner migration, prove strength with mutations run on BOTH suites (a mutant the
+old suite kills and the new one misses = a weakened test); write negative cases as
+`await expect(x).rejects.toThrow(<exact message>)`, never fail-inside-try.

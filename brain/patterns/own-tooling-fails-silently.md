@@ -41,6 +41,12 @@ caught any of them:
 - Tests cover the failure paths, proven by a mutation run (break the code and
   watch the test fail).
 
+**2026-11-16 (a migration gate):** a "lockfile backed by package.json" row could never PASS
+(zsh match bug) and nobody noticed for weeks; two rows silently skipped `test/` once tests
+became TypeScript; a replay borrowed current deps. All found only by planting faults and by
+reading a green row that should have been impossible. Re-run the planted-fault self-test
+after every gate edit.
+
 **Signal:** "write a hook / script / checker / small server" in gigabrain or a lab.
 
 Related: [[test-guards-against-innocent-lookalikes]], [[incremental-export-cursor-only-advances-on-complete-runs]],
