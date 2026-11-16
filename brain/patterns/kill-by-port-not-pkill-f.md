@@ -41,3 +41,8 @@ itself, or kill a saved PID.
 
 **Signal:** stopping a process Claude started earlier in the session, or chaining
 background jobs so that one waits for another.
+
+**Fourth hit, during cleanup (2026-11-16).** `pkill -f 'HTTP_PORT=3099'` to stop a test API whose port Claude knew
+killed the tool's own shell (exit 144). The cleanup lines after it (test-row deletes) never ran, so the test
+data stayed behind until a rerun with `ss -ltnp` → `kill <pid>`. The entry is known and still loses to habit,
+so treat a `pkill -f` you are about to type as the signal itself.
