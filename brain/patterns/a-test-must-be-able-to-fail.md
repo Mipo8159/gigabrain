@@ -49,3 +49,12 @@ was green: `assert.throws(() => nll([[1]], [0]))` accepted the stub's own TODO e
 When a test expects an error, assert *which* error (`e => !/TODO/.test(e.message)`, or
 a message or type) so a stub, a typo or a wrong branch can't satisfy it. Then
 prove it: reference solution 25/25, stubs 0/25.
+
+**Check which code the run actually loaded** (2026-11-16, work repo TS port): a
+"pins pass on the old JS" run ran the NEW code, because the test loader (tsx) resolves
+`./x` to `x.ts` before `x.js` when both exist (Vitest does the opposite). Only
+`require.resolve` printing the `.ts` path showed it. To prove pins on old code: move
+the new files aside, print the resolved path, then run. Same day, a "no .js beside .ts
+in any commit" check printed nothing because macOS `sed` silently ignores `\|`, so the
+clean result was vacuous. Redone with `grep -E`, and proven by feeding it a planted pair
+first. Rule for any negative check ("nothing found"): show it finding a planted positive.

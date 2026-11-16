@@ -339,3 +339,9 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Remake the video slower: 4 parts × ~5–6 min, one idea per scene, recap per part. Done when, after watching, I can (a) draw a review's trip from store to client report from memory and (b) give 3 sourced reasons for the move; end with a 5-question quiz that tests exactly those. Hand me the mp4s in ~/Downloads as <topic>1..N."
 - **Why:** "done when you recollect" grades Claude's recall, not Giga's understanding; the length, split and delivery place came from the gate, and the delivery place still needed a later correction ("too much hassle").
 - **Good:** "this was better, but the system is so complex" was precise feedback on the first cut: it named what worked and what didn't, so the second cut changed pace, not content.
+
+## 2026-11-16 · plan a migration step (work repo)
+- **Before:** "please analyze every past and future 7.5 steps - in accordition with how the migrations were previously done withing <company> come up with solid plan based on numbers test cases or history patterns or existing guidelines and prepare step 7.5 done when you got the plan"
+- **After:** "Step 7.5 (config + auth). Before code: a table, one row per decision → playbook rule · precedent commit · measured fit (for a shared module, run our tests against it and give the count). Then pins on the old code, port, mutations. Done when: suite + typecheck green per commit (replay), every pin fails on at least one mutation, and anything kept local cites its failing-test count. Local commits only, no push."
+- **Why:** the original named the right evidence sources but its done-line ("when you got the plan") is true as soon as a plan exists. The after version makes "followed precedent" and "no false positives" checkable.
+- **Good:** "this is precisely what I am trying to avoid. false positives." named the real bar in one line, and it changed how every later step ran.
