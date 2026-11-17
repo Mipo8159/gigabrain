@@ -19,6 +19,12 @@ shared config helper adds (nested sections missing when the env is unset). Same 
 I had told Giga lint/format "don't run until moon.yml exists". The task runner showed it
 infers the project from a glob, and both gates were already red in PR CI.
 
+**Also the ticket itself:** 2026-11-17, same work repo: four items of the ticket's own
+checklist (post-deploy functional-test gate, a doc to carry instead of delete, an assumed
+pre-check that was false, a secrets plan we deviated from) surfaced only when Giga asked an
+unrelated "why this folder?" and I reread the ticket. Before calling a step done, diff the
+work against every numbered item of the ticket and list each as done / deviated (why) / open.
+
 **How to apply:** grep the playbook for the step's files; `git log` the earliest and
 latest migrations for the same file; when a shared module could replace ours, run our
 tests against it and quote the count; state the plan only after the table.

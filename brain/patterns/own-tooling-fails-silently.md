@@ -51,3 +51,10 @@ after every gate edit.
 
 Related: [[test-guards-against-innocent-lookalikes]], [[incremental-export-cursor-only-advances-on-complete-runs]],
 [[localhost-server-for-browser-pages]], [[shared-kit-and-checker-before-fan-out]].
+- A probe that reports absence ("not found (expected)") must tell absent from
+  "the call failed": preflight the tool once (an identity call) and abort, and
+  match the not-found error text. 2026-11-17: a broken CLI install made a
+  read-only check print reassuring "not found" lines for every resource.
+- Skip lists and allow lists key on stable attributes (subject, path), never a
+  commit hash: a history rewrite (author-email fix) changed the hash and a
+  replay gate turned red on the commit it was meant to skip.
