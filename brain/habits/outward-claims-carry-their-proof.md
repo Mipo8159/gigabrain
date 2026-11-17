@@ -33,6 +33,10 @@ creating a ticket which does not match reality" (Giga, 2026-10-22). Hits since:
   new stack" as done from a commit message + the ticket's own words; Giga's "are you
   confident … not hallucination?" downgraded it to "likely". Same session: "you already
   have something done" was hearsay; the PRs showed a teammate did that work.
+- 2026-11-17 (standup line): "is this absolutely precise? show me codewise" before
+  a daily-meeting statement; the rewrite said "local branch" and "probably SSM", and
+  a later "where have you seen this?" found the cited permissions belonged to another
+  resource in the same file (see [[fact-check-generated-knowledge]]).
 Each correction cost a round and some trust; measuring was cheap every time.
 
 **How to apply:**

@@ -28,8 +28,17 @@ code first. A random sample comes second; a full pass catches what no author dou
 - 2026-11-13, a lesson step said "add X to the workspace config", but X had been
   there since the first scaffold commit. An absence claim was made from memory and
   never grepped. Found only when a later video re-checked the same fact.
+- 2026-11-17, a deploy lesson described one IAM role's permissions with statements
+  that belonged to a different role ~300 lines earlier in the same template. The
+  lesson's own checker passed because its absence checks grepped the whole file.
+  Found only when Giga asked "where have you seen this, how are you sure?"; 3 of 8
+  videos were re-rendered and the size of an infra ask grew.
 
 **How to apply:**
+- In a file holding many resources (an IAM template, a compose file, a CI config),
+  first find the named block's line range, then read and grep only inside it. A
+  checker's presence and absence checks are bounded to that range too, and the
+  claim cites the range ("role block 1491–1789"), not a single line.
 - Absence claims ("the repo lacks X", "nothing does Y") cite the grep or `git show`
   that found nothing. Presence is easier to verify than absence, so absence is
   where confident errors hide.

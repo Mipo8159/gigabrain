@@ -345,3 +345,9 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "Step 7.5 (config + auth). Before code: a table, one row per decision → playbook rule · precedent commit · measured fit (for a shared module, run our tests against it and give the count). Then pins on the old code, port, mutations. Done when: suite + typecheck green per commit (replay), every pin fails on at least one mutation, and anything kept local cites its failing-test count. Local commits only, no push."
 - **Why:** the original named the right evidence sources but its done-line ("when you got the plan") is true as soon as a plan exists. The after version makes "followed precedent" and "no false positives" checkable.
 - **Good:** "this is precisely what I am trying to avoid. false positives." named the real bar in one line, and it changed how every later step ran.
+
+## 2026-11-17 · lesson on a deploy pipeline (work repo, rung 1)
+- **Before:** "create a visual lesson artifact explaining what this devops ask is … I have a complete chaos in my head … done when you have created sufficient amount of lessons for me to easily grasp these question"
+- **After:** "8 slow videos (4–6 min) in ~/Downloads/<folder>, one box of the pipeline each. Every code claim cites file:line and a script rechecks it (N/N). Done when I can answer, without notes: what the old runner did, what the new one does, what the deploy role may touch (by line range), which secrets live where, and who owns each gap."
+- **Why:** "sufficient … easily grasp" can't be checked; the gate filled length, split and folder. The missing piece was a recall test of exactly the claims that later turned out wrong.
+- **Good:** "where have you seen this permission? how are you sure it exists?" is the best prompt of the session: it asked for the source, not reassurance, and it found a real error in shipped lessons.
