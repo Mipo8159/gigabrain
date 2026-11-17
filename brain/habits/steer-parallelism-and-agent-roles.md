@@ -50,6 +50,14 @@ Rules:
   test scripts, which use fixed docker names (`db`, `lint-target`); two deleted each
   other's containers and one ran `docker volume prune -f`. Each brief must say: unique
   container/volume names (suffix the task), never prune or remove what you didn't create.
+- **Two sessions on one task: read the other's latest state before answering.**
+  2026-11-17: one session taught and answered questions while a second one ran the
+  read-only checks for the same ticket. The first gave answers from its own older
+  reading (a secret "only in old CI", DB and event permissions "needed", an SSM line
+  "to confirm"). The second had already shown these were wrong or out of date in its
+  draft and handoff. Before stating the
+  state of shared work, `ls -t` the task's tools dir and read the repo handoff; say
+  which session's artifact the answer comes from, and point to the newer one.
 - **Have agents write the report to a file.** 2026-11-09: 5 of 8 background reviewers'
   results were cut off mid-findings in the idle notification (even at a 40-line cap), costing a
   resend round each. Put `write your final report to <scratch>/<name>.md, reply with the path`
