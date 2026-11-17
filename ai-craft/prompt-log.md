@@ -351,3 +351,8 @@ The goal is to *see* your own patterns change over the months.
 - **After:** "8 slow videos (4–6 min) in ~/Downloads/<folder>, one box of the pipeline each. Every code claim cites file:line and a script rechecks it (N/N). Done when I can answer, without notes: what the old runner did, what the new one does, what the deploy role may touch (by line range), which secrets live where, and who owns each gap."
 - **Why:** "sufficient … easily grasp" can't be checked; the gate filled length, split and folder. The missing piece was a recall test of exactly the claims that later turned out wrong.
 - **Good:** "where have you seen this permission? how are you sure it exists?" is the best prompt of the session: it asked for the source, not reassurance, and it found a real error in shipped lessons.
+
+## 2026-11-17 · outward PR with a feeling as done-line
+- **Before:** "open the PR with up to date, correct description … done when you have the PR … which carries no risks and is likely to be approved"
+- **After:** "Open the infra PR for the role change, shaped like the last approved one from our team. Done when: every claim in the body is measured or cited (PRs opened and checked), the policy check + planted faults pass on the pushed head, and one independent reviewer reports 0 blocking. Allowed: commit, push, open PR. Ask first: anything else."
+- **Why:** "no risks" and "likely to be approved" can't be checked by a script; precedent shape + 0 blocking findings can, and the second review is what actually found the rollback gap.

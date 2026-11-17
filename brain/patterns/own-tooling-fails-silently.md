@@ -38,6 +38,11 @@ caught any of them:
   `--help` as read-only; for Giga-run apply scripts, prefer dry-run by default.
 - A script that writes backups inside a repo gitignores them first.
 - Before reporting a file as written (yours or a subagent's), `ls` it.
+- Capture a CLI's error by its code, not its first line: AWS CLI errors start with a blank
+  line, so `2>&1 | head -1` turned every failed call into an empty "result" (2026-11-17,
+  40/40 blank decisions). Print the first error once.
+- One planted fault per dimension the check claims: a policy check that matched resources
+  passed a fault that removed an *action* (2026-11-17); adding an action check caught it.
 - Tests cover the failure paths, proven by a mutation run (break the code and
   watch the test fail).
 

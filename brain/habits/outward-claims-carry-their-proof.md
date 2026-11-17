@@ -61,6 +61,9 @@ Each correction cost a round and some trust; measuring was cheap every time.
   itself checked: the rows, `state == MERGED`, a successful deploy run.
 - When a reviewer or later check overturns something Giga already has, say so plainly
   at the top, before the fix.
+- Open every PR or commit you cite as history and check it touched *the same thing*: a PR
+  cited as part of a role's history had changed a sibling role (2026-11-17, caught before
+  push). Precedent tables built by script (author, approver, days) beat remembered ones.
 
 **Signal:** the text is going to a ticket, a DM, a PR, a channel, or a manager; or
 Giga asks "are you sure?" or "be precise".
