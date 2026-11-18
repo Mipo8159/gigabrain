@@ -18,6 +18,12 @@ real bug or review finding the first time:
    append-only (a CRM import that can't update records duplicates them). So serve only artifacts whose ledger commit
    succeeded, ask the ledger rather than listing the directory, and have the client record the ids it fetched in its
    own state file, not infer them from which folders exist. Otherwise deleting an imported folder brings it back.
+10. **A cursor shared by several outputs moves only when all of them go out.** If a run can select one output
+    (`--only`, an HTTP option), the cursor would skip that period for the other one for good. Send both or neither.
+    **A long backlog is read in bounded parts:** a per-page timeout and a page cap per run, committing the cursor at
+    the last *whole* period read. One all-or-nothing deadline over the backlog can fail on every run, and it gets
+    worse every day. Close a period a few minutes after it ends, because late rows are still landing.
+    2026-11-18: a background reviewer found both in a fresh append-only feed reader; 199 tests had passed.
 8. **Make output deterministic** (`STRING_AGG ... WITHIN GROUP (ORDER BY …)`), or hashes flap. Use language-neutral date literals (`'YYYYMMDD'` on SQL Server).
    Every "pick one of several rows" (newest card, latest address) needs a total order: break ties on stable ids,
    never on the order SQL returns rows in. 2026-11-03: a person's name came from "the newest card", ties fell to row

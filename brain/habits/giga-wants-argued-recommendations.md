@@ -51,6 +51,12 @@ one by size. The lead had ranked the other higher, and its infra half was alread
 done, which made it the stepping stone. Giga's "why was I told to start from X?"
 flipped the verdict. When someone with context set an order (rank, assigner,
 sprint), first reconstruct why; put "the lead's reason" in "what would change my mind".
+- **Profile the real data before recommending a design for it, not after.** 2026-11-18: a new
+  tracking feed. Claude recommended per-contact summary fields from the shape of 3 sample rows. The
+  aggregate profile, which ran only after a VPN drop forced a pause, showed ~1% of events logged in and
+  one session per view, which flipped the recommendation to a per-item daily report. Giga, unsure
+  about it, went with the revised one. Run a counts-only profile (types, share with a user, distinct
+  keys, date range) before the first recommendation; it costs one call.
 
 Giga also uses the "clarify" option in `AskUserQuestion` rather than pick a
 weak option. Treat a rejected question batch as "the framing is wrong", not
