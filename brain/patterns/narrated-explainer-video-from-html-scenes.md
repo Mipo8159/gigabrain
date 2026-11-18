@@ -37,6 +37,8 @@ than agreed, add the part and say so; don't cram.
 for after lesson pages ([[visual-learner-diagram-first]]). Driving cues from measured
 TTS durations removes the sync bugs that hand-timed video has.
 
+Pacing evidence (2026-11-19): ~1,000 words of narration ran 7.5 min; trimming to ~830 words and shortening gaps (0.7 s line, 1.6 s scene) gave 6.0 min. Budget ~140 spoken words per finished minute and cut words before pauses.
+
 **Signal:** "make a video", "explain it with motion and voice", or onboarding to a
 system with many glued parts.
 
