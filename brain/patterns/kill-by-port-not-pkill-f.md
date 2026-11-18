@@ -36,6 +36,11 @@ The real fix was upstream: the one-off hung because the service it called was st
 one-off scripts a timeout (`timeout 60 node -`, `AbortSignal.timeout`) instead of killing them
 afterwards.
 
+**To end a stuck check (2026-11-18, fifth repeat, with this entry *and* the handoff warning loaded).**
+A backgrounded loop of `curl` calls hung on an unreachable host; Claude "cleaned it up" with
+`pkill -f 'heartbeat/status'` and killed its own shell (exit 144). The fix was upstream again: every
+`curl` needs `-m <seconds>`; to stop a background task, use the task-stop tool, not a pattern kill.
+
 **Next time:** never `pkill -f` anywhere, host or container. Use `timeout` on the command
 itself, or kill a saved PID.
 

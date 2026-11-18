@@ -359,3 +359,7 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "help me add a content upload to <entity>, from admin panel. update and create endpoints. admin or application asking for it should also return its image." (then "leave that part as it is" → "make the name required, and cover optional. per region")
 - **After:** "Admin create/update/delete for <entity> (none exist today?): name required and stored per region, optional image cover returned on every GET. Don't touch translations otherwise. Done when: migration up/down/up locally, curl create→cover→rename→delete (409 if in use), admin builds. Shared env ask-first."
 - **Why:** the ask assumed create/update existed; the naming model surfaced in three rounds, and "leave that part as it is" contradicted "add create" until rephrased. 2026-11-13.
+
+- **Before:** "check the server, download fails for my client" (then a screenshot, then "he says yesterday it was working", then "is it definitely not caused by us? I need guarantees")
+- **After:** "Client's Lutecia.exe fails since this morning: <screenshot>. Expected: a new dated folder, as yesterday. Changed: I sent him new .env files. I suspect the .env or the server. Done when: one-line cause backed by the server's own logs, plus what to tell the client. VPN up, read-only."
+- **Why:** the screenshot held the first answer (a `www.` typo) and "worked yesterday" + "I need a guarantee" were the real acceptance bar; arriving one by one they cost ~6 rounds and two walked-back verdicts. 2026-11-18.
