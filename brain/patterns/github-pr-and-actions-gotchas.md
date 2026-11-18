@@ -65,3 +65,18 @@ while a gated deploy check waits; poll and ignore `deploy-staging` instead.
 **Signal:** two or more "Deploy / <app> (staging) … Waiting" checks plus "which one?",
 or "where is rerun?". **Next time:** PR files + detect log before answering; give the
 cancel-then-rerun path in the first answer.
+
+## The PR diff limit counts raw patch lines, not +/- (2026-11-18)
+
+GitHub refuses `gh pr diff` (HTTP 406, `PullRequest.diff too_large`) above 20,000 lines,
+and AI review bots that read the PR through it then post nothing. The count is the raw
+patch: file headers (~6 lines per new file), hunk headers and context, not the
+`additions + deletions` the API reports. A large move PR was trimmed to 19,894 +/-
+and still got 406 at 21,183 raw lines; Claude had promised the trim would be enough
+before measuring the real number. The bot later passed on a plain rerun (it found
+another way to read the change), so a 406 run is worth one rerun before any split.
+
+**Signal:** "Claude/AI review failed or posted nothing" on a PR with ~15k+ changed lines.
+**Next time:** measure `git diff origin/main...HEAD | wc -l` and try `gh pr diff <n>`
+before proposing cuts; rerun the bot once; the fallback is a stacked PR for whole
+file groups (e.g. new tests), never compacting code to fit.
