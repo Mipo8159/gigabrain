@@ -30,3 +30,11 @@ handle. Never weaken a check to make it pass. See
 afterwards. 2026-10-12: with a deadline that day, Claude skipped questions and
 delivered two verified repos smoothly, while an onboarding question in the same
 window was rejected and the turn interrupted.
+
+**The batch shows the output, not just questions about it.** For a new file, export or folder, put a
+preview in the one batch: the folder tree, the header line and one real row. 2026-11-18/19: "transform to the
+target's format … keep Excel copies for viewing" was built three times. First as per-day aggregate reports
+(the target had no importer for events), then as raw rows in a separate subfolder, then as raw rows next to the
+existing files. Each version passed its tests and a review. Giga's corrections were "untouched, as they were"
+and "wrapped exactly as the rest". A 5-line preview would have surfaced both in the first batch. When the target
+can't import the data, the default is the source's own rows, unchanged, in the existing layout.
