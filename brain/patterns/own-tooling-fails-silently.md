@@ -26,7 +26,18 @@ caught any of them:
   never written to disk. 2026-10-19: the finalize script's `git add -A` committed
   the apply script's `*.bak-*` backups (now gitignored).
 
+- 2026-11-19: a model-run eval reported 12/12 "fail" across both arms; every
+  run's check log said `node: command not found` (node came from a version
+  manager that headless runs don't load). ~$4 bought nothing. Same day, a hook
+  was "dry-run" with a guessed env var it never read, so 3 test rows landed in
+  the real signal log (found and removed).
+
 **How to apply** (self-check before handover):
+- Before reading any eval verdict, open one run's check log. If an arm fails
+  identically on every run, or a baseline that passed before now fails, suspect
+  setup (PATH, auth, missing tool) and stop there instead of paying for more runs.
+- Never guess a dry-run flag on a stateful tool. Read how it picks its state
+  paths, or copy it into a temp root with its own state dirs and run it there.
 - Check every subprocess's exit code, give it a timeout and `stdin`, and
   decode its output with `errors="replace"`.
 - On error, a hook or guard fails *closed* or says so loudly. It never passes quietly.

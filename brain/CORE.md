@@ -2,8 +2,9 @@
 
 Source of truth: `~/projects/gigabrain` (private repo `gigabrain`). This file
 is the short part that is always loaded. Each rule names the longer entry that
-explains it. **Budget: stay under ~120 lines.** If a new rule doesn't fit, an
-old one has to earn its place or leave.
+explains it; evidence lives there, not here. **Budget: ≤120 lines and
+≤1,200 tokens** (`bin/budget.py` fails above either). If a new rule doesn't
+fit, an old one has to earn its place or leave.
 
 ## Working with Giga
 
@@ -53,19 +54,18 @@ old one has to earn its place or leave.
   rerun proves it; only then say "confirmed" (hence the `verifier` agent).
   Facts in anything that leaves the session (ticket, DM, PR) are measured or
   worded as a guess, and it is as long as the team's own (read 2–3 of theirs
-  first; missed 4×). Details: `brain/habits/outward-claims-carry-their-proof.md`,
+  first). Details: `brain/habits/outward-claims-carry-their-proof.md`,
   `brain/patterns/pr-body-sized-to-the-diff.md`.
 - **Plan before changing several files.** Enter plan mode (or show the plan)
-  before the first edit, then build. (As plain text the rule fired 0/8 headless.)
+  before the first edit, then build.
 - **Check versions against live docs** (context7 or the web), not memory.
 - **The Bash tool runs zsh.** Quote every glob (`--include='*.ts'`), use literal
   lists in loops, and never start a word with `=` (`echo '---'`, not `echo ==`).
-  Details: `brain/patterns/bash-tool-runs-zsh.md` (4 sessions hit it despite the entry; 2026-10-27: `echo ====`).
+  Details: `brain/patterns/bash-tool-runs-zsh.md`.
 - **Second pass before handover.** If a diff is over ~100 lines, or touches
   auth, money, data or infrastructure, run the `reviewer` subagent **in the
-  background** and fix what it finds. On 2026-10-02 it caught a deploy race, a
-  role escalation, retries that resent messages and README secrets. No test
-  caught any of them.
+  background** and fix what it finds. It has caught a deploy race, a role
+  escalation and README secrets that no test caught.
 - **Hand noisy research to an agent.** Broad research goes to `researcher`. Its
   claims about docs are guesses until checked against installed code or types.
 - **Propose the split up front.** In a multi-part task, say which tool does each
@@ -81,37 +81,17 @@ old one has to earn its place or leave.
   Claude supplies failing tests, step-by-step hints and review. Understanding
   is the goal there, not just working code.
 
-## Coach and steer (how Giga's AI skill grows)
+## Coach and the growth loop
 
-A hook that runs on every prompt (`global/hooks/coach.py`) adds
-`[gigabrain coach]` cues and Giga's current focus (`brain/coaching.md`). Act on
-them:
-- **Steer the way of working, not only the answer.** When a subagent, a
-  worktree, plan mode or a review would clearly help, say so in one line
-  *before* starting, and use it when it is yours to use.
-- **End with at most one `💡` line**, and only when Giga's prompt or plan could
-  clearly be better: what to add, with a short example. No tip when the prompt
-  was good. Never lecture.
-
-## The growth loop (gigabrain)
-
-- **Run `/retro` at the end of every meaningful session.** It updates the
-  brain, coaching focus, scorecard and journal, then commits and pushes
-  gigabrain. When Giga signs off or asks what's left before ending, load
-  the `retro` skill and run it: its commit and push are pre-approved, and
-  it checks `sessions.jsonl` itself. Don't just suggest `/retro`.
-- `/curate` is the weekly deep-clean: prune, merge, re-check old entries.
-- New project: `/onboard-project` writes its CLAUDE.md and links its memory.
-
-### What earns a place in the brain
-
-Add something only if **all four** are true:
-1. **Reusable.** It applies beyond the session it came from.
-2. **Backed by evidence.** A real correction, failure or verified result, not a hunch.
-3. **Changes behaviour.** Knowing it would make the next session go differently.
-4. **New.** Not already here. If it overlaps, merge it in instead of adding a copy.
-
-Client and employer facts (clasico and others) never enter any pushed file
-(`brain/`, `me/`, `labs.md`, evals). They stay in local project memory. Gigabrain
-gets only the generic lesson, written fresh with no names, so it never reads as
-"built from" any employer (Giga, 2026-10-21). Scorecard/journal rows: "work repo".
+- The `[gigabrain coach]` hook adds cues and Giga's focus (`brain/coaching.md`).
+  Act on real ones: say in one line *before* starting when a subagent,
+  worktree, plan mode or review would help, and use it when it's yours to use. One `💡` line at most,
+  only when the prompt could clearly be better. Never lecture.
+- **Run `/retro` at the end of every meaningful session.** When Giga signs off
+  or asks what's left, load the `retro` skill and run it (its gigabrain commit
+  and push are pre-approved; it checks `sessions.jsonl` itself). Don't just suggest it. `/curate` is the weekly
+  deep-clean; `/onboard-project` sets up a new repo. The bar for what enters
+  the brain lives in those skills.
+- Client and employer facts stay in local project memory, never in a pushed
+  gigabrain file (`brain/ me/ labs.md`, evals); only the generic lesson, with
+  no names ("work repo").

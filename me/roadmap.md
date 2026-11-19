@@ -6,7 +6,7 @@ skill. Progress is tracked where it already lives: `/retro` rows in
 `me/scorecard.md`, the monthly re-score, and the `Now:` line below, which the
 coach hook adds to every session. There is no second tracker.
 
-**Now:** Phase 2, step 1 (second half). Giga launches `claude -w routine`. There: a headless weekly job (`signals-report` + `check-library --drift` + `bin/eval-skills` + `bin/eval-knowledge --domain process --arms base,brain`, the CORE regression) writes a report for `/curate`, never a push. Coach signal pollution: fixed 2026-10-13.
+**Now:** Phase 2, step 1 (second half). Giga launches `claude -w routine`. There: a headless weekly job (`signals-report` + `check-library --drift` + `bin/eval-skills` + `bin/eval-knowledge --domain process --arms base,brain`, the CORE regression) + `bin/budget.py <work repo> --max 6200` + `bin/coach-selftest` (added 2026-11-19; eval runs need node on PATH) writes a report for `/curate`, never a push. Coach signal pollution: fixed 2026-10-13.
 
 `/retro` moves the `Now:` line, and marks a phase done only when its proof is shown.
 

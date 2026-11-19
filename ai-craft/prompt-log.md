@@ -369,3 +369,8 @@ The goal is to *see* your own patterns change over the months.
 - **After (kept, plus one clause):** "Before I post this in the team channel: give each claim a verdict (proven / not proven / wrong) with the evidence (log line, gh output, file:line). Rewrite it with proven claims only. Say what only a future run can prove."
 - **Why:** naming irreversibility + "with evidence" made Claude re-check every claim live; one was wrong ("on purpose"), one unproven ("DevOps is handling"). Asking for the per-claim table up front saves the second "is this 100%?" round.
 - **Good:** "don't we already have the ssm params?" caught a stale handoff fact with one question from Giga's own memory.
+
+## 2026-11-19 · brain efficiency trim (gigabrain, rung 0 → 2)
+- **Before:** "please check our gigabrain. I need the context of it to be revaluated. whether its large or acceptible."
+- **After:** "Measure gigabrain's always-loaded context on this machine (startup + per-prompt hook) with bin/budget.py and a history replay. Done when: one table per source with tokens/session vs baseline; acceptable = ≤5% of the window. Read-only; I decide every cut. Model-run checks ≤ $5, stop on a setup failure."
+- **Why:** "large or acceptable" had no number, so Claude had to ask for the threshold and the scope. The third prompt added baseline + "test after each step" (rung 2) but no target number, and no cost cap, so a broken eval run spent ~$4 before anyone looked.
