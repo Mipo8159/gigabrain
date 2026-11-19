@@ -363,3 +363,9 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "check the server, download fails for my client" (then a screenshot, then "he says yesterday it was working", then "is it definitely not caused by us? I need guarantees")
 - **After:** "Client's Lutecia.exe fails since this morning: <screenshot>. Expected: a new dated folder, as yesterday. Changed: I sent him new .env files. I suspect the .env or the server. Done when: one-line cause backed by the server's own logs, plus what to tell the client. VPN up, read-only."
 - **Why:** the screenshot held the first answer (a `www.` typo) and "worked yesterday" + "I need a guarantee" were the real acceptance bar; arriving one by one they cost ~6 rounds and two walked-back verdicts. 2026-11-18.
+
+## 2026-11-19 · channel post with certainty bar (work repo, good prompt)
+- **Before:** "are you absolutely sure of this verdict? … if I post this, I can not unpost later. so I need you to have 100% guarantee with evidence"
+- **After (kept, plus one clause):** "Before I post this in the team channel: give each claim a verdict (proven / not proven / wrong) with the evidence (log line, gh output, file:line). Rewrite it with proven claims only. Say what only a future run can prove."
+- **Why:** naming irreversibility + "with evidence" made Claude re-check every claim live; one was wrong ("on purpose"), one unproven ("DevOps is handling"). Asking for the per-claim table up front saves the second "is this 100%?" round.
+- **Good:** "don't we already have the ssm params?" caught a stale handoff fact with one question from Giga's own memory.

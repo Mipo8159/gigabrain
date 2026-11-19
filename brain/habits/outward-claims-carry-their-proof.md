@@ -37,6 +37,11 @@ creating a ticket which does not match reality" (Giga, 2026-10-22). Hits since:
   a daily-meeting statement; the rewrite said "local branch" and "probably SSM", and
   a later "where have you seen this?" found the cited permissions belonged to another
   resource in the same file (see [[fact-check-generated-knowledge]]).
+- 2026-11-19 (handoff as fact): a session-start handoff said "DevOps must create
+  parameter X"; Claude repeated it, and Giga's "don't we already have it?" found a
+  deeper note (and the infra code) saying it existed for months. The same session's
+  channel draft said a red check was "red on purpose" and that DevOps was "handling"
+  a PR with no assignee and no DevOps review; Giga's "100% guaranteed?" cut both.
 Each correction cost a round and some trust; measuring was cheap every time.
 
 **How to apply:**
@@ -64,6 +69,16 @@ Each correction cost a round and some trust; measuring was cheap every time.
 - Open every PR or commit you cite as history and check it touched *the same thing*: a PR
   cited as part of a role's history had changed a sibling role (2026-11-17, caught before
   push). Precedent tables built by script (author, approver, days) beat remembered ones.
+
+- Tag claims in answers Giga will act on: `✔ checked` (command / file:line),
+  `📝 memory/handoff, not rechecked`, `? inference`. A claim that triggers an action
+  (ask another team, rerun CI, post, merge) is checked before it is said; if it
+  can't be checked here, say so and hand over the command.
+- Handoff and memory notes are claims too: check them against code before repeating.
+  When a fact turns out wrong, grep every memory note for it and fix all copies.
+- "Is this 100% guaranteed?" splits into what is proven *now* (the error text from the
+  system itself, on the current head) and what only a future run can prove; word the
+  message so it claims only the first.
 
 **Signal:** the text is going to a ticket, a DM, a PR, a channel, or a manager; or
 Giga asks "are you sure?" or "be precise".
