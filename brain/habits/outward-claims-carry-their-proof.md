@@ -75,6 +75,8 @@ Each correction cost a round and some trust; measuring was cheap every time.
   (ask another team, rerun CI, post, merge) is checked before it is said; if it
   can't be checked here, say so and hand over the command.
 - Handoff and memory notes are claims too: check them against code before repeating.
+  So is a status line in Giga's own prompt (2026-11-20: "step 2 is sent" was repeated as fact;
+  ticket search + git showed nothing was filed). Check "sent / merged / deployed" before building on it.
   When a fact turns out wrong, grep every memory note for it and fix all copies.
 - "Is this 100% guaranteed?" splits into what is proven *now* (the error text from the
   system itself, on the current head) and what only a future run can prove; word the

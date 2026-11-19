@@ -67,3 +67,10 @@ reviewer found them by mutating the source and running old vs new suites side by
 Rule: in a runner migration, prove strength with mutations run on BOTH suites (a mutant the
 old suite kills and the new one misses = a weakened test); write negative cases as
 `await expect(x).rejects.toThrow(<exact message>)`, never fail-inside-try.
+
+**Read the observation before teardown** (2026-11-20, work repo pins): a helper returned
+`called: scope.isDone()` after `nock.cleanAll()` in `finally`; cleanAll removes pending
+interceptors, so `isDone()` was true either way and both "was called" and "was not called"
+asserts were vacuous. Capture every observation (mock done-flags, spy calls, captured args)
+into the return value *before* the cleanup runs, and prove each with a mutation that drops
+the call.

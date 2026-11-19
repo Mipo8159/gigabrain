@@ -68,6 +68,13 @@ already red, so every fault looked "caught". Check that the baseline passes each
 before planting faults, and judge each fault by its own row. Run a new checker on the
 commit that drew the misses it exists for: the first version passed them.
 
+**2026-11-20 (a lockfile diff script):** a per-importer diff of a pnpm 12 lockfile printed
+"0 importers changed, 0 packages removed" next to a 4,329-line deletion: the file holds two
+YAML documents and the script parsed the first (a 15-package side document). Rule: before
+trusting a checker's "nothing changed", hold it against a cheap independent count (diffstat,
+`wc -l`, a package count); a summary that contradicts it is a bug in the checker. After the
+fix, re-run it on the earlier claims it made (here the previous step's: still true).
+
 **Signal:** "write a hook / script / checker / small server" in gigabrain or a lab.
 
 Related: [[test-guards-against-innocent-lookalikes]], [[incremental-export-cursor-only-advances-on-complete-runs]],
