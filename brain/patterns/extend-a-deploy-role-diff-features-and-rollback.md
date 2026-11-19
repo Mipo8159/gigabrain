@@ -28,8 +28,20 @@ found three gaps no sibling deploy had ever exercised:
 - Prove it offline: resolve the policy for each stage, match the real names, include
   negative cases and planted faults (one per dimension: resources *and* actions).
 
+**Second case, 2026-11-19 (same root cause, generated list):** for the next service the
+permission list was *generated*: translate the template locally, take each resource type's
+create/update/delete/read handler permissions from the AWS resource schemas bundled with
+cfn-lint, keep only actions the role already grants siblings ("precedent filter"), check
+every (action, ARN) per stage. A sibling control showed 0 missing, so the method doesn't
+invent needs. A background reviewer still found a gap: the precedent filter dropped
+`iam:ListRolePolicies` / `ListAttachedRolePolicies`, which only the IAM role **delete**
+handler needs. Siblings had never deleted a role, so "granted nowhere" meant "never
+exercised", not "not needed". A failed first deploy would have ended in UPDATE_ROLLBACK_FAILED.
+- Precedent proves create/update only. Check delete handlers separately, without the filter.
+- Write the delete path as a positive assertion plus a planted fault in the checker.
+
 **Signal:** "same way it deploys the X stacks today", a first migrated service of a new kind,
 or an artifact path/prefix that changes with the move.
-**Next time:** run the property diff and the rollback walk before writing the ask, not after review.
+**Next time:** run the property diff and the rollback walk before writing the ask, not after review; when generating the list, exempt every delete handler from the precedent filter.
 
 Related: [[prove-a-permission-revoke-by-diffing-effective-access]], [[map-each-step-to-playbook-and-precedent-first]], [[a-test-must-be-able-to-fail]].
