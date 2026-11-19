@@ -80,8 +80,16 @@ Each correction cost a round and some trust; measuring was cheap every time.
   system itself, on the current head) and what only a future run can prove; word the
   message so it claims only the first.
 
+- "Ready to push" is a claim about the exact tree, now: rerun the proofs on it, not the
+  numbers from before. 2026-11-19: a later `pnpm install` had quietly re-resolved shared
+  deps for two other packages (lock vs main +55/-191, after "+52/-0" was reported). After
+  any package-manager install, diff the lockfile against the base branch and the pushed
+  head; a change in another package's entry is drift.
+
 **Signal:** the text is going to a ticket, a DM, a PR, a channel, or a manager; or
 Giga asks "are you sure?" or "be precise".
 **Next time:** run the claims pass before the first draft is shown, not after the challenge.
 
 Related: [[giga-wants-argued-recommendations]], [[fact-check-generated-knowledge]], [[a-test-must-be-able-to-fail]].
+
+- Length rule (moved from CORE 2026-11-19): read 2–3 of the team's own first; missed 4× before it moved into CORE.

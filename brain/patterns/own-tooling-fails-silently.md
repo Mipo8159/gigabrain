@@ -52,6 +52,11 @@ became TypeScript; a replay borrowed current deps. All found only by planting fa
 reading a green row that should have been impossible. Re-run the planted-fault self-test
 after every gate edit.
 
+**2026-11-19 (a precedent check):** the planted-fault self-test ran on a baseline that was
+already red, so every fault looked "caught". Check that the baseline passes each row
+before planting faults, and judge each fault by its own row. Run a new checker on the
+commit that drew the misses it exists for: the first version passed them.
+
 **Signal:** "write a hook / script / checker / small server" in gigabrain or a lab.
 
 Related: [[test-guards-against-innocent-lookalikes]], [[incremental-export-cursor-only-advances-on-complete-runs]],
