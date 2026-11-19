@@ -38,6 +38,16 @@ Windows and `.command`/`.app` on macOS. Say so before building, and offer one cl
   separator or number-format fix can't live in the CSV (a `sep=` line breaks importers): put "never open/save in
   Excel; choose UTF-8 + comma in the import" in the program's closing message, where a non-technical user reads.
 - Windows: keep the console open at the end ("Press Enter"), or a double-clicked error flashes and vanishes.
+- **"It freezes" from a non-technical user has three cheap causes; fix all three before asking which.**
+  (1) Windows QuickEdit: one click in the console starts a selection and pauses the program at its next write
+  (a spinner hits that within 200 ms) until a key is pressed. Turn it off at start: `GetConsoleMode` on stdin,
+  then `SetConsoleMode(mode &^ 0x0040 | 0x0080)` (stdlib `syscall` + kernel32, no-op when input is redirected).
+  (2) No overall HTTP timeout (big downloads) means a silent dead connection waits forever: use an idle deadline
+  instead, see [[keepalive-socket-dies-during-blocking-work]]. (3) A long step with no motion on screen reads as
+  dead: keep the spinner running through download *and* local merge. 2026-11-19: (2) reproduced (a test server
+  that goes silent mid-file hung the client; after the fix it errors in 0.3 s); (1) and (3) shipped unconfirmed.
+  **Signal:** "it freezes sometimes" with no error text. **Next time:** also ask "does a key press make it go on?"
+  (yes = QuickEdit) and for a photo of the window.
 
 **Why:** 2026-10-14: the packaging target moved from exe → zip kit per OS → "one exe for all" → git repo + .env
 within one session; each move was a rebuild. The answers above were what survived. Real runs on the Linux build

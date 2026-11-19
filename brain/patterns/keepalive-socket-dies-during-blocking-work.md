@@ -25,4 +25,11 @@ Test the retry with a local server that `req.socket.destroy()`s the first reques
 **Signal:** `fetch failed` / `UND_ERR_SOCKET` / `other side closed` in a job that works from curl or in isolation;
 an HTTP call placed after a heavy in-process step.
 **Next time:** add the connection-level retry to every GET adapter up front; repro with a blocked loop, not a sleep.
-Related: [[unheard-error-event-kills-node]]
+**Go variant (idle deadline on pooled connections):** to fail a silent connection without an overall
+`http.Client.Timeout`, wrap the `DialContext` conn so each `Read` sets `SetReadDeadline(now+idle)`; TLS rides
+on top, so https is covered. Also refresh it in `Write`: net/http's background readLoop sits in a `Read` while
+the conn idles in the pool, so its deadline was set when the conn went idle, and a request sent on it after
+local work gets only what is left; Go retries GET/HEAD on a fresh dial but PUT/POST fail (`i/o timeout`).
+2026-11-19, reviewer repro: idle 1 s, conn idle 0.8 s, server answers in 0.5 s → PUT/POST failed after 200 ms
+without the `Write` override, all three passed with it. A changed deadline applies to a `Read` already blocked.
+Related: [[unheard-error-event-kills-node]], [[double-click-client-for-every-os]]
