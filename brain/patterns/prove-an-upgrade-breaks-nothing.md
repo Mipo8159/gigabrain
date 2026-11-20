@@ -71,7 +71,21 @@ because the harness was written before the entry was read. Read this entry first
   payload for planted markers (a fake bearer token, an SQL literal, a 500 KB error) showed
   the old version leaking all three and the new one redacting them.
 
-**Signal:** "will upgrading X break anything for the repos that use it?",
+**Same rule for a migration, per step (2026-11-20, work repo):** after five ported steps, all
+green on unit tests and gate scores, Giga asked "do they work at all? cant we prove it on local
+scale?" and then made it standing: e2e and old-repo comparison come first on every step. What
+worked: real handlers, no mocks, against a local HTTPS stub of the upstream API and a stub of
+the cloud invoke API that the real SDK reaches through its endpoint env var; one harness run
+on the OLD repo, the new source, an esbuild bundle and (once a template exists) the real build
+output; a normalised trace of every observable effect (requests, headers, invokes, errors,
+log meaning) diffed old vs new. Deliberate differences go in a named allow-list that fails
+when a rule matches nothing (stale). Replay it on every earlier commit in detached worktrees
+when it arrives late. It found what unit tests missed: a shared HTTP client that follows a
+302 off-host (host check bypass), a token in a library error's inspect output, a schedule
+input no test covered.
+
+**Signal:** "will upgrading X break anything for the repos that use it?", or a migration
+"step" where only unit tests are green,
 "deep test with evidence", a shared package bump across many services.
 **Next time:** inventory → pilot one repo end to end → serial batch with a
 monitor on non-zero exits → rerun only the arms that failed in setup → one

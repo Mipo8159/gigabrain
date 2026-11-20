@@ -48,6 +48,12 @@ doesn't stop the `=` slip when composing long one-liners fast. **Open fix:** a
 PreToolUse check in `global/hooks/guard.py` that denies a bare word starting with
 `=` ("use echo '---'"), not another reminder.
 
+**`^` under `setopt extendedglob`:** in a script that turns on extendedglob, an unquoted
+`grep -c ^PASS file` makes `^PASS` a negation glob ("every file but PASS"), so grep got a file
+list and the evidence column filled with per-file counts (2026-11-20, own gate script; the
+verdict came from the exit code and stayed right). Quote every regex: `grep -c '^PASS'`.
+Same day the `:s` modifier struck again: `git show :services/...` became a substitution.
+
 **2026-11-06/08 (again):** `gh api repos/…/statuses?per_page=1` unquoted → `no matches found`
 (the `?` is a glob); `echo ====` once more aborted a whole read command. Quote every API path
 that holds `?`/`&`.

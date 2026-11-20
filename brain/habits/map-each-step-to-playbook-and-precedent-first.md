@@ -29,6 +29,12 @@ work against every numbered item of the ticket and list each as done / deviated 
 latest migrations for the same file; when a shared module could replace ours, run our
 tests against it and quote the count; state the plan only after the table.
 
+**Mark each decision decided or open (2026-11-20, same kind of work):** a plan listed two
+values as "recommended" (a timeout, a schedule). Several steps later they had quietly become
+"plan" and nearly went into a deploy template unconfirmed; they were asked only when the
+template encoded them. The table gets a column: decided by Giga (date) or open. An open row
+that the step encodes goes into the step's one question batch, before the edit.
+
 **Signal:** "follow precedent", "don't invent a new wheel", a `docs/migration*.md`, or a
 step that touches a file that every earlier migration also touched.
 
