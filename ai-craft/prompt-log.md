@@ -384,3 +384,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "done when you have successfully revised and adjusted all of gigabrain repository according to [the other team's] chosen stylistics"
 - **After:** "Restyle global skills + agents to a style guide derived from their skills (own words, no names). Done when skill-lint shows 0 FAIL, trigger + intent evals score no lower than today's baseline, and the new skill's dry run on a real step returns ≥ 3 cited cases. Library skills: lint only. Leave uncommitted."
 - **Why:** "successfully revised" can't be checked by a script; the rewrite names the lint, the eval baseline, the excluded scope and who commits. Good part kept: the goal ("understanding, coding, evaluating, proofing, analysis and reviews") and a named baseline to learn from.
+
+## 2026-11-20 · stack a branch on a teammate's open PR (work repo, rung 0 → 2)
+- **Before:** "stack on it, even if we will have to change it for some reasons in future, if it gives a fuller picture"
+- **After:** "Stack my branch on the PR head, keep a backup ref. Done when every step commit is replayed with identical service tree, message and author; lockfile conflicts regenerated, not hand-merged; the step gate is green on the new head, and the repo-wide test count rises only by the PR's own tests. Local only, no push."
+- **Why:** the decision and its trade-off were clear, but nothing said what proves the stack is safe; Claude had to write the bar (per-step hash identity, lock package set, baseline delta 3518 → 4098 = +577 +3). Good part kept: accepting the re-stack cost up front ("even if we will have to change it").

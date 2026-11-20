@@ -32,3 +32,23 @@ without `--no-renames` shows renames by the new name only, so the deletions were
 (old commits went red once a dependency was removed; the pre-workspace import "passed"
 on borrowed deps). Each snapshot installs from its own lockfile (`pnpm install --offline
 --frozen-lockfile`) and builds its own workspace packages in dependency order.
+
+**Stacking a series onto an unmerged PR (2026-11-20).** To build on a teammate's
+open PR, a 12-step local series (first commit = a merge that imports another repo's
+history as a separate root) was moved onto the PR head.
+- Don't `git rebase` a history-import merge: it replays the imported root's commits.
+  Recreate the merge on the new base with the same second parent (tree of the
+  imported dir must hash-equal the old one), then `cherry-pick` the first-parent
+  commits in order (`git rev-list --first-parent --reverse <merge>..<old-head>`).
+- Lockfile conflicts: take the new base's lockfile and regenerate it
+  (`pnpm install --offline --lockfile-only`), never hand-merge; accept only when the
+  importer block and the added/removed package set equal the ORIGINAL commit's.
+- Proof per step: for every old/new pair, the moved dirs' tree hashes, message and
+  author+date are identical (11/11), plus a backup branch at the old head.
+- Package-manager supply-chain checks can fail on the combined lockfile even when
+  every entry is byte-identical to an already-verified lockfile. Skipping the check
+  (`--trust-lockfile`) is a human's decision: show the entry-by-entry identity proof
+  and let them run it. Reusing one install in a snapshot is then fine only when the
+  snapshot's lockfile is byte-identical (see (3) above for why it lies otherwise).
+**Signal:** "stack on <open PR>", "rebase onto their branch", a merge commit in the series.
+**Next time:** backup branch → recreate merge → cherry-pick first-parent → regenerate lock → per-step hash compare → gate.
