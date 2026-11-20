@@ -27,3 +27,10 @@ The shape that works for "notify the user when X happens" with a job queue (e.g.
 **Evidence:** 2026-10-02, review-result push notifications. The background reviewer caught #4
 (`Promise.all` of counter UPDATEs after `sendEach`). #5 came from a sibling batch job that
 selects tokens by `updatedAt` within a month.
+
+**Same root cause, different shape (2026-11-20):** a scheduler invoked async with a short
+timeout POSTs to an app that keeps working after the client drops. A timeout marks the run
+failed, the platform retries twice, and the app redoes jobs that already finished. Jobs that
+set the "sent" flag after the send, with no lock, can email twice when a retry overlaps a
+run still in progress. A response missing the expected count fields is "failed" too, so
+every run is triggered 3×. See [[break-down-timeouts-before-raising-them]].

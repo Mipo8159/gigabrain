@@ -374,3 +374,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "please check our gigabrain. I need the context of it to be revaluated. whether its large or acceptible."
 - **After:** "Measure gigabrain's always-loaded context on this machine (startup + per-prompt hook) with bin/budget.py and a history replay. Done when: one table per source with tokens/session vs baseline; acceptable = ≤5% of the window. Read-only; I decide every cut. Model-run checks ≤ $5, stop on a setup failure."
 - **Why:** "large or acceptable" had no number, so Claude had to ask for the threshold and the scope. The third prompt added baseline + "test after each step" (rung 2) but no target number, and no cost cap, so a broken eval run spent ~$4 before anyone looked.
+
+## 2026-11-20 · investigation done-line that presupposed the answer (work repo, rung 2)
+- **Before:** "done when you have numerable evidence and testable proof that prod async task lambdas could indeed suffer from leaving the execution on 6 second and could benefit if its risen up to 60"
+- **After:** "Find what causes the prod timeouts, per job. Done when every timeout is attributed to a job with numbers, and a rerunnable check shows **whether** raising to 60 s fixes each group, either way. Aggregates only; I run anything that reads log text."
+- **Why:** the done-line asked to prove a hypothesis, which invites confirming it. The breakdown showed 97% of timeouts could not be fixed by 60 s (a server-side query limit). Good parts kept: numbers, testable proof, and the explicit "worth mentioning?" framing.
