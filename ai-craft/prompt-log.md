@@ -379,3 +379,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "done when you have numerable evidence and testable proof that prod async task lambdas could indeed suffer from leaving the execution on 6 second and could benefit if its risen up to 60"
 - **After:** "Find what causes the prod timeouts, per job. Done when every timeout is attributed to a job with numbers, and a rerunnable check shows **whether** raising to 60 s fixes each group, either way. Aggregates only; I run anything that reads log text."
 - **Why:** the done-line asked to prove a hypothesis, which invites confirming it. The breakdown showed 97% of timeouts could not be fixed by 60 s (a server-side query limit). Good parts kept: numbers, testable proof, and the explicit "worth mentioning?" framing.
+
+## 2026-11-20 · bulk skill restyle (gigabrain, rung 2 → 3)
+- **Before:** "done when you have successfully revised and adjusted all of gigabrain repository according to [the other team's] chosen stylistics"
+- **After:** "Restyle global skills + agents to a style guide derived from their skills (own words, no names). Done when skill-lint shows 0 FAIL, trigger + intent evals score no lower than today's baseline, and the new skill's dry run on a real step returns ≥ 3 cited cases. Library skills: lint only. Leave uncommitted."
+- **Why:** "successfully revised" can't be checked by a script; the rewrite names the lint, the eval baseline, the excluded scope and who commits. Good part kept: the goal ("understanding, coding, evaluating, proofing, analysis and reviews") and a named baseline to learn from.
