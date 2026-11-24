@@ -26,6 +26,16 @@ each of these on real transcripts:
   substring match would drop a real `…-projects-my-private-api`.
 - **Hook output** is stored as `attachment.type == "hook_additional_context"`
   with a `content` list. `/resume` replays it without re-running the hook.
+- **Minute-by-minute "was Claude working" rebuilds** (2026-11-24, lone-wait
+  vs team usage chart): pairing each prompt with the next `end_turn` gave
+  155h of lone wait over 30 days, about 2.6× too much, because interrupted or
+  killed turns never close and stretch across nights. Count only gaps of
+  ≤ 10 min between consecutive records inside a turn (that dropped 173h). Other
+  details: `promptSource: "system"` is a turn the human didn't start
+  (wakeups, task notifications); `session-owner.accountUuid` splits work
+  from personal accounts; sessions from before late October have no owner row.
+  Even after the fix, absolute hours ran about 2× the team chart's, so
+  compare its % and the trend, never its hours (`bin/wait-report`).
 - Transcripts older than `cleanupPeriodDays` are gone. Install raised it to
   365 on 2026-10-12, so earlier months can't be re-scored.
 

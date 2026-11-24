@@ -394,3 +394,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "allright, do it, ammend all the points reviews have found"
 - **After:** "Amend every finding in the verdict file. Done when each finding has a row: fixed (commit or description diff) or skipped with a reason; tests and the step gate rerun green before each push; descriptions checked unchanged remotely before each edit. Ask before filing any new ticket."
 - **Why:** the verdict file carried the list, but nothing named what "amended" means or where the boundary was; filing a follow-up ticket (outward) was left to Claude's judgment. Good part kept: a prior verdict file as the single source of findings.
+
+### 2026-11-24 — "why is my wait time high" (metric diagnosis)
+- **Before:** "how can I reduce that orange time? I am definatelly sure those are because of my nighttime sessions, where I leave the claude open and it idles. could you help me measure it? and possibly help me mitigate it?"
+- **After:** "Measure my lone-wait minutes from local transcripts, split night 23–08 vs day. Done when the split is within 20% of the chart's hours, or it says why it can't match; then propose fixes for whichever bucket holds most, and change no settings until I OK them."
+- **Why:** asking to measure before fixing was the right move: the "definitely sure" cause was wrong (0 orange minutes during sleep), and a fix aimed at idle sessions would have changed nothing. Missing pieces: a number to hit and a can't-match path. The gate added both.
