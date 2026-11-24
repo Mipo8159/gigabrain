@@ -404,3 +404,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "sharpen up the lesson you have generated, make it simpler, and use visualizations is possible"
 - **After:** "Cut the lesson's prose by a third, open every section with a figure, keep every cited source line; show a before/after table from one script."
 - **Why:** "simpler" had no bar, so a gate and a question batch were needed to invent one. Naming the cut, the structure rule and the thing that must not shrink (unique sources) makes the prompt checkable on its own. See [[measure-simplify-with-a-script]].
+
+## 2026-11-25 · "more plain" without a number (2nd time)
+- **Before:** "please resharpen the lessons, make them more plain, and simple to understand, while adhering to all the requirements given"
+- **After:** "Rewrite the 3 videos plainer, same requirements. Done when check.py also passes: every narration line ≤ 20 words (avg ≤ 14), ≤ 4 boxes per scene, every jargon term explained on first use; old versions archived."
+- **Why:** same gap as 11-24: "plain" had no measure, so the gate had to invent one. The good part, "adhering to all the requirements given", kept the old bar in one phrase. See [[measure-simplify-with-a-script]].

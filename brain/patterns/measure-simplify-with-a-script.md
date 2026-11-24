@@ -27,5 +27,13 @@ of unique sources was the right one.
   move punctuation before the hidden tag and drop labels such as "Source:" that would
   dangle.
 
-**Signal:** "simpler", "sharpen", "cleaner", "less noisy", "easier to read" on an existing artifact.
+**Example 2 (2026-11-25, narrated videos, "more plain"):** the same move for spoken scripts. Rules added to the
+done-check: every narration line ≤ 20 words, average ≤ 14, Flesch reading ease ≥ 60, ≤ 4 boxes per scene, and
+a glossary check (the first line that names a jargon term must also contain its plain explanation, e.g. a queue
+→ "waiting line"). Run red on the old version first: all 3 failed (avg 21.9–23.8 words/line, 5–7 boxes per scene,
+10+ terms never explained); the rewrite passed all of them while every source cite still held. Flesch alone
+was useless here (the dense version already scored 70–72); line length, boxes and the glossary did the work.
+For text-to-speech, keep captions readable and put the spoken form of acronyms in a separate attribute.
+
+**Signal:** "simpler", "sharpen", "cleaner", "less noisy", "easier to read", "more plain" on an existing artifact (page, doc, lesson or narrated video).
 **Next time:** first tool call is the measurer on the current version; the done-line quotes its numbers.
