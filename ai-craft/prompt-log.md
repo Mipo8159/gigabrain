@@ -409,3 +409,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "please resharpen the lessons, make them more plain, and simple to understand, while adhering to all the requirements given"
 - **After:** "Rewrite the 3 videos plainer, same requirements. Done when check.py also passes: every narration line ≤ 20 words (avg ≤ 14), ≤ 4 boxes per scene, every jargon term explained on first use; old versions archived."
 - **Why:** same gap as 11-24: "plain" had no measure, so the gate had to invent one. The good part, "adhering to all the requirements given", kept the old bar in one phrase. See [[measure-simplify-with-a-script]].
+
+## 2026-11-25 · "check whether they are still valid" with no PR list
+- **Before:** "analyze the PRs for now, check whether they are still valid, use t-review and other reviewer skills"
+- **After:** "Check PRs <list>: still valid = 0 behind base, CI green except known blockers, 0 open threads, 0 blocker/high from reviewer + intent-reviewer. Read-only; chat table."
+- **Why:** "the PRs" relied on memory (one listed PR had been merged a month earlier) and "valid" had no test, so a gate and a 3-question batch had to supply both. Naming the PRs and what "valid" means makes it scriptable.

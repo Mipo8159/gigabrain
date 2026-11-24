@@ -33,6 +33,8 @@ runs if the glob has no match in cwd.
   `export PATH="$HOME/.nvm/versions/node/$(ls ~/.nvm/versions/node | tail -1)/bin:$PATH";`.
   Same root cause, 2026-11-10: an MCP server launched with `npx` failed to connect
   (`Executable not found in $PATH: npx`). Tell Giga it's PATH, not a missing tool.
+  2026-11-25: `pnpm moon run` failed with `Command "moon" not found`; moon lives in
+  `~/.proto/bin`, so add that too, or run the package's own `pnpm run test` in its dir.
 - **`echo` interprets backslashes:** zsh `echo "$rows"` turned a `\n` inside a stored perl
   expression into a real newline, splitting a data row (2026-11-16). Write data with
   `print -r --`, `printf %s`, or straight `grep` into the file, never `echo`.

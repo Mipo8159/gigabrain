@@ -50,6 +50,11 @@ Rules:
   test scripts, which use fixed docker names (`db`, `lint-target`); two deleted each
   other's containers and one ran `docker volume prune -f`. Each brief must say: unique
   container/volume names (suffix the task), never prune or remove what you didn't create.
+- **Give a reviewer the requirement as written, not your summary.** 2026-11-25: a
+  condensed ticket brief turned "either A, or B plus tests" into "A plus tests", and
+  the intent reviewer reported a should-fix the ticket never asked for (caught by
+  re-reading the ticket). Save the source text to a scratch file and point the agent at
+  it; if you must condense, keep every either/or and "prefer" word.
 - **Two sessions on one task: read the other's latest state before answering.**
   2026-11-17: one session taught and answered questions while a second one ran the
   read-only checks for the same ticket. The first gave answers from its own older
