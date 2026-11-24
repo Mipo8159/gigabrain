@@ -80,3 +80,13 @@ another way to read the change), so a 406 run is worth one rerun before any spli
 **Next time:** measure `git diff origin/main...HEAD | wc -l` and try `gh pr diff <n>`
 before proposing cuts; rerun the bot once; the fallback is a stacked PR for whole
 file groups (e.g. new tests), never compacting code to fit.
+
+**Stacked PRs: descriptions go stale, and body edits need a loose compare (2026-11-24):**
+a PR body that describes another PR's state ("its PR opens after this is deployed", "not
+open yet") is false the moment that PR opens; a night review found it in 2 of 4 bodies.
+When you open, merge or retarget one PR of a stack, grep the siblings' bodies for its
+number/branch and state words, and fix them in the same step. To verify `gh pr edit
+--body-file`, compare ignoring trailing whitespace (`gh` drops the final newline) and
+expect a tracker integration to append reference links at the bottom; a strict `cmp`
+reports a false mismatch. Updating a stack's bottom branch: merge the base into it, then
+the bottom into the next, and prove each diff vs its base is unchanged before pushing.

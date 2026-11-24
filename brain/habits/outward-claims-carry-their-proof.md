@@ -42,6 +42,14 @@ creating a ticket which does not match reality" (Giga, 2026-10-22). Hits since:
   deeper note (and the infra code) saying it existed for months. The same session's
   channel draft said a red check was "red on purpose" and that DevOps was "handling"
   a PR with no assignee and no DevOps review; Giga's "100% guaranteed?" cut both.
+- 2026-11-24 (expected-red, again): a status table called two red CI checks
+  "red for the expected reason"; Giga: "check the PR instead of guessing". The job logs
+  confirmed it (access denied, the guard stopped before anything deployed) and showed a
+  difference the guess had missed (one stack had no ID yet, so it may not exist).
+  Same day, a precedent Giga remembered ("an infra ticket archived the old repos after
+  the merge") was proven in 3 calls: the archived repos' `updatedAt` clustered on one
+  morning, and a tracker search near that date found the ticket. It also showed the old
+  repos were never frozen in between (one got a merge two months later).
 Each correction cost a round and some trust; measuring was cheap every time.
 
 **How to apply:**
@@ -87,6 +95,11 @@ Each correction cost a round and some trust; measuring was cheap every time.
   deps for two other packages (lock vs main +55/-191, after "+52/-0" was reported). After
   any package-manager install, diff the lockfile against the base branch and the pushed
   head; a change in another package's entry is drift.
+
+- A red check is "expected" only with its failing log line quoted
+  (`gh api --allow-escape-sequences repos/O/R/actions/jobs/<id>/logs`, strip ANSI).
+  A precedent the user remembers gets the same check; for "when was X archived/changed",
+  cluster the artifacts' timestamps first, then search the tracker on that date.
 
 **Signal:** the text is going to a ticket, a DM, a PR, a channel, or a manager; or
 Giga asks "are you sure?" or "be precise".
