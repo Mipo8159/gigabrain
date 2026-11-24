@@ -31,7 +31,19 @@ already held a full phased plan, and a grep found a migration that had already
 revoked the service's tokens months earlier. Both changed which ticket to start
 first. An empty ticket is not unplanned work, so search before you size it.
 
+2026-11-24, same root cause, and this time I made the miss: a title-only migration ticket
+left out one word ("monorepo") that its sibling tickets had. I recommended the monorepo
+from inference, as "I lean towards…", before reading the epic's linked planning doc. That
+doc said "stay standalone, ~2d". Two more sources changed the plan: the org-wide import
+sheet ("skipped — lambda"), and an infra role comment naming the service as its first
+caller. The same day another team filed 3 To-Do tickets that edit the same service's
+code. A Done-only JQL would never have shown them. I had to reverse my recommendation in
+front of Giga.
+
 **How to apply:**
+0a. For a title-only ticket: read the parent epic's linked planning docs (hand a
+    long doc to an agent) and search every status, not only Done, by service name
+    across all projects, before giving any recommendation.
 0. Split the description into claims and mark each one true, partial, wrong or unsourced against the primary source (vendor docs/JSON, code, git log).
 1. `git log -1 --format=%cs` on the named repo; months idle while the team is busy = suspect.
 2. Grep the likely new home (monorepo, `providers/`, `packages/`) for the ticket's key terms.
