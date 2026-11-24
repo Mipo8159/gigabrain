@@ -399,3 +399,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "how can I reduce that orange time? I am definatelly sure those are because of my nighttime sessions, where I leave the claude open and it idles. could you help me measure it? and possibly help me mitigate it?"
 - **After:** "Measure my lone-wait minutes from local transcripts, split night 23–08 vs day. Done when the split is within 20% of the chart's hours, or it says why it can't match; then propose fixes for whichever bucket holds most, and change no settings until I OK them."
 - **Why:** asking to measure before fixing was the right move: the "definitely sure" cause was wrong (0 orange minutes during sleep), and a fix aimed at idle sessions would have changed nothing. Missing pieces: a number to hit and a can't-match path. The gate added both.
+
+## 2026-11-24 · "simpler" without a number
+- **Before:** "sharpen up the lesson you have generated, make it simpler, and use visualizations is possible"
+- **After:** "Cut the lesson's prose by a third, open every section with a figure, keep every cited source line; show a before/after table from one script."
+- **Why:** "simpler" had no bar, so a gate and a question batch were needed to invent one. Naming the cut, the structure rule and the thing that must not shrink (unique sources) makes the prompt checkable on its own. See [[measure-simplify-with-a-script]].
