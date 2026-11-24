@@ -57,6 +57,15 @@ Each correction cost a round and some trust; measuring was cheap every time.
 - "Inferred" claims either get a quick check or are worded as a guess ("probably",
   "I haven't checked").
 - A precedent is only a precedent after opening the ticket or PR itself, not its title.
+  Also check *who* did it, *how* (pipeline vs a person, merged vs run from a branch) and
+  whether the rule it rests on is on the main branch or only on your own. 2026-11-24: an
+  infra ask said "the earlier service did the same" about pre-created placeholder stacks;
+  the PRs showed its own CI made them from unmerged branches, and the "stack must exist"
+  rule came from our open branch, not main (where CI creates new stacks). The ask was
+  still right (the role has no delete-stack, so a failed first create would need the
+  infra team anyway), but two sentences overstated the precedent. A rerunnable 10-check
+  script settled it; 2 of its first FAILs were the script's own scoping bugs, found by
+  inspecting before concluding.
 - Counts come from a command, never from memory ("~30").
 - A past finding quoted as fact is re-checked or carries its "assuming …" along.
 - A ticket's description is a claim about the world, not proof of it. Label it
