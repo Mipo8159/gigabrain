@@ -54,3 +54,5 @@ system with many glued parts.
 **Next time:** reuse the engine. Gate on the length and split, which hops to cover,
 and the voice. Hand the mp4s over as plain-named files in a folder Giga browses
 (see [[visual-learner-diagram-first]]).
+
+Header gotcha (2026-11-25): the top bar holds the scene title, the chapter chips and the brand. With 8 chips, a title over ~15 characters wrapped the whole bar onto two lines, so it looked squashed. Keep titles short when there are more than 7 chips, and grab one still from every *new* scene after a render, not only the scenes that changed.

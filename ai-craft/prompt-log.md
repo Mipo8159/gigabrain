@@ -414,3 +414,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "analyze the PRs for now, check whether they are still valid, use t-review and other reviewer skills"
 - **After:** "Check PRs <list>: still valid = 0 behind base, CI green except known blockers, 0 open threads, 0 blocker/high from reviewer + intent-reviewer. Read-only; chat table."
 - **Why:** "the PRs" relied on memory (one listed PR had been merged a month earlier) and "valid" had no test, so a gate and a 3-question batch had to supply both. Naming the PRs and what "valid" means makes it scriptable.
+
+## 2026-11-25 · "if something is missing, add them in"
+- **Before:** "please take a closer look at the lessons, and if something is missing, add them in. done when you have enriched all the existing lessons with the missing content."
+- **After:** "Gap-check the 4 lessons against the code (every route, handler, config, test). Done when each gap maps to a scene, check.py passes with every new cite, each video ≤ 5 min (code depth in a new part), and Downloads is refreshed. Read-only on repos."
+- **Why:** "missing" had no reference to compare against, and "enriched" is true after one added line. Naming the source to compare with (the code), the length cap and the check made it scriptable; the length question was the one that changed the plan (a 5th video instead of 7-min parts).
