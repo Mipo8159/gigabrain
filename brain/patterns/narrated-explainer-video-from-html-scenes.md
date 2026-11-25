@@ -33,6 +33,15 @@ shows where we are, and each part ends with a recap. The last part has a quiz wi
 a pause before each answer. If keeping every detail at that pace needs more parts
 than agreed, add the part and say so; don't cram.
 
+**Real artifacts on screen are copied, not recalled (2026-11-25).** A scene showing the
+shape of a real record (a ticket's form fields) got one invented field from memory; a
+re-fetch of the source caught it before render. Fetch the record, copy its fields,
+and cite the fetch in the claims file. Under plain-language limits (≤14 words a line)
+narration runs short: three 8-min floors needed 5 extra scenes. Fill with a worked
+example, a record's anatomy or a hand-off scene, never longer pauses. Keep top-bar
+chip labels to one word each: two-word labels overflowed the bar in 2 of 3 videos.
+After any chip change, look at one frame per video.
+
 **Why:** a narrated, animated walk-through was the format the visual learner asked
 for after lesson pages ([[visual-learner-diagram-first]]). Driving cues from measured
 TTS durations removes the sync bugs that hand-timed video has.
