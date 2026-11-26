@@ -424,3 +424,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "can we check this password field against [the password-manager entry for the vendor key]? mark in mind that NOTHING SHOULD LEAK" (with the encrypted DB row pasted in).
 - **After:** "Does the password-manager entry for the vendor key still work, and does it matter for this ticket? Prove it with an HTTP status code only; no value, ciphertext or row may enter the transcript; I run anything that touches the secret in my own terminal."
 - **Why:** the ask named a method (compare) instead of the decision; equality needed a decrypt the account rightly lacks, which cost two rounds. Asking "does it still work" got the same practical answer in one status code, and leaving the row out of the prompt kept the ciphertext out of the transcript.
+
+## 2026-11-26 · "two, very simple yet full fledged video lessons"
+- **Before:** "please create two, very simple yet full fledged video lessons, explaining each. make sure the visualization is prioritized as I am a visual learner"
+- **After:** "Make two narrated videos (~5 min each) with the video engine, one per skill doc (sync flow; storage tables). Done when: every name in each doc appears in a scene (script-checked), frames viewed, no secret values; local only."
+- **Why:** "video" was not pinned to the format already proven, so the gate offered (and Giga accepted) a page with a Play button instead. "Full fledged" and "make sure" are feelings; a coverage script and a length make them checkable.

@@ -42,6 +42,13 @@ example, a record's anatomy or a hand-off scene, never longer pauses. Keep top-b
 chip labels to one word each: two-word labels overflowed the bar in 2 of 3 videos.
 After any chip change, look at one frame per video.
 
+**Check this recipe before the gate (miss, 2026-11-26).** Asked for "two video lessons", Claude's
+gate offered an HTML stepper with a Play button as "(Recommended)" and labelled a real mp4 as
+"needs ffmpeg + headless browser, slower", without reading this entry, though the engine had
+shipped 5 videos the day before. Giga accepted the default, so the lessons came out as pages,
+not videos. On "video", grep the brain for `video` first and offer this engine as the default;
+offer the stepper page only as a quick extra.
+
 **Why:** a narrated, animated walk-through was the format the visual learner asked
 for after lesson pages ([[visual-learner-diagram-first]]). Driving cues from measured
 TTS durations removes the sync bugs that hand-timed video has.

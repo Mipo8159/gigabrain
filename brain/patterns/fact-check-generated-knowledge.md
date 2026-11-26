@@ -67,3 +67,11 @@ validates shape.
 researcher checks them before handover.
 
 Related: [[shared-kit-and-checker-before-fan-out]], [[import-knowledge-on-demand]].
+
+**Name-coverage check for lessons built from a doc set (2026-11-26).** The lesson checker
+passed two pages that still lacked 4 names each from their sources (fields of a record,
+the doc's own spelling of two expressions). A 20-line script fixed it: collect every
+backticked name and section-heading name from the source docs (skipping fenced code),
+strip the page's tags, and list each name that is missing. It turns "covers everything"
+into a done-line a script can check (46/46, 88/88), and the gaps it finds become content,
+not padding.
