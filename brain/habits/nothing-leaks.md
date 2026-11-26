@@ -70,3 +70,16 @@ let them decide.
 full new key in its "copy it now" banner, so the key reached the transcript. Ask for the
 banner to be closed before any screenshot of a key, token or credential page; if one slips,
 say so at once and ask for a rotation, then carry on (the leak is already done).
+
+**Checking a stored secret without seeing it (2026-11-26).** Asked "is the stored key the
+same as the password-manager entry?": (1) first ask what decision the answer changes; a
+key the service already uses successfully needs no equality proof. (2) Equality needs a
+decrypt; encrypted-at-rest values are random per encryption (KMS-style ciphertext), never a
+"hash" to compare, so don't call them one in outward text. (3) If Giga still wants it, the
+compare runs in Giga's own terminal as a subshell that prints only MATCH / NO MATCH
+(sha256 of both sides), never via `!`. (4) A denied decrypt is the guard working; don't ask
+for the grant. (5) The usable substitute is liveness: send the manager's value as a header
+through stdin (`... | sed 's/^/Header: /' | curl -H @- -o /dev/null -w '%{http_code}'`) to
+a read-only endpoint, and paste back only the status code. That settled it in one round.
+Also: a pasted DB row that carries a credential field (even ciphertext) gets flagged at
+once and never echoed; suggest a projection that leaves the field out next time.

@@ -419,3 +419,8 @@ The goal is to *see* your own patterns change over the months.
 - **Before:** "please take a closer look at the lessons, and if something is missing, add them in. done when you have enriched all the existing lessons with the missing content."
 - **After:** "Gap-check the 4 lessons against the code (every route, handler, config, test). Done when each gap maps to a scene, check.py passes with every new cite, each video ≤ 5 min (code depth in a new part), and Downloads is refreshed. Read-only on repos."
 - **Why:** "missing" had no reference to compare against, and "enriched" is true after one added line. Naming the source to compare with (the code), the length cap and the check made it scriptable; the length question was the one that changed the plan (a 5th video instead of 7-min parts).
+
+## 2026-11-26 · "check this password field against the manager entry"
+- **Before:** "can we check this password field against [the password-manager entry for the vendor key]? mark in mind that NOTHING SHOULD LEAK" (with the encrypted DB row pasted in).
+- **After:** "Does the password-manager entry for the vendor key still work, and does it matter for this ticket? Prove it with an HTTP status code only; no value, ciphertext or row may enter the transcript; I run anything that touches the secret in my own terminal."
+- **Why:** the ask named a method (compare) instead of the decision; equality needed a decrypt the account rightly lacks, which cost two rounds. Asking "does it still work" got the same practical answer in one status code, and leaving the row out of the prompt kept the ciphertext out of the transcript.

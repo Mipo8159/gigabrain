@@ -26,6 +26,13 @@ creating a ticket which does not match reality" (Giga, 2026-10-22). Hits since:
 - 2026-10-27 (a test proves only its claim): a "secrets are redacted" test asserted
   the one attribute the change touched; a reviewer found the secret in a second one.
 - 2026-11-04 (recall): a suite run "we did" in another session had never happened.
+- 2026-11-26 (time claims + Giga's own draft): a support reply said an auth failure was
+  "since yesterday" (the request-trace store keeps 1 day); the job log showed every poll
+  failing for the full 14-day retention, with no success in ~2 years. The same draft called
+  encrypted credentials "compared with the hash". Both were in Giga's draft that Claude was
+  asked to extend, and both got posted. A "since X" claim needs the oldest failing record,
+  the last success, and the store's retention named; and the claims pass covers the words
+  Giga brings, not only Claude's.
 - 2026-11-05/06 (state words): "completed and rolled back" when only the tracker row
   was gone (a teammate's project creation broke next day); "merged" for a PR whose
   `gh` state was `CLOSED`.
