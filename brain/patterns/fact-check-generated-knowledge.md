@@ -75,3 +75,16 @@ backticked name and section-heading name from the source docs (skipping fenced c
 strip the page's tags, and list each name that is missing. It turns "covers everything"
 into a done-line a script can check (46/46, 88/88), and the gaps it finds become content,
 not padding.
+
+**A cite that resolves is not a cite that supports (2026-11-26).** A lesson on a team's own
+migration history had a checker proving every cite resolved (file:line needle found, PR
+exists, ticket key real): PASS. Three independent verifiers then read each narrated
+sentence against its ticket, PR or commit: 289 claims, 10 wrong and 64 partly right (26%
+changed). Repeating error classes: "in review" told as "done"; counts paraphrased from
+memory (commits, fixes); event order flipped (prod before staging); an inferred method
+told as fact; a "first caller" comment read as sole ownership. Fix: per-sentence verifiers
+with verdicts confirmed / partly / wrong / inference / unverifiable; inferences stay,
+worded "most likely"; status facts (open, merged, approved) are re-fetched live at render
+time, never taken from notes (the same day, notes said two infra PRs waited on another
+team; a live check showed both merged). Ask for that verifier pass in the first prompt,
+not after delivery.
